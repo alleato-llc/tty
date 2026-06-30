@@ -1,12 +1,11 @@
-use iced::widget::{
-    column, container, mouse_area, pane_grid, row, scrollable, text, Column, Space,
-};
+use iced::widget::{column, container, mouse_area, pane_grid, row, scrollable, text, Column};
 use iced::{Border, Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, context_menu, labeled, section, select, slider, status_bar, stepper, tabs,
-    text_field, toggle, tooltip, MenuItem, Tab, TabBarStyle, TooltipPosition,
+    button, color_field, context_menu, labeled, section, select, shortcut_row, slider, status_bar,
+    stepper, tabs, text_field, toggle, tooltip, window_shell, MenuItem, Tab, TabBarStyle,
+    TooltipPosition,
 };
 
 use crate::message::Message;
@@ -331,19 +330,6 @@ fn detached_view<'a>(
     .on_click(move |pane| Message::FocusPane(window, pane))
     .on_resize(8, move |e| Message::ResizeSplit(window, e));
 
-    // Slim strip: the tab name on the left, a Reattach button on the right.
-    let strip = container(
-        row![
-            text(tab.label()).size(13).color(t.ink),
-            Space::new().width(Length::Fill),
-            button::ghost("Reattach", Message::ReattachTab(window)),
-        ]
-        .align_y(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .padding([4, 10])
-    .style(move |_| container::background(t.surface));
-
     let (cols, rows) = tab
         .focused()
         .map(|term| {
@@ -351,17 +337,22 @@ fn detached_view<'a>(
             (s.cols, s.rows)
         })
         .unwrap_or((0, 0));
+    let label = tab.label();
     let status = format!("{cols}×{rows} · {}px", size as u32);
 
-    container(column![
-        strip,
-        container(body).width(Length::Fill).height(Length::Fill),
-        status_bar(&tab.label(), &status),
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(move |_| container::background(bg))
-    .into()
+    // The shared rime detached-window chrome: a title strip (name + Reattach) over the
+    // pane tree (kept on the terminal background) over a status bar. The body carries the
+    // terminal bg so the shell's window background never shows through the pane gaps.
+    window_shell(
+        &label,
+        vec![button::ghost("Reattach", Message::ReattachTab(window)).into()],
+        container(body)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::background(bg)),
+        &label,
+        &status,
+    )
 }
 
 /// The body of the active settings section.
@@ -418,24 +409,11 @@ fn keys_section<'a>() -> Element<'a, Message> {
         ),
     ];
 
-    let t = theme::tokens();
     let mut body = Column::new().spacing(14);
     for (title, rows) in groups {
         let mut list = Column::new().spacing(6);
         for (chord, desc) in rows {
-            list = list.push(
-                row![
-                    container(
-                        text(*chord)
-                            .size(12)
-                            .color(t.ink)
-                            .font(iced::Font::MONOSPACE)
-                    )
-                    .width(Length::Fixed(160.0)),
-                    text(*desc).size(12).color(t.muted),
-                ]
-                .spacing(8),
-            );
+            list = list.push(shortcut_row(chord, desc));
         }
         body = body.push(column![section(title), list].spacing(8));
     }
