@@ -20,7 +20,11 @@ use iced::{
     alignment, Border, Color, Element, Event, Font, Length, Point, Rectangle, Shadow, Size,
 };
 
-use cathode::screen::{Cell, TermColor, TerminalScreen};
+use iced::keyboard::Modifiers;
+
+use cathode::screen::{Cell, CursorShape, TermColor, TerminalScreen};
+
+use crate::input::{self, MouseButton, MouseEvent};
 
 /// The 16 ANSI colors (0–7 normal, 8–15 bright) as RGB — a conventional dark palette.
 /// A host with its own theme can override every field of [`TerminalStyle`]; this is the
@@ -86,7 +90,8 @@ const LINE_HEIGHT_RATIO: f32 = 1.3;
 /// scrollback (so it's stable as the live screen scrolls).
 type Pos = (usize, usize);
 
-/// Per-widget state: how far we've scrolled back, and any in-progress selection.
+/// Per-widget state: how far we've scrolled back, any in-progress selection, and the
+/// live modifier state (so ⌥ can override an app's mouse grab to force selection).
 #[derive(Default)]
 struct State {
     /// Lines scrolled up into history (0 = the live bottom).
@@ -94,6 +99,9 @@ struct State {
     /// `(anchor, head)` of a selection in absolute grid coords.
     selection: Option<(Pos, Pos)>,
     dragging: bool,
+    modifiers: Modifiers,
+    /// The cell the last drag report was sent for (dedupe motion within a cell).
+    last_report: Option<(usize, usize)>,
 }
 
 pub struct Terminal<Message> {
@@ -106,10 +114,24 @@ pub struct Terminal<Message> {
     /// Fires as a selection is dragged (`Some(text)`) or cleared (`None`); the host
     /// caches it so a copy shortcut can write it to the clipboard.
     on_select: Box<dyn Fn(Option<String>) -> Message>,
+    /// Fires with the bytes to send to the PTY when a running app has enabled mouse
+    /// reporting (the host writes them to the shell).
+    on_mouse: Box<dyn Fn(Vec<u8>) -> Message>,
+    /// Case-insensitive scrollback search: matching runs are highlighted.
+    find: Option<String>,
+}
+
+impl<Message> Terminal<Message> {
+    /// Highlight every case-insensitive occurrence of `query` (the `⌘F` search).
+    pub fn find(mut self, query: Option<String>) -> Self {
+        self.find = query.filter(|q| !q.is_empty());
+        self
+    }
 }
 
 /// Build the terminal widget over `screen`. `on_resize(cols, rows)` fires when the
-/// grid that fits changes; `on_select(text)` as a selection is dragged.
+/// grid that fits changes; `on_select(text)` as a selection is dragged; `on_mouse`
+/// carries PTY bytes when the app grabbed the mouse (DEC modes 1000/1002/1003/1006).
 #[allow(clippy::too_many_arguments)]
 pub fn terminal<Message>(
     screen: Arc<Mutex<TerminalScreen>>,
@@ -119,6 +141,7 @@ pub fn terminal<Message>(
     focused: bool,
     on_resize: impl Fn(usize, usize) -> Message + 'static,
     on_select: impl Fn(Option<String>) -> Message + 'static,
+    on_mouse: impl Fn(Vec<u8>) -> Message + 'static,
 ) -> Terminal<Message> {
     Terminal {
         screen,
@@ -128,6 +151,8 @@ pub fn terminal<Message>(
         focused,
         on_resize: Box::new(on_resize),
         on_select: Box::new(on_select),
+        on_mouse: Box::new(on_mouse),
+        find: None,
     }
 }
 
@@ -274,6 +299,23 @@ fn hit(
     (view_top(total, rows, scroll) + vr, col)
 }
 
+/// Pixel position → 0-based visible `(col, row)` for mouse reporting (clamped).
+fn cell_pos(bounds: Rectangle, cell_w: f32, line_h: f32, pos: Point) -> (usize, usize) {
+    let col = ((pos.x - bounds.x) / cell_w).floor().max(0.0) as usize;
+    let row = ((pos.y - bounds.y) / line_h).floor().max(0.0) as usize;
+    (col, row)
+}
+
+/// Map an iced mouse button to the reportable set (extra buttons are ignored).
+fn mouse_button(b: mouse::Button) -> Option<MouseButton> {
+    match b {
+        mouse::Button::Left => Some(MouseButton::Left),
+        mouse::Button::Middle => Some(MouseButton::Middle),
+        mouse::Button::Right => Some(MouseButton::Right),
+        _ => None,
+    }
+}
+
 /// Map a `TermColor` to an iced color against the style's palette.
 fn resolve(c: TermColor, style: &TerminalStyle, default: Color, bold: bool) -> Color {
     match c {
@@ -358,16 +400,44 @@ where
             }
         }
 
+        // When a running app has grabbed the mouse (DEC 1000/1002/1003), pointer events
+        // go to the PTY — unless ⌥ is held, which forces local selection instead.
+        let mouse_state = self.screen.lock().mouse;
+        let to_app = mouse_state.reports() && !state.modifiers.alt();
+
         match event {
+            Event::Keyboard(iced::keyboard::Event::ModifiersChanged(m)) => {
+                state.modifiers = *m;
+            }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                if cursor.position_over(bounds).is_some() {
-                    // Wheel up shows earlier history (3 lines per notch, like the editor).
-                    let lines = match delta {
-                        mouse::ScrollDelta::Lines { y, .. } => y * 3.0,
-                        mouse::ScrollDelta::Pixels { y, .. } => y / line_h,
+                let Some(pos) = cursor.position_over(bounds) else {
+                    return;
+                };
+                let notches = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => y / line_h,
+                };
+                if to_app {
+                    // Report wheel as button 64/65 at the pointer cell.
+                    let (col, row) = cell_pos(bounds, cell_w, line_h, pos);
+                    let ev = if notches > 0.0 {
+                        MouseEvent::WheelUp
+                    } else {
+                        MouseEvent::WheelDown
                     };
+                    for _ in 0..notches.abs().ceil() as usize {
+                        if let Some(b) =
+                            input::mouse_report(mouse_state, ev, col, row, state.modifiers)
+                        {
+                            shell.publish((self.on_mouse)(b));
+                        }
+                    }
+                    shell.capture_event();
+                } else {
+                    // Wheel up shows earlier history (3 lines per notch, like the editor).
                     let history = self.screen.lock().scrollback.len();
-                    let next = (state.scroll as f32 + lines).clamp(0.0, history as f32) as usize;
+                    let next =
+                        (state.scroll as f32 + notches * 3.0).clamp(0.0, history as f32) as usize;
                     if next != state.scroll {
                         state.scroll = next;
                         shell.request_redraw();
@@ -375,8 +445,27 @@ where
                     shell.capture_event();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let Some(pos) = cursor.position_over(bounds) {
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+                let Some(pos) = cursor.position_over(bounds) else {
+                    return;
+                };
+                if to_app {
+                    if let Some(b) = mouse_button(*button) {
+                        let (col, row) = cell_pos(bounds, cell_w, line_h, pos);
+                        if let Some(bytes) = input::mouse_report(
+                            mouse_state,
+                            MouseEvent::Press(b),
+                            col,
+                            row,
+                            state.modifiers,
+                        ) {
+                            shell.publish((self.on_mouse)(bytes));
+                        }
+                        state.dragging = matches!(b, MouseButton::Left);
+                        state.last_report = Some((col, row));
+                        shell.capture_event();
+                    }
+                } else if *button == mouse::Button::Left {
                     let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
                     let p = hit(bounds, cell_w, line_h, pos, total, rows, cols, state.scroll);
                     state.selection = Some((p, p));
@@ -387,36 +476,75 @@ where
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if state.dragging {
-                    if let Some(pos) = cursor.position() {
-                        let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
-                        // Clamp into bounds so a drag past the edge still selects the edge.
+                let Some(pos) = cursor.position() else { return };
+                if to_app {
+                    let clamped = Point::new(
+                        pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
+                        pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
+                    );
+                    let (col, row) = cell_pos(bounds, cell_w, line_h, clamped);
+                    // Dedupe motion within the same cell to avoid flooding the PTY.
+                    if state.last_report != Some((col, row)) {
+                        let ev = if state.dragging {
+                            MouseEvent::Drag(MouseButton::Left)
+                        } else {
+                            MouseEvent::Move
+                        };
+                        if let Some(bytes) =
+                            input::mouse_report(mouse_state, ev, col, row, state.modifiers)
+                        {
+                            shell.publish((self.on_mouse)(bytes));
+                            state.last_report = Some((col, row));
+                        }
+                    }
+                } else if state.dragging {
+                    let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
+                    // Clamp into bounds so a drag past the edge still selects the edge.
+                    let clamped = Point::new(
+                        pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
+                        pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
+                    );
+                    let p = hit(
+                        bounds,
+                        cell_w,
+                        line_h,
+                        clamped,
+                        total,
+                        rows,
+                        cols,
+                        state.scroll,
+                    );
+                    if let Some((a, _)) = state.selection {
+                        state.selection = Some((a, p));
+                    }
+                    let text = self.selection_text(state);
+                    shell.publish((self.on_select)((!text.is_empty()).then_some(text)));
+                    shell.request_redraw();
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(button)) => {
+                if to_app {
+                    if let (Some(b), Some(pos)) = (mouse_button(*button), cursor.position()) {
                         let clamped = Point::new(
                             pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
                             pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
                         );
-                        let p = hit(
-                            bounds,
-                            cell_w,
-                            line_h,
-                            clamped,
-                            total,
-                            rows,
-                            cols,
-                            state.scroll,
-                        );
-                        if let Some((a, _)) = state.selection {
-                            state.selection = Some((a, p));
+                        let (col, row) = cell_pos(bounds, cell_w, line_h, clamped);
+                        if let Some(bytes) = input::mouse_report(
+                            mouse_state,
+                            MouseEvent::Release(b),
+                            col,
+                            row,
+                            state.modifiers,
+                        ) {
+                            shell.publish((self.on_mouse)(bytes));
                         }
-                        let text = self.selection_text(state);
-                        shell.publish((self.on_select)((!text.is_empty()).then_some(text)));
-                        shell.request_redraw();
-                        shell.capture_event();
                     }
-                }
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.dragging {
+                    state.dragging = false;
+                    state.last_report = None;
+                    shell.capture_event();
+                } else if *button == mouse::Button::Left && state.dragging {
                     state.dragging = false;
                     if let Some((a, b)) = state.selection {
                         if a == b {
@@ -507,11 +635,48 @@ where
                     }
                 }
 
+                // Search highlight — tint every case-insensitive match on this line.
+                // Column-based (one char per cell) so it's panic-safe with wide glyphs.
+                if let Some(q) = self.find.as_deref() {
+                    let cells: Vec<char> = (0..cols)
+                        .map(|c| cell_at(&screen, history, line, c).ch)
+                        .collect();
+                    let needle: Vec<char> = q.chars().collect();
+                    let hl = Color {
+                        a: 0.45,
+                        ..self.style.ansi[11]
+                    };
+                    let mut s = 0;
+                    while s + needle.len() <= cells.len() && !needle.is_empty() {
+                        let hit = (0..needle.len())
+                            .all(|k| cells[s + k].eq_ignore_ascii_case(&needle[k]));
+                        if hit {
+                            fill_rect(
+                                renderer,
+                                bounds.x + s as f32 * cell_w,
+                                y,
+                                needle.len() as f32 * cell_w,
+                                line_h,
+                                hl,
+                            );
+                            s += needle.len();
+                        } else {
+                            s += 1;
+                        }
+                    }
+                }
+
                 // Foreground runs (one fill_text per color+attribute run; underline as
                 // a thin quad since `Text` has no underline field).
                 let mut c = 0;
                 while c < cols {
                     let cell = cell_at(&screen, history, line, c);
+                    // A width-0 spacer is the right half of the wide glyph to its left;
+                    // its glyph was drawn with that base cell, so skip it here.
+                    if cell.width == 0 {
+                        c += 1;
+                        continue;
+                    }
                     let (fg, _) = self.cell_colors(&cell);
                     let key = (fg, cell.bold, cell.italic, cell.underline);
                     let mut run = String::new();
@@ -519,6 +684,12 @@ where
                     let mut end = c + 1;
                     while end < cols {
                         let nc = cell_at(&screen, history, line, end);
+                        // Absorb wide-glyph spacers into the current run without adding a
+                        // char — the wide glyph's own advance covers that column.
+                        if nc.width == 0 {
+                            end += 1;
+                            continue;
+                        }
                         let (nfg, _) = self.cell_colors(&nc);
                         if (nfg, nc.bold, nc.italic, nc.underline) == key {
                             run.push(nc.ch);
@@ -560,31 +731,57 @@ where
                 }
             }
 
-            // Block cursor — only at the live bottom (not while scrolled into history).
-            if self.focused && state.scroll == 0 && screen.cursor_col < cols {
+            // Cursor — only at the live bottom (not while scrolled into history), and
+            // only when the app hasn't hidden it (DEC 25). Shape per DECSCUSR.
+            if self.focused
+                && state.scroll == 0
+                && screen.cursor_visible
+                && screen.cursor_col < cols
+            {
                 let cvr = (history + screen.cursor_row).saturating_sub(top);
                 if cvr < rows {
+                    let under = screen.cell(screen.cursor_row, screen.cursor_col);
+                    let span = (under.width.max(1) as f32) * cell_w;
                     let cx = bounds.x + screen.cursor_col as f32 * cell_w;
                     let cy = bounds.y + cvr as f32 * line_h;
-                    fill_rect(renderer, cx, cy, cell_w, line_h, self.style.cursor);
-                    let ch = screen.cell(screen.cursor_row, screen.cursor_col).ch;
-                    if ch != ' ' {
-                        renderer.fill_text(
-                            text::Text {
-                                content: ch.to_string(),
-                                bounds: Size::new(cell_w.max(1.0), line_h),
-                                size: self.font_size.into(),
-                                line_height: text::LineHeight::Absolute(line_h.into()),
-                                font: self.font,
-                                align_x: text::Alignment::Left,
-                                align_y: alignment::Vertical::Top,
-                                shaping: text::Shaping::Advanced,
-                                wrapping: text::Wrapping::None,
-                            },
-                            Point::new(cx, cy),
-                            self.style.bg,
-                            bounds,
-                        );
+                    let bar = (self.font_size * 0.12).clamp(1.5, 3.0);
+                    match screen.cursor_shape {
+                        CursorShape::Block => {
+                            fill_rect(renderer, cx, cy, span, line_h, self.style.cursor);
+                            // Re-draw the covered glyph in the background color (inverse).
+                            let ch = under.ch;
+                            if ch != ' ' {
+                                renderer.fill_text(
+                                    text::Text {
+                                        content: ch.to_string(),
+                                        bounds: Size::new(span.max(1.0), line_h),
+                                        size: self.font_size.into(),
+                                        line_height: text::LineHeight::Absolute(line_h.into()),
+                                        font: self.font,
+                                        align_x: text::Alignment::Left,
+                                        align_y: alignment::Vertical::Top,
+                                        shaping: text::Shaping::Advanced,
+                                        wrapping: text::Wrapping::None,
+                                    },
+                                    Point::new(cx, cy),
+                                    self.style.bg,
+                                    bounds,
+                                );
+                            }
+                        }
+                        CursorShape::Underline => {
+                            fill_rect(
+                                renderer,
+                                cx,
+                                cy + line_h - bar,
+                                span,
+                                bar,
+                                self.style.cursor,
+                            );
+                        }
+                        CursorShape::Bar => {
+                            fill_rect(renderer, cx, cy, bar, line_h, self.style.cursor);
+                        }
                     }
                 }
             }

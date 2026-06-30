@@ -11,6 +11,14 @@ pub enum Message {
     Resize(usize, usize),
     /// The terminal selection changed (drag) — cached for ⌘C copy.
     Select(Option<String>),
+    /// Bytes the terminal widget produced (mouse reporting) to send to the PTY.
+    PtyBytes(Vec<u8>),
+    /// A clipboard read for ⌘V resolved — paste into the active shell.
+    Pasted(Option<String>),
+    /// The `⌘F` find query changed.
+    SearchChanged(String),
+    /// The find bar was submitted (Enter) — close it, keep the cursor in the terminal.
+    SearchSubmit,
     /// Open a new terminal tab.
     NewTab,
     /// Close tab `i` (the window closes when the last tab goes).

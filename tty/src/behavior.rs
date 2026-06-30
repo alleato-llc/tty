@@ -28,6 +28,8 @@ fn screen_term(title: &str) -> Term {
         pty: None,
         title: title.into(),
         alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
     }
 }
 
@@ -44,6 +46,7 @@ fn headless(n: usize) -> Tty {
         window_height: 600.0,
         hovered_tab: None,
         selection: None,
+        search: None,
     }
 }
 
@@ -124,4 +127,39 @@ fn reap_drops_exited_tabs_and_quits_on_the_last() {
     assert_eq!(tty.tabs.len(), 1);
     tty.tabs[0].alive.store(false, Ordering::Relaxed);
     assert!(!tty.reap_dead(), "no tabs left → exit");
+}
+
+#[test]
+fn app_cursor_mode_follows_the_screen() {
+    let tty = headless(1);
+    assert!(!tty.active_app_cursor());
+    // The shell enables DECCKM (application cursor keys).
+    let mut parser = cathode::parser::TermParser::new();
+    parser.process(b"\x1b[?1h", &mut tty.tabs[0].screen.lock());
+    assert!(tty.active_app_cursor());
+}
+
+#[test]
+fn search_toggles_open_and_closed() {
+    let mut tty = headless(1);
+    assert!(
+        tty.toggle_search(),
+        "opening returns true (focus the field)"
+    );
+    assert_eq!(tty.search.as_deref(), Some(""));
+    assert!(!tty.toggle_search(), "closing returns false");
+    assert_eq!(tty.search, None);
+}
+
+#[test]
+fn drain_lights_background_activity_and_clears_active() {
+    let mut tty = headless(2);
+    // Output on the inactive tab 1; active tab 0 has none.
+    tty.tabs[1].dirty.store(true, Ordering::Relaxed);
+    let _ = tty.drain_effects();
+    assert!(tty.tabs[1].activity, "background output lights a dot");
+    assert!(!tty.tabs[0].activity, "the active tab never carries a dot");
+    // Switching to it clears the dot.
+    tty.activate(1);
+    assert!(!tty.tabs[1].activity);
 }

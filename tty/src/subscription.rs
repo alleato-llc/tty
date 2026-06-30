@@ -10,13 +10,19 @@ pub fn subscription(_state: &Tty) -> Subscription<Message> {
     // keys (so Shift/AltGr produce the right character) and fall back to the logical
     // key for Named keys (Enter/arrows) and Ctrl combos, which `phosphor::input::to_bytes`
     // turns into the right escape/control bytes.
-    let keys = event::listen_with(|event, _status, _window| match event {
+    let keys = event::listen_with(|event, status, _window| match event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
             text,
             modifiers,
             ..
         }) => {
+            // A focused widget (the ⌘F find field) consumes its keys → status isn't
+            // Ignored → don't also route them to the PTY. ⌘-chords aren't consumed by a
+            // text input, so they stay Ignored and still reach the shortcut handler.
+            if status != iced::event::Status::Ignored {
+                return None;
+            }
             let effective = match (&key, &text) {
                 (keyboard::Key::Character(_), Some(t)) if !t.is_empty() && !modifiers.control() => {
                     keyboard::Key::Character(t.clone())

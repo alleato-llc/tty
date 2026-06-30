@@ -9,3 +9,5 @@ portable-pty = { workspace = true }
 vte = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+unicode-width = "0.2"
+base64 = "0.22"

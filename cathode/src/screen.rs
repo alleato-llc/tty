@@ -1,7 +1,11 @@
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
+use base64::Engine as _;
+use unicode_width::UnicodeWidthChar;
+
 const DEFAULT_SCROLLBACK: usize = 2000;
+const TAB_WIDTH: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TermColor {
@@ -9,6 +13,44 @@ pub enum TermColor {
     Named(u8),
     Indexed(u8),
     Rgb(u8, u8, u8),
+}
+
+/// The cursor glyph a program asked for via DECSCUSR (`CSI Ps SP q`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+/// How a program wants pointer events reported (DEC private modes 1000/1002/1003).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseTracking {
+    /// No reporting — the widget owns the mouse (select/copy).
+    #[default]
+    Off,
+    /// 1000: press + release only.
+    Normal,
+    /// 1002: press/release + motion while a button is held (drag).
+    ButtonDrag,
+    /// 1003: all motion, button or not.
+    AnyMotion,
+}
+
+/// Mouse reporting state: what to report and in which encoding.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MouseState {
+    pub tracking: MouseTracking,
+    /// 1006: SGR encoding (`CSI < b ; x ; y M/m`). We only emit SGR when set — it's
+    /// the universal modern encoding and avoids the 223-column limit of the legacy one.
+    pub sgr: bool,
+}
+
+impl MouseState {
+    pub fn reports(&self) -> bool {
+        self.tracking != MouseTracking::Off
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +63,9 @@ pub struct Cell {
     pub underline: bool,
     pub dim: bool,
     pub inverse: bool,
+    /// Display columns this cell spans: 1 normal, 2 the left half of a wide glyph,
+    /// 0 the right-half spacer of a wide glyph (skipped by the renderer + selection).
+    pub width: u8,
 }
 
 impl Default for Cell {
@@ -34,8 +79,33 @@ impl Default for Cell {
             underline: false,
             dim: false,
             inverse: false,
+            width: 1,
         }
     }
+}
+
+impl Cell {
+    /// A right-half spacer for a wide glyph (no glyph of its own).
+    fn spacer() -> Self {
+        Self {
+            width: 0,
+            ..Self::default()
+        }
+    }
+}
+
+/// Saved pen + cursor for DECSC/DECRC and the alt-screen swap.
+#[derive(Clone, Copy)]
+struct Saved {
+    row: usize,
+    col: usize,
+    fg: TermColor,
+    bg: TermColor,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    dim: bool,
+    inverse: bool,
 }
 
 pub struct TerminalScreen {
@@ -48,6 +118,7 @@ pub struct TerminalScreen {
     pub scroll_bot: usize,
     pub scrollback: VecDeque<Vec<Cell>>,
     pub dirty_rows: BTreeSet<usize>,
+    // Pen (current SGR state).
     fg: TermColor,
     bg: TermColor,
     bold: bool,
@@ -55,15 +126,37 @@ pub struct TerminalScreen {
     underline: bool,
     dim: bool,
     inverse: bool,
+    // DECSC/DECRC saved cursor.
+    saved: Option<Saved>,
+
+    // Modes + cursor presentation, surfaced to the widget / app.
+    pub cursor_visible: bool,
+    pub cursor_shape: CursorShape,
+    pub cursor_blink: bool,
+    /// DECCKM (mode 1): arrow keys send `ESC O A` instead of `ESC [ A`.
+    pub app_cursor_keys: bool,
+    /// Bracketed paste (mode 2004): the app wants pastes wrapped in `ESC[200~…ESC[201~`.
+    pub bracketed_paste: bool,
+    pub mouse: MouseState,
+
+    // Alternate screen (1049/47/1047): a separate buffer with no scrollback, so
+    // full-screen apps don't pollute history. We stash the main buffer while in alt.
+    alt: bool,
+    saved_main: Option<(Vec<Cell>, usize, usize)>, // cells, cursor_row, cursor_col
+
+    // OSC-driven state the host reads.
+    pub title: Option<String>,
+    pub cwd: Option<String>,
+    bell: bool,
+    clipboard: Option<String>,
 }
 
 impl TerminalScreen {
     pub fn new(cols: usize, rows: usize) -> Self {
-        let cells = vec![Cell::default(); cols * rows];
         Self {
             cols,
             rows,
-            cells,
+            cells: vec![Cell::default(); cols * rows],
             cursor_row: 0,
             cursor_col: 0,
             scroll_top: 0,
@@ -77,33 +170,71 @@ impl TerminalScreen {
             underline: false,
             dim: false,
             inverse: false,
+            saved: None,
+            cursor_visible: true,
+            cursor_shape: CursorShape::Block,
+            cursor_blink: true,
+            app_cursor_keys: false,
+            bracketed_paste: false,
+            mouse: MouseState::default(),
+            alt: false,
+            saved_main: None,
+            title: None,
+            cwd: None,
+            bell: false,
+            clipboard: None,
         }
     }
 
+    /// Whether the alternate screen is active (full-screen app). The host can use this
+    /// to suppress its own scrollback affordances.
+    pub fn alt_screen(&self) -> bool {
+        self.alt
+    }
+
+    /// Read-and-clear the bell flag (rung since the last check).
+    pub fn take_bell(&mut self) -> bool {
+        std::mem::take(&mut self.bell)
+    }
+
+    /// Read-and-clear a pending OSC 52 clipboard write request.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
+    }
+
+    /// Resize the grid, preserving the overlapping top-left content (so a window
+    /// resize doesn't blank the screen). Cursor + scroll region clamp to the new size.
     pub fn resize(&mut self, cols: usize, rows: usize) {
+        if cols == self.cols && rows == self.rows {
+            return;
+        }
+        let mut next = vec![Cell::default(); cols * rows];
+        for r in 0..rows.min(self.rows) {
+            for c in 0..cols.min(self.cols) {
+                next[r * cols + c] = self.cells[r * self.cols + c].clone();
+            }
+        }
+        self.cells = next;
         self.cols = cols;
         self.rows = rows;
-        self.cells = vec![Cell::default(); cols * rows];
         self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
         self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
+        self.scroll_top = self.scroll_top.min(rows.saturating_sub(1));
         self.scroll_bot = rows.saturating_sub(1);
-        for r in 0..rows {
-            self.dirty_rows.insert(r);
-        }
+        self.dirty_rows.extend(0..rows);
     }
 
     pub fn cell(&self, row: usize, col: usize) -> &Cell {
         &self.cells[row * self.cols + col]
     }
 
-    fn write_char_at_cursor(&mut self, ch: char) {
-        if self.cursor_col >= self.cols {
-            self.cursor_col = 0;
-            self.advance_row();
-        }
-        let (row, col) = (self.cursor_row, self.cursor_col);
-        // Copy SGR state before the mutable borrow of cells.
-        let new_cell = Cell {
+    fn set_cell(&mut self, row: usize, col: usize, cell: Cell) {
+        self.cells[row * self.cols + col] = cell;
+        self.dirty_rows.insert(row);
+    }
+
+    fn pen(&self, ch: char, width: u8) -> Cell {
+        Cell {
             ch,
             fg: self.fg,
             bg: self.bg,
@@ -112,10 +243,28 @@ impl TerminalScreen {
             underline: self.underline,
             dim: self.dim,
             inverse: self.inverse,
-        };
-        self.cells[row * self.cols + col] = new_cell;
-        self.dirty_rows.insert(row);
-        self.cursor_col += 1;
+            width,
+        }
+    }
+
+    fn write_char(&mut self, ch: char) {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w == 0 {
+            // Combining mark / zero-width: dropped for now (full grapheme clustering
+            // is a separate enhancement). Control chars never reach here.
+            return;
+        }
+        // Wrap if the glyph (1 or 2 cells) won't fit on the current row.
+        if self.cursor_col + w > self.cols {
+            self.cursor_col = 0;
+            self.advance_row();
+        }
+        let (row, col) = (self.cursor_row, self.cursor_col);
+        self.set_cell(row, col, self.pen(ch, w as u8));
+        if w == 2 && col + 1 < self.cols {
+            self.set_cell(row, col + 1, Cell::spacer());
+        }
+        self.cursor_col += w;
     }
 
     fn advance_row(&mut self) {
@@ -126,25 +275,41 @@ impl TerminalScreen {
         }
     }
 
+    /// Scroll the region up by `count` rows. Rows leaving the top of the *main* screen
+    /// enter scrollback; on the alt screen they're discarded.
     pub fn scroll_up(&mut self, count: usize) {
         for _ in 0..count {
-            let top_row: Vec<Cell> = (0..self.cols)
-                .map(|c| self.cell(self.scroll_top, c).clone())
-                .collect();
-            if self.scrollback.len() >= DEFAULT_SCROLLBACK {
-                self.scrollback.pop_front();
+            if !self.alt {
+                let top: Vec<Cell> = (0..self.cols)
+                    .map(|c| self.cell(self.scroll_top, c).clone())
+                    .collect();
+                if self.scrollback.len() >= DEFAULT_SCROLLBACK {
+                    self.scrollback.pop_front();
+                }
+                self.scrollback.push_back(top);
             }
-            self.scrollback.push_back(top_row);
             for r in self.scroll_top..self.scroll_bot {
                 for c in 0..self.cols {
                     self.cells[r * self.cols + c] = self.cells[(r + 1) * self.cols + c].clone();
                 }
                 self.dirty_rows.insert(r);
             }
-            for c in 0..self.cols {
-                self.cells[self.scroll_bot * self.cols + c] = Cell::default();
+            self.clear_line(self.scroll_bot);
+        }
+    }
+
+    /// Scroll the region down by `count` (blank lines inserted at the top of the region).
+    pub fn scroll_down(&mut self, count: usize) {
+        for _ in 0..count {
+            let mut r = self.scroll_bot;
+            while r > self.scroll_top {
+                for c in 0..self.cols {
+                    self.cells[r * self.cols + c] = self.cells[(r - 1) * self.cols + c].clone();
+                }
+                self.dirty_rows.insert(r);
+                r -= 1;
             }
-            self.dirty_rows.insert(self.scroll_bot);
+            self.clear_line(self.scroll_top);
         }
     }
 
@@ -153,6 +318,183 @@ impl TerminalScreen {
             self.cells[row * self.cols + c] = Cell::default();
         }
         self.dirty_rows.insert(row);
+    }
+
+    fn tab(&mut self) {
+        let next = ((self.cursor_col / TAB_WIDTH) + 1) * TAB_WIDTH;
+        self.cursor_col = next.min(self.cols.saturating_sub(1));
+    }
+
+    fn save_cursor(&mut self) {
+        self.saved = Some(Saved {
+            row: self.cursor_row,
+            col: self.cursor_col,
+            fg: self.fg,
+            bg: self.bg,
+            bold: self.bold,
+            italic: self.italic,
+            underline: self.underline,
+            dim: self.dim,
+            inverse: self.inverse,
+        });
+    }
+
+    fn restore_cursor(&mut self) {
+        if let Some(s) = self.saved {
+            self.cursor_row = s.row.min(self.rows.saturating_sub(1));
+            self.cursor_col = s.col.min(self.cols.saturating_sub(1));
+            self.fg = s.fg;
+            self.bg = s.bg;
+            self.bold = s.bold;
+            self.italic = s.italic;
+            self.underline = s.underline;
+            self.dim = s.dim;
+            self.inverse = s.inverse;
+        }
+    }
+
+    /// Insert `n` blank cells at the cursor, shifting the rest of the row right (ICH).
+    fn insert_chars(&mut self, n: usize) {
+        let row = self.cursor_row;
+        let start = self.cursor_col;
+        for c in (start..self.cols).rev() {
+            self.cells[row * self.cols + c] = if c >= start + n {
+                self.cells[row * self.cols + (c - n)].clone()
+            } else {
+                Cell::default()
+            };
+        }
+        self.dirty_rows.insert(row);
+    }
+
+    /// Delete `n` cells at the cursor, shifting the rest of the row left (DCH).
+    fn delete_chars(&mut self, n: usize) {
+        let row = self.cursor_row;
+        let start = self.cursor_col;
+        for c in start..self.cols {
+            self.cells[row * self.cols + c] = if c + n < self.cols {
+                self.cells[row * self.cols + (c + n)].clone()
+            } else {
+                Cell::default()
+            };
+        }
+        self.dirty_rows.insert(row);
+    }
+
+    /// Erase `n` cells at the cursor in place (ECH).
+    fn erase_chars(&mut self, n: usize) {
+        let row = self.cursor_row;
+        for c in self.cursor_col..(self.cursor_col + n).min(self.cols) {
+            self.cells[row * self.cols + c] = Cell::default();
+        }
+        self.dirty_rows.insert(row);
+    }
+
+    /// Insert `n` blank lines at the cursor row within the scroll region (IL).
+    fn insert_lines(&mut self, n: usize) {
+        if self.cursor_row < self.scroll_top || self.cursor_row > self.scroll_bot {
+            return;
+        }
+        let saved = self.scroll_top;
+        self.scroll_top = self.cursor_row;
+        self.scroll_down(n);
+        self.scroll_top = saved;
+    }
+
+    /// Delete `n` lines at the cursor row within the scroll region (DL).
+    fn delete_lines(&mut self, n: usize) {
+        if self.cursor_row < self.scroll_top || self.cursor_row > self.scroll_bot {
+            return;
+        }
+        let saved = self.scroll_top;
+        self.scroll_top = self.cursor_row;
+        self.scroll_up(n);
+        self.scroll_top = saved;
+    }
+
+    fn enter_alt(&mut self) {
+        if self.alt {
+            return;
+        }
+        self.save_cursor();
+        self.saved_main = Some((self.cells.clone(), self.cursor_row, self.cursor_col));
+        self.alt = true;
+        self.cells = vec![Cell::default(); self.cols * self.rows];
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.dirty_rows.extend(0..self.rows);
+    }
+
+    fn leave_alt(&mut self) {
+        if !self.alt {
+            return;
+        }
+        if let Some((cells, row, col)) = self.saved_main.take() {
+            // The main buffer may predate a resize; rebuild at the current size.
+            if cells.len() == self.cols * self.rows {
+                self.cells = cells;
+            } else {
+                self.cells = vec![Cell::default(); self.cols * self.rows];
+            }
+            self.cursor_row = row.min(self.rows.saturating_sub(1));
+            self.cursor_col = col.min(self.cols.saturating_sub(1));
+        }
+        self.alt = false;
+        self.restore_cursor();
+        self.dirty_rows.extend(0..self.rows);
+    }
+
+    /// Set/reset a DEC private mode (`CSI ? Pm h/l`).
+    fn set_private_mode(&mut self, mode: u16, on: bool) {
+        match mode {
+            1 => self.app_cursor_keys = on,
+            25 => self.cursor_visible = on,
+            1000 => {
+                self.mouse.tracking = if on {
+                    MouseTracking::Normal
+                } else {
+                    MouseTracking::Off
+                }
+            }
+            1002 => {
+                self.mouse.tracking = if on {
+                    MouseTracking::ButtonDrag
+                } else {
+                    MouseTracking::Off
+                }
+            }
+            1003 => {
+                self.mouse.tracking = if on {
+                    MouseTracking::AnyMotion
+                } else {
+                    MouseTracking::Off
+                }
+            }
+            1006 => self.mouse.sgr = on,
+            2004 => self.bracketed_paste = on,
+            47 | 1047 => {
+                if on {
+                    self.enter_alt();
+                } else {
+                    self.leave_alt();
+                }
+            }
+            1048 => {
+                if on {
+                    self.save_cursor();
+                } else {
+                    self.restore_cursor();
+                }
+            }
+            1049 => {
+                if on {
+                    self.enter_alt();
+                } else {
+                    self.leave_alt();
+                }
+            }
+            _ => {}
+        }
     }
 
     fn apply_sgr(&mut self, params: &[u16]) {
@@ -219,7 +561,7 @@ impl TerminalScreen {
 
 impl vte::Perform for TerminalScreen {
     fn print(&mut self, c: char) {
-        self.write_char_at_cursor(c);
+        self.write_char(c);
     }
 
     fn execute(&mut self, byte: u8) {
@@ -233,12 +575,13 @@ impl vte::Perform for TerminalScreen {
                     self.dirty_rows.insert(self.cursor_row);
                 }
             }
+            0x09 => self.tab(),
             0x08 => {
                 if self.cursor_col > 0 {
                     self.cursor_col -= 1;
                 }
             }
-            0x07 => {}
+            0x07 => self.bell = true,
             _ => {}
         }
     }
@@ -246,30 +589,57 @@ impl vte::Perform for TerminalScreen {
     fn csi_dispatch(
         &mut self,
         params: &vte::Params,
-        _intermediates: &[u8],
+        intermediates: &[u8],
         _ignore: bool,
         action: char,
     ) {
         let ps: Vec<u16> = params.iter().map(|p| p[0]).collect();
         let p0 = *ps.first().unwrap_or(&0);
         let p1 = *ps.get(1).unwrap_or(&0);
+        let n0 = p0.max(1) as usize;
+
+        // DEC private modes: `CSI ? Pm h/l`.
+        if intermediates.first() == Some(&b'?') && (action == 'h' || action == 'l') {
+            let on = action == 'h';
+            for &m in &ps {
+                self.set_private_mode(m, on);
+            }
+            return;
+        }
+        // DECSCUSR cursor shape: `CSI Ps SP q`.
+        if intermediates.first() == Some(&b' ') && action == 'q' {
+            let (shape, blink) = match p0 {
+                0 | 1 => (CursorShape::Block, true),
+                2 => (CursorShape::Block, false),
+                3 => (CursorShape::Underline, true),
+                4 => (CursorShape::Underline, false),
+                5 => (CursorShape::Bar, true),
+                6 => (CursorShape::Bar, false),
+                _ => (CursorShape::Block, true),
+            };
+            self.cursor_shape = shape;
+            self.cursor_blink = blink;
+            return;
+        }
 
         match action {
-            'A' => {
-                let n = p0.max(1) as usize;
-                self.cursor_row = self.cursor_row.saturating_sub(n);
+            'A' => self.cursor_row = self.cursor_row.saturating_sub(n0),
+            'B' => self.cursor_row = (self.cursor_row + n0).min(self.rows.saturating_sub(1)),
+            'C' => self.cursor_col = (self.cursor_col + n0).min(self.cols.saturating_sub(1)),
+            'D' => self.cursor_col = self.cursor_col.saturating_sub(n0),
+            'E' => {
+                self.cursor_col = 0;
+                self.cursor_row = (self.cursor_row + n0).min(self.rows.saturating_sub(1));
             }
-            'B' => {
-                let n = p0.max(1) as usize;
-                self.cursor_row = (self.cursor_row + n).min(self.rows.saturating_sub(1));
+            'F' => {
+                self.cursor_col = 0;
+                self.cursor_row = self.cursor_row.saturating_sub(n0);
             }
-            'C' => {
-                let n = p0.max(1) as usize;
-                self.cursor_col = (self.cursor_col + n).min(self.cols.saturating_sub(1));
+            'G' | '`' => {
+                self.cursor_col = (p0.saturating_sub(1) as usize).min(self.cols.saturating_sub(1));
             }
-            'D' => {
-                let n = p0.max(1) as usize;
-                self.cursor_col = self.cursor_col.saturating_sub(n);
+            'd' => {
+                self.cursor_row = (p0.saturating_sub(1) as usize).min(self.rows.saturating_sub(1));
             }
             'H' | 'f' => {
                 self.cursor_row = (p0.saturating_sub(1) as usize).min(self.rows.saturating_sub(1));
@@ -305,16 +675,14 @@ impl vte::Perform for TerminalScreen {
             },
             'K' => match p0 {
                 0 => {
-                    let row = self.cursor_row;
-                    let col = self.cursor_col;
+                    let (row, col) = (self.cursor_row, self.cursor_col);
                     for c in col..self.cols {
                         self.cells[row * self.cols + c] = Cell::default();
                     }
                     self.dirty_rows.insert(row);
                 }
                 1 => {
-                    let row = self.cursor_row;
-                    let col = self.cursor_col;
+                    let (row, col) = (self.cursor_row, self.cursor_col);
                     for c in 0..=col {
                         self.cells[row * self.cols + c] = Cell::default();
                     }
@@ -326,6 +694,13 @@ impl vte::Perform for TerminalScreen {
                 }
                 _ => {}
             },
+            '@' => self.insert_chars(n0),
+            'P' => self.delete_chars(n0),
+            'X' => self.erase_chars(n0),
+            'L' => self.insert_lines(n0),
+            'M' => self.delete_lines(n0),
+            'S' => self.scroll_up(n0),
+            'T' => self.scroll_down(n0),
             'm' => {
                 if ps.is_empty() {
                     self.apply_sgr(&[0]);
@@ -333,6 +708,8 @@ impl vte::Perform for TerminalScreen {
                     self.apply_sgr(&ps);
                 }
             }
+            's' => self.save_cursor(),
+            'u' => self.restore_cursor(),
             'r' => {
                 let top = (p0.saturating_sub(1) as usize).min(self.rows.saturating_sub(1));
                 let bot = if p1 == 0 {
@@ -349,12 +726,73 @@ impl vte::Perform for TerminalScreen {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        // Charset selection (`ESC ( B` etc.) carries an intermediate; ignore it.
+        if !intermediates.is_empty() {
+            return;
+        }
+        match byte {
+            b'7' => self.save_cursor(),
+            b'8' => self.restore_cursor(),
+            b'M' => {
+                // Reverse index: up one row, scrolling the region down at the top.
+                if self.cursor_row == self.scroll_top {
+                    self.scroll_down(1);
+                } else if self.cursor_row > 0 {
+                    self.cursor_row -= 1;
+                }
+            }
+            b'c' => {
+                // RIS — full reset.
+                *self = TerminalScreen::new(self.cols, self.rows);
+            }
+            _ => {}
+        }
+    }
+
     fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _action: char) {
     }
     fn put(&mut self, _byte: u8) {}
     fn unhook(&mut self) {}
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        let Some(kind) = params.first() else { return };
+        let arg = |i: usize| {
+            params
+                .get(i)
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+        };
+        match *kind {
+            b"0" | b"2" => {
+                if let Some(t) = arg(1) {
+                    self.title = Some(t);
+                }
+            }
+            b"7" => {
+                // file://host/abs/path — keep just the path.
+                if let Some(uri) = arg(1) {
+                    let path = uri.split_once("://").map(|(_, rest)| {
+                        rest.find('/')
+                            .map(|i| &rest[i..])
+                            .unwrap_or(rest)
+                            .to_string()
+                    });
+                    self.cwd = path.or(Some(uri));
+                }
+            }
+            b"52" => {
+                // 52 ; <selection> ; <base64>  — a clipboard write request.
+                if let Some(payload) = params.get(2) {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(payload) {
+                        if let Ok(s) = String::from_utf8(bytes) {
+                            self.clipboard = Some(s);
+                        }
+                    }
+                }
+            }
+            _ => {} // OSC 8 hyperlinks etc.: consumed (no garbage printed), UI is a backlog item.
+        }
+    }
 }
 
 #[cfg(test)]
@@ -362,7 +800,6 @@ mod tests {
     use super::*;
     use crate::parser::TermParser;
 
-    /// Drive `bytes` through the real vte parser into a fresh screen.
     fn run(cols: usize, rows: usize, bytes: &[u8]) -> TerminalScreen {
         let mut screen = TerminalScreen::new(cols, rows);
         let mut parser = TermParser::new();
@@ -370,7 +807,6 @@ mod tests {
         screen
     }
 
-    /// Collect a row's characters into a String for easy assertions.
     fn row_text(screen: &TerminalScreen, row: usize) -> String {
         (0..screen.cols).map(|c| screen.cell(row, c).ch).collect()
     }
@@ -381,10 +817,8 @@ mod tests {
         assert_eq!(s.cell(0, 0).ch, 'a');
         assert_eq!(s.cell(0, 1).ch, 'b');
         assert_eq!(s.cell(0, 2).ch, 'c');
-        // Cursor advanced past the last written cell.
         assert_eq!(s.cursor_row, 0);
         assert_eq!(s.cursor_col, 3);
-        // Untouched cells remain spaces.
         assert_eq!(s.cell(0, 3).ch, ' ');
     }
 
@@ -393,7 +827,6 @@ mod tests {
         let s = run(10, 3, b"abc\r");
         assert_eq!(s.cursor_col, 0);
         assert_eq!(s.cursor_row, 0);
-        // CR alone does not erase what was written.
         assert_eq!(s.cell(0, 0).ch, 'a');
     }
 
@@ -407,10 +840,8 @@ mod tests {
 
     #[test]
     fn newline_advances_row_keeping_column() {
-        // vte treats lone \n as line feed: row down, column unchanged.
         let s = run(10, 3, b"ab\ncd");
         assert_eq!(row_text(&s, 0).trim_end(), "ab");
-        // After "ab" cursor is at col 2; \n moves to row 1 col 2; "cd" lands there.
         assert_eq!(s.cell(1, 2).ch, 'c');
         assert_eq!(s.cell(1, 3).ch, 'd');
         assert_eq!(s.cursor_row, 1);
@@ -429,7 +860,6 @@ mod tests {
     fn backspace_moves_cursor_left_without_erasing() {
         let s = run(10, 3, b"abc\x08");
         assert_eq!(s.cursor_col, 2);
-        // Backspace alone leaves the glyph in place.
         assert_eq!(s.cell(0, 2).ch, 'c');
     }
 
@@ -441,7 +871,6 @@ mod tests {
 
     #[test]
     fn cursor_position_csi_h_is_one_based() {
-        // ESC[2;5H → row 2, col 5 (1-based) → (1, 4) zero-based.
         let s = run(20, 10, b"\x1b[2;5H");
         assert_eq!(s.cursor_row, 1);
         assert_eq!(s.cursor_col, 4);
@@ -455,7 +884,6 @@ mod tests {
 
     #[test]
     fn cursor_position_no_params_homes() {
-        // ESC[H with no params → home (0,0).
         let s = run(20, 10, b"\x1b[5;5H\x1b[H");
         assert_eq!(s.cursor_row, 0);
         assert_eq!(s.cursor_col, 0);
@@ -470,11 +898,9 @@ mod tests {
 
     #[test]
     fn cursor_movement_relative() {
-        // Start at (0,0); down 2, right 3.
         let s = run(20, 10, b"\x1b[2B\x1b[3C");
         assert_eq!(s.cursor_row, 2);
         assert_eq!(s.cursor_col, 3);
-        // Up 1, left 1.
         let s = run(20, 10, b"\x1b[2B\x1b[3C\x1b[1A\x1b[1D");
         assert_eq!(s.cursor_row, 1);
         assert_eq!(s.cursor_col, 2);
@@ -488,7 +914,6 @@ mod tests {
 
     #[test]
     fn line_wraps_at_right_edge() {
-        // 3 columns: "abcd" → "abc" on row 0, "d" wraps to row 1.
         let s = run(3, 3, b"abcd");
         assert_eq!(row_text(&s, 0), "abc");
         assert_eq!(s.cell(1, 0).ch, 'd');
@@ -498,7 +923,6 @@ mod tests {
 
     #[test]
     fn sgr_bold_and_color_apply_to_written_cells() {
-        // ESC[1;31m sets bold + red (named 1), then 'X'.
         let s = run(10, 3, b"\x1b[1;31mX");
         let cell = s.cell(0, 0);
         assert_eq!(cell.ch, 'X');
@@ -508,7 +932,6 @@ mod tests {
 
     #[test]
     fn sgr_reset_clears_attributes() {
-        // Set bold+italic, write 'A', reset, write 'B'.
         let s = run(10, 3, b"\x1b[1;3mA\x1b[0mB");
         assert!(s.cell(0, 0).bold);
         assert!(s.cell(0, 0).italic);
@@ -519,21 +942,17 @@ mod tests {
 
     #[test]
     fn sgr_256_indexed_and_rgb_colors() {
-        // ESC[38;5;200m → indexed fg 200.
         let s = run(10, 3, b"\x1b[38;5;200mP");
         assert_eq!(s.cell(0, 0).fg, TermColor::Indexed(200));
-        // ESC[48;2;10;20;30m → rgb bg.
         let s = run(10, 3, b"\x1b[48;2;10;20;30mQ");
         assert_eq!(s.cell(0, 0).bg, TermColor::Rgb(10, 20, 30));
     }
 
     #[test]
     fn erase_in_line_to_end_k0() {
-        // Write "abcde", move cursor to col 2, erase to end of line.
         let s = run(10, 3, b"abcde\x1b[1;3H\x1b[0K");
         assert_eq!(s.cell(0, 0).ch, 'a');
         assert_eq!(s.cell(0, 1).ch, 'b');
-        // From the cursor (col 2) onward cleared.
         assert_eq!(s.cell(0, 2).ch, ' ');
         assert_eq!(s.cell(0, 3).ch, ' ');
         assert_eq!(s.cell(0, 4).ch, ' ');
@@ -549,17 +968,14 @@ mod tests {
 
     #[test]
     fn newline_at_bottom_scrolls_up() {
-        // 2-row screen: fill row0, newline pushes content up.
         let mut screen = TerminalScreen::new(5, 2);
         let mut parser = TermParser::new();
         parser.process(b"top\r\nbot", &mut screen);
         assert_eq!(row_text(&screen, 0).trim_end(), "top");
         assert_eq!(row_text(&screen, 1).trim_end(), "bot");
-        // Now cursor is on the last row; a newline must scroll.
         parser.process(b"\r\nnew", &mut screen);
         assert_eq!(row_text(&screen, 0).trim_end(), "bot");
         assert_eq!(row_text(&screen, 1).trim_end(), "new");
-        // The scrolled-off line landed in scrollback.
         assert_eq!(
             screen.scrollback.back().map(|r| r
                 .iter()
@@ -573,7 +989,6 @@ mod tests {
 
     #[test]
     fn set_scroll_region_resets_cursor() {
-        // ESC[2;5r sets scroll region rows 2..5 (1-based) and homes cursor.
         let s = run(10, 8, b"\x1b[3;6Hxx\x1b[2;5r");
         assert_eq!(s.scroll_top, 1);
         assert_eq!(s.scroll_bot, 4);
@@ -582,16 +997,145 @@ mod tests {
     }
 
     #[test]
-    fn resize_clamps_cursor_and_clears_cells() {
+    fn resize_preserves_overlap() {
+        let mut s = run(10, 3, b"hello");
+        s.resize(6, 2);
+        assert_eq!(s.cols, 6);
+        assert_eq!(s.rows, 2);
+        // The overlapping top-left content survives the resize.
+        assert_eq!(row_text(&s, 0).trim_end(), "hello");
+    }
+
+    // --- new coverage -----------------------------------------------------
+
+    #[test]
+    fn tab_advances_to_next_stop() {
+        let s = run(40, 2, b"a\tb");
+        assert_eq!(s.cell(0, 0).ch, 'a');
+        assert_eq!(s.cell(0, 8).ch, 'b');
+    }
+
+    #[test]
+    fn wide_char_occupies_two_cells_with_spacer() {
+        let s = run(10, 2, "你x".as_bytes());
+        assert_eq!(s.cell(0, 0).ch, '你');
+        assert_eq!(s.cell(0, 0).width, 2);
+        assert_eq!(s.cell(0, 1).width, 0); // spacer
+        assert_eq!(s.cell(0, 2).ch, 'x');
+        assert_eq!(s.cursor_col, 3);
+    }
+
+    #[test]
+    fn bracketed_paste_and_app_cursor_modes_toggle() {
+        let mut s = run(10, 2, b"\x1b[?2004h\x1b[?1h");
+        assert!(s.bracketed_paste);
+        assert!(s.app_cursor_keys);
+        let mut parser = TermParser::new();
+        parser.process(b"\x1b[?2004l", &mut s);
+        assert!(!s.bracketed_paste);
+    }
+
+    #[test]
+    fn mouse_modes_set_tracking_and_encoding() {
+        let s = run(10, 2, b"\x1b[?1000h\x1b[?1006h");
+        assert_eq!(s.mouse.tracking, MouseTracking::Normal);
+        assert!(s.mouse.sgr);
+        assert!(s.mouse.reports());
+    }
+
+    #[test]
+    fn cursor_shape_from_decscusr() {
+        let s = run(10, 2, b"\x1b[5 q");
+        assert_eq!(s.cursor_shape, CursorShape::Bar);
+        assert!(s.cursor_blink);
+        let s = run(10, 2, b"\x1b[2 q");
+        assert_eq!(s.cursor_shape, CursorShape::Block);
+        assert!(!s.cursor_blink);
+    }
+
+    #[test]
+    fn cursor_visibility_toggles() {
+        let s = run(10, 2, b"\x1b[?25l");
+        assert!(!s.cursor_visible);
+        let s = run(10, 2, b"\x1b[?25l\x1b[?25h");
+        assert!(s.cursor_visible);
+    }
+
+    #[test]
+    fn alt_screen_isolates_and_restores_main() {
+        // Write to main, enter alt, write there, leave alt → main content returns and
+        // alt content never reached scrollback.
+        let mut s = run(10, 3, b"main");
+        let mut parser = TermParser::new();
+        parser.process(b"\x1b[?1049h", &mut s);
+        assert!(s.alt_screen());
+        parser.process(b"ALT", &mut s);
+        assert_eq!(row_text(&s, 0).trim_end(), "ALT");
+        parser.process(b"\x1b[?1049l", &mut s);
+        assert!(!s.alt_screen());
+        assert_eq!(row_text(&s, 0).trim_end(), "main");
+        assert!(
+            s.scrollback.is_empty(),
+            "alt content must not enter scrollback"
+        );
+    }
+
+    #[test]
+    fn osc_sets_title_and_cwd() {
+        let s = run(10, 2, b"\x1b]0;my title\x07\x1b]7;file://host/Users/me\x07");
+        assert_eq!(s.title.as_deref(), Some("my title"));
+        assert_eq!(s.cwd.as_deref(), Some("/Users/me"));
+    }
+
+    #[test]
+    fn osc52_decodes_clipboard() {
+        // base64("hi") == "aGk=".
+        let mut s = run(10, 2, b"\x1b]52;c;aGk=\x07");
+        assert_eq!(s.take_clipboard().as_deref(), Some("hi"));
+        assert_eq!(s.take_clipboard(), None);
+    }
+
+    #[test]
+    fn bell_flag_reads_and_clears() {
+        let mut s = run(10, 2, b"\x07");
+        assert!(s.take_bell());
+        assert!(!s.take_bell());
+    }
+
+    #[test]
+    fn insert_and_delete_chars_shift_the_row() {
+        // "abcd", home, insert 2 → "  ab" then "cd" pushed right.
+        let s = run(6, 2, b"abcd\x1b[1;1H\x1b[2@");
+        assert_eq!(
+            row_text(&s, 0),
+            "  abcd".chars().take(6).collect::<String>()
+        );
+        // delete 2 at home → "cdef"-style left shift.
+        let s = run(6, 2, b"abcdef\x1b[1;1H\x1b[2P");
+        assert_eq!(&row_text(&s, 0)[..4], "cdef");
+    }
+
+    #[test]
+    fn insert_delete_lines_within_region() {
+        let s = run(4, 3, b"aaa\r\nbbb\r\nccc\x1b[1;1H\x1b[1L");
+        // A blank line was inserted at the top; "aaa" pushed down.
+        assert_eq!(row_text(&s, 0).trim_end(), "");
+        assert_eq!(row_text(&s, 1).trim_end(), "aaa");
+    }
+
+    #[test]
+    fn save_and_restore_cursor() {
+        let s = run(20, 5, b"\x1b[3;4H\x1b7\x1b[1;1H\x1b8");
+        assert_eq!(s.cursor_row, 2);
+        assert_eq!(s.cursor_col, 3);
+    }
+
+    #[test]
+    fn resize_clamps_cursor() {
         let mut s = run(10, 5, b"\x1b[5;9Hhello");
         assert_eq!(s.cursor_row, 4);
         s.resize(4, 2);
-        assert_eq!(s.cols, 4);
-        assert_eq!(s.rows, 2);
-        // Cursor clamped into the smaller grid.
         assert!(s.cursor_row < 2);
         assert!(s.cursor_col < 4);
-        // Fresh grid is blank.
-        assert_eq!(s.cell(0, 0).ch, ' ');
     }
 }

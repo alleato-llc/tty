@@ -18,6 +18,17 @@ impl PtySession {
         cols: u16,
         rows: u16,
     ) -> Result<(Self, mpsc::Receiver<Vec<u8>>), BoxError> {
+        Self::spawn_in(shell, cols, rows, None)
+    }
+
+    /// Like [`spawn`](Self::spawn), but starts the shell in `cwd` when it's an existing
+    /// directory (used for "new tab in the same directory").
+    pub fn spawn_in(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(Self, mpsc::Receiver<Vec<u8>>), BoxError> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -28,6 +39,11 @@ impl PtySession {
 
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
+        if let Some(dir) = cwd {
+            if dir.is_dir() {
+                cmd.cwd(dir);
+            }
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
         let master = pair.master;

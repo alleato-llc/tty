@@ -28,6 +28,8 @@ fn painted_term(title: &str, cols: usize, rows: usize, bytes: &[u8]) -> Term {
         pty: None,
         title: title.into(),
         alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
     }
 }
 
@@ -55,6 +57,7 @@ fn populated() -> Tty {
         window_height: 600.0,
         hovered_tab: None,
         selection: None,
+        search: None,
     }
 }
 

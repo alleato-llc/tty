@@ -27,6 +27,11 @@ pub struct Term {
     /// Cleared by the read thread when the PTY closes (the shell exited), so the UI
     /// can reap the tab.
     pub alive: Arc<AtomicBool>,
+    /// Set by the read thread on output; the UI swaps it false each redraw to light a
+    /// background tab's activity dot.
+    pub dirty: Arc<AtomicBool>,
+    /// Unseen output / bell on a background tab (shown as a • in the tab strip).
+    pub activity: bool,
 }
 
 /// The whole app: a stack of terminal tabs + theme/font chrome. The terminal counterpart
@@ -42,6 +47,8 @@ pub struct Tty {
     pub hovered_tab: Option<usize>,
     /// The active terminal's current selection text (for ⌘C).
     pub selection: Option<String>,
+    /// The scrollback search query when the `⌘F` find bar is open (`None` = closed).
+    pub search: Option<String>,
 }
 
 impl Tty {
@@ -64,21 +71,93 @@ impl Tty {
             window_height: 620.0,
             hovered_tab: None,
             selection: None,
+            search: None,
         };
         tty.new_tab();
         tty
+    }
+
+    /// Toggle the `⌘F` find bar. Opening returns the search-field id to focus.
+    pub fn toggle_search(&mut self) -> bool {
+        if self.search.is_some() {
+            self.search = None;
+            false
+        } else {
+            self.search = Some(String::new());
+            true
+        }
     }
 
     pub fn active_term(&self) -> Option<&Term> {
         self.tabs.get(self.active)
     }
 
-    /// Spawn a shell in a new tab and make it active.
+    /// Make tab `idx` active and clear its unseen-activity dot.
+    pub fn activate(&mut self, idx: usize) {
+        if idx < self.tabs.len() {
+            self.active = idx;
+            self.tabs[idx].activity = false;
+        }
+    }
+
+    /// Spawn a shell in a new tab and make it active. The new shell starts in the
+    /// active tab's reported working directory (OSC 7) when known.
     pub fn new_tab(&mut self) {
-        if let Some(term) = spawn_term(80, 24) {
+        let cwd = self.active_term().and_then(|t| t.screen.lock().cwd.clone());
+        if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
             self.tabs.push(term);
             self.active = self.tabs.len() - 1;
         }
+    }
+
+    /// The active tab's DEC application-cursor-keys mode (affects arrow-key bytes).
+    pub fn active_app_cursor(&self) -> bool {
+        self.active_term()
+            .map(|t| t.screen.lock().app_cursor_keys)
+            .unwrap_or(false)
+    }
+
+    /// Paste `text` into the active shell, wrapping it in bracketed-paste markers when
+    /// the app enabled mode 2004 (so multi-line paste can't auto-execute).
+    pub fn paste(&mut self, text: &str) {
+        let bracketed = self
+            .active_term()
+            .map(|t| t.screen.lock().bracketed_paste)
+            .unwrap_or(false);
+        let mut bytes = Vec::new();
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        self.write_active(&bytes);
+    }
+
+    /// Per-redraw housekeeping: light activity dots on background tabs that produced
+    /// output or rang the bell, clear the active tab's dot, and surface any OSC 52
+    /// clipboard-write request for the host to put on the system clipboard.
+    pub fn drain_effects(&mut self) -> Option<String> {
+        let active = self.active;
+        let mut clip = None;
+        for (i, term) in self.tabs.iter_mut().enumerate() {
+            let (bell, requested) = {
+                let mut s = term.screen.lock();
+                (s.take_bell(), s.take_clipboard())
+            };
+            if let Some(c) = requested {
+                clip = Some(c);
+            }
+            let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
+            if (was_dirty || bell) && i != active {
+                term.activity = true;
+            }
+        }
+        if let Some(t) = self.tabs.get_mut(active) {
+            t.activity = false;
+        }
+        clip
     }
 
     /// Close tab `idx`. Returns `false` when the last tab closes (the caller exits).
@@ -150,10 +229,12 @@ impl Default for Tty {
 }
 
 /// Spawn a shell PTY + screen, run the read→parse→screen loop on a background thread,
-/// and return the tab. `None` if the shell couldn't start.
-fn spawn_term(cols: u16, rows: u16) -> Option<Term> {
+/// and return the tab. `None` if the shell couldn't start. `cwd` starts the shell in a
+/// directory (new-tab-in-cwd); `None` uses the default.
+fn spawn_term(cols: u16, rows: u16, cwd: Option<&str>) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let (session, mut rx) = match PtySession::spawn(&shell, cols, rows) {
+    let dir = cwd.map(std::path::Path::new);
+    let (session, mut rx) = match PtySession::spawn_in(&shell, cols, rows, dir) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("Failed to spawn shell {shell:?}: {e}");
@@ -165,12 +246,15 @@ fn spawn_term(cols: u16, rows: u16) -> Option<Term> {
         rows as usize,
     )));
     let alive = Arc::new(AtomicBool::new(true));
+    let dirty = Arc::new(AtomicBool::new(false));
     let read_into = screen.clone();
     let alive_flag = alive.clone();
+    let dirty_flag = dirty.clone();
     std::thread::spawn(move || {
         let mut parser = cathode::parser::TermParser::new();
         while let Some(data) = rx.blocking_recv() {
             parser.process(&data, &mut read_into.lock());
+            dirty_flag.store(true, Ordering::Relaxed);
             cathode::wake::signal(); // repaint on output
         }
         // The channel closed — cathode's reader hit EOF, i.e. the shell exited.
@@ -183,6 +267,8 @@ fn spawn_term(cols: u16, rows: u16) -> Option<Term> {
         pty: Some(session),
         title,
         alive,
+        dirty,
+        activity: false,
     })
 }
 

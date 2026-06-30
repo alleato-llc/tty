@@ -2,10 +2,15 @@ use iced::widget::{container, text, Column};
 use iced::{Element, Length};
 
 use rime::theme;
-use rime::widgets::{status_bar, tabs, Tab};
+use rime::widgets::{status_bar, tabs, text_field, Tab};
 
 use crate::message::Message;
 use crate::state::Tty;
+
+/// The find bar's text-input id (so `⌘F` can focus it).
+pub fn search_id() -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::new("tty-search")
+}
 
 pub fn view(state: &Tty) -> Element<'_, Message> {
     // Open the active theme's palette for this render pass (RAII, drops at end).
@@ -22,7 +27,20 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         let models: Vec<Tab> = state
             .tabs
             .iter()
-            .map(|term| Tab::new(term.title.clone()))
+            .map(|term| {
+                // Prefer the program-set title (OSC 0/2); a • marks unseen activity.
+                let title = term
+                    .screen
+                    .lock()
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| term.title.clone());
+                Tab::new(if term.activity {
+                    format!("• {title}")
+                } else {
+                    title
+                })
+            })
             .collect();
         root = root.push(tabs(
             models,
@@ -38,15 +56,19 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
 
     // The active terminal.
     let body: Element<'_, Message> = match state.active_term() {
-        Some(term) => container(phosphor::terminal(
-            term.screen.clone(),
-            style,
-            state.font,
-            state.font_size,
-            true,
-            Message::Resize,
-            Message::Select,
-        ))
+        Some(term) => container(
+            phosphor::terminal(
+                term.screen.clone(),
+                style,
+                state.font,
+                state.font_size,
+                true,
+                Message::Resize,
+                Message::Select,
+                Message::PtyBytes,
+            )
+            .find(state.search.clone()),
+        )
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(6)
@@ -57,6 +79,20 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             .into(),
     };
     root = root.push(body);
+
+    // Find bar (⌘F): a focused field whose text highlights matches in the terminal.
+    if let Some(query) = &state.search {
+        let field = text_field("Find in scrollback…", query, Message::SearchChanged)
+            .id(search_id())
+            .on_submit(Message::SearchSubmit)
+            .size(13);
+        root = root.push(
+            container(field)
+                .padding([4, 6])
+                .width(Length::Fill)
+                .style(move |_| container::background(t.surface)),
+        );
+    }
 
     // Status bar: shell name on the left, grid + tab count + font on the right.
     let (left, right) = status_text(state);
@@ -73,9 +109,9 @@ fn status_text(state: &Tty) -> (String, String) {
     let Some(term) = state.active_term() else {
         return (String::new(), String::new());
     };
-    let (cols, rows) = {
+    let (cols, rows, title) = {
         let s = term.screen.lock();
-        (s.cols, s.rows)
+        (s.cols, s.rows, s.title.clone())
     };
     let tabs = if state.tabs.len() > 1 {
         format!(" · {} tabs", state.tabs.len())
@@ -83,7 +119,7 @@ fn status_text(state: &Tty) -> (String, String) {
         String::new()
     };
     (
-        term.title.clone(),
+        title.unwrap_or_else(|| term.title.clone()),
         format!("{cols}×{rows}{tabs} · {}px", state.font_size as u32),
     )
 }
