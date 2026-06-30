@@ -111,9 +111,9 @@ impl Tty {
         tty
     }
 
-    /// The terminal-background opacity to render with right now: opaque while focused,
-    /// the configured unfocused opacity otherwise.
-    pub fn bg_opacity(&self) -> f32 {
+    /// The whole-window opacity to render with right now: opaque while focused, the
+    /// configured unfocused opacity otherwise. Applied to every surface + text color.
+    pub fn window_opacity(&self) -> f32 {
         if self.focused {
             1.0
         } else {
@@ -401,7 +401,9 @@ fn named_font(family: &str) -> Font {
     Font::with_name(Box::leak(family.to_string().into_boxed_str()))
 }
 
-/// Per-window theme for the iced runtime (scrollbars etc.).
+/// Per-window theme for the iced runtime (scrollbars etc.), faded with the rest of the
+/// window when it's unfocused so built-in widgets dim in step.
 pub fn theme(state: &Tty) -> iced::Theme {
-    state.theme.iced()
+    let op = state.window_opacity();
+    crate::theme::fade_palette(state.theme.palette, op).iced_theme("tty")
 }

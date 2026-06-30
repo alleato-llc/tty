@@ -71,7 +71,9 @@ fn terminal_view() {
     let tty = populated();
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(view(&tty));
-    let snap = sim.snapshot(&tty.theme.iced()).expect("render snapshot");
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
     let matches = snap
         .matches_image("snapshots/tty-terminal.png")
         .expect("write/compare snapshot");

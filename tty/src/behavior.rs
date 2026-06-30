@@ -176,19 +176,23 @@ fn settings_panel_toggles_and_switches_section() {
 fn unfocused_opacity_applies_only_when_unfocused() {
     let mut tty = headless(1);
     // Off by default — opaque regardless of focus.
-    assert_eq!(tty.bg_opacity(), 1.0);
+    assert_eq!(tty.window_opacity(), 1.0);
     let _ = update(&mut tty, Message::Focused(false));
     assert!(!tty.focused);
-    assert_eq!(tty.bg_opacity(), 1.0, "off by default even when unfocused");
+    assert_eq!(
+        tty.window_opacity(),
+        1.0,
+        "off by default even when unfocused"
+    );
     // Enabled: translucent only while unfocused, opaque while focused.
     tty.settings.unfocused_opacity = Some(0.6);
-    assert_eq!(tty.bg_opacity(), 0.6, "translucent while unfocused");
+    assert_eq!(tty.window_opacity(), 0.6, "translucent while unfocused");
     let _ = update(&mut tty, Message::Focused(true));
-    assert_eq!(tty.bg_opacity(), 1.0, "always opaque while focused");
+    assert_eq!(tty.window_opacity(), 1.0, "always opaque while focused");
     // Never fully invisible.
     tty.settings.unfocused_opacity = Some(0.0);
     tty.focused = false;
-    assert!(tty.bg_opacity() >= 0.3, "clamped away from invisible");
+    assert!(tty.window_opacity() >= 0.3, "clamped away from invisible");
 }
 
 #[test]

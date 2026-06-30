@@ -16,16 +16,14 @@ pub fn search_id() -> iced::advanced::widget::Id {
 }
 
 pub fn view(state: &Tty) -> Element<'_, Message> {
-    // Open the active theme's palette for this render pass (RAII, drops at end).
-    let _scope = theme::enter(state.theme.palette);
+    // Unfocused-window transparency: fade every surface + text by the same factor so
+    // the whole window goes translucent uniformly (opaque while focused / by default).
+    let op = state.window_opacity();
+    // Open the (faded) theme palette for this render pass (RAII, drops at end).
+    let _scope = theme::enter(crate::theme::fade_palette(state.theme.palette, op));
     let t = theme::tokens();
-    let style = state.theme.terminal;
-    // The terminal background goes translucent while the window is unfocused (if the
-    // user enabled it); text and colored cells stay opaque. Focused = always opaque.
-    let bg = iced::Color {
-        a: state.bg_opacity(),
-        ..style.bg
-    };
+    let style = crate::theme::fade_style(state.theme.terminal, op);
+    let bg = style.bg;
 
     let mut root = Column::new().width(Length::Fill).height(Length::Fill);
 

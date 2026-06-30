@@ -52,11 +52,6 @@ impl Theme {
         }
         Self::named(s.theme.as_deref().unwrap_or("Dracula"))
     }
-
-    /// The iced theme for built-in widgets (scrollbars, etc.), from the chrome palette.
-    pub fn iced(&self) -> iced::Theme {
-        self.palette.iced_theme("tty")
-    }
 }
 
 impl Default for Theme {
@@ -120,6 +115,48 @@ fn chrome_from_terminal(s: &TerminalStyle) -> Palette {
 fn mix(a: Color, b: Color, t: f32) -> Color {
     let l = |x: f32, y: f32| x + (y - x) * t;
     Color::from_rgb(l(a.r, b.r), l(a.g, b.g), l(a.b, b.b))
+}
+
+/// Scale a color's alpha by `op` — the per-surface fade behind the unfocused-window
+/// transparency. (iced 0.14 has no OS-level window opacity, so "overall" transparency
+/// is every surface + text color faded by the same factor.)
+pub fn fade(c: Color, op: f32) -> Color {
+    Color { a: c.a * op, ..c }
+}
+
+/// The whole chrome palette faded by `op`, so the tabs, status bar, panel, and their
+/// text all go translucent together. `op >= 1.0` is a no-op (the focused/default case).
+pub fn fade_palette(p: Palette, op: f32) -> Palette {
+    if op >= 1.0 {
+        return p;
+    }
+    Palette {
+        bg: fade(p.bg, op),
+        surface: fade(p.surface, op),
+        ink: fade(p.ink, op),
+        muted: fade(p.muted, op),
+        hairline: fade(p.hairline, op),
+        accent: fade(p.accent, op),
+        success: fade(p.success, op),
+        warn: fade(p.warn, op),
+        danger: fade(p.danger, op),
+    }
+}
+
+/// The terminal style faded by `op` (background, foreground, all 16 ANSI colors,
+/// cursor, selection), so the terminal surface + text fade with the rest of the window.
+pub fn fade_style(mut s: TerminalStyle, op: f32) -> TerminalStyle {
+    if op >= 1.0 {
+        return s;
+    }
+    for c in s.ansi.iter_mut() {
+        *c = fade(*c, op);
+    }
+    s.fg = fade(s.fg, op);
+    s.bg = fade(s.bg, op);
+    s.cursor = fade(s.cursor, op);
+    s.selection = fade(s.selection, op);
+    s
 }
 
 // Canonical base16 schemes (base00..base0F) for each built-in theme's terminal palette.
