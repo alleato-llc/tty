@@ -32,6 +32,12 @@ pub enum Message {
     ClosePane,
     /// Dismiss the pane context menu (an item was chosen, or a click landed outside).
     CloseMenu,
+    /// Begin renaming tab `i` (the "Rename tab…" menu item).
+    StartRename(usize),
+    /// The rename field's text changed.
+    RenameChanged(String),
+    /// The rename field was submitted (Enter) — commit the new name.
+    RenameSubmit,
     /// A clipboard read for ⌘V resolved — paste into the active shell.
     Pasted(Option<String>),
     /// The `⌘F` find query changed.

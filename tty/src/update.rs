@@ -15,7 +15,15 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
         }
         Message::PtyBytes(pane, bytes) => state.write_pane(pane, &bytes),
-        Message::FocusPane(pane) => state.focus_pane(pane),
+        // A plain click focuses the pane; Ctrl+click is macOS's secondary-click (it
+        // arrives as Left+Control, not a right button), so treat it as "open the menu".
+        Message::FocusPane(pane) => {
+            if state.modifiers.control() {
+                state.open_pane_menu(pane);
+            } else {
+                state.focus_pane(pane);
+            }
+        }
         Message::ResizeSplit(e) => state.resize_split(e.split, e.ratio),
         Message::PointerMoved(p) => state.pointer = p,
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
@@ -31,6 +39,13 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
         }
         Message::CloseMenu => state.close_menu(),
+        Message::StartRename(idx) => {
+            state.start_rename(idx);
+            // Focus the rename field so the user can type immediately.
+            return iced::widget::operation::focus(crate::view::rename_id());
+        }
+        Message::RenameChanged(text) => state.set_rename_draft(text),
+        Message::RenameSubmit => state.commit_rename(),
         Message::Pasted(Some(text)) => state.paste(&text),
         Message::Pasted(None) => {}
         Message::SearchChanged(q) => state.search = Some(q),
@@ -45,7 +60,14 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 return iced::exit();
             }
         }
-        Message::ActivateTab(idx) => state.activate(idx),
+        // Plain click activates the tab; Ctrl+click (macOS secondary-click) opens its menu.
+        Message::ActivateTab(idx) => {
+            if state.modifiers.control() {
+                state.open_tab_menu(idx);
+            } else {
+                state.activate(idx);
+            }
+        }
         Message::HoverTab(i) => state.hovered_tab = i,
         Message::Tick => {
             // Surface any OSC 52 clipboard request and light background-activity dots.
@@ -75,8 +97,13 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
 }
 
 fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message> {
-    // Escape closes the settings panel / find bar (when open) instead of going to the shell.
+    // Escape closes the rename field / settings panel / find bar (when open) instead of
+    // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.renaming.is_some() {
+            state.cancel_rename();
+            return iced::Task::none();
+        }
         if state.show_settings {
             state.show_settings = false;
             return iced::Task::none();

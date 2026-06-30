@@ -69,8 +69,10 @@ Thin glue, mirroring `fed`'s module shape:
 - **`view`** — the `rime` `tabs` strip (always shown, so a tab is always right-clickable),
   a `pane_grid` over the active tab's panes (each pane a `phosphor` terminal; the focused
   one's border turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A
-  right-click opens a `rime` `context_menu` at the tracked pointer — a pane menu
-  (split + close pane) or a tab menu (new tab + split + close tab), per `state.menu`.
+  right-click (or `⌃`-click, macOS's secondary-click) opens a `rime` `context_menu` at
+  the tracked pointer — a pane menu (split + close pane) or a tab menu (new tab + rename
+  + split + close tab), per `state.menu`. "Rename tab" shows a focused field under the
+  strip; `Tab::label()` resolves a tab's display name (custom → program title → shell).
 - **`subscription`** — key events + **one always-on output stream** fed by
   `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
 - **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome

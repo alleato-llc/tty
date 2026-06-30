@@ -60,18 +60,42 @@ pub struct Term {
 pub struct Tab {
     pub panes: pane_grid::State<Term>,
     pub focus: pane_grid::Pane,
+    /// A user-set name (via "Rename tab"). When `None`, the label comes from the focused
+    /// pane's program title (OSC 0/2) or shell name.
+    pub title: Option<String>,
 }
 
 impl Tab {
     /// A new tab wrapping a single shell pane.
     pub fn new(term: Term) -> Self {
         let (panes, focus) = pane_grid::State::new(term);
-        Self { panes, focus }
+        Self {
+            panes,
+            focus,
+            title: None,
+        }
     }
 
     /// The focused pane's terminal.
     pub fn focused(&self) -> Option<&Term> {
         self.panes.get(self.focus)
+    }
+
+    /// The tab's display label: a user-set name wins, else the focused pane's program
+    /// title (OSC 0/2), else its shell name.
+    pub fn label(&self) -> String {
+        if let Some(name) = &self.title {
+            return name.clone();
+        }
+        self.focused()
+            .map(|term| {
+                term.screen
+                    .lock()
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| term.title.clone())
+            })
+            .unwrap_or_default()
     }
 
     /// Whether any pane in this tab still has a live shell.
@@ -112,6 +136,8 @@ pub struct Tty {
     /// When `Some`, a right-click context menu is open: its kind (tab vs pane, which
     /// picks the item set) and the point to anchor it at. Both act on the active tab.
     pub menu: Option<(MenuKind, iced::Point)>,
+    /// When `Some`, a tab is being renamed: its index and the in-progress draft text.
+    pub renaming: Option<(usize, String)>,
 }
 
 /// Which right-click menu is open — a tab's (split + tab actions) or a pane's (split +
@@ -150,9 +176,42 @@ impl Tty {
             focused: true,
             pointer: iced::Point::ORIGIN,
             menu: None,
+            renaming: None,
         };
         tty.new_tab();
         tty
+    }
+
+    /// Begin renaming tab `idx`, seeding the draft with its current label and closing the
+    /// context menu. The view focuses the rename field.
+    pub fn start_rename(&mut self, idx: usize) {
+        if let Some(tab) = self.tabs.get(idx) {
+            self.renaming = Some((idx, tab.label()));
+            self.menu = None;
+        }
+    }
+
+    /// Update the in-progress rename draft.
+    pub fn set_rename_draft(&mut self, text: String) {
+        if let Some((_, draft)) = self.renaming.as_mut() {
+            *draft = text;
+        }
+    }
+
+    /// Commit the rename: a non-empty draft becomes the tab's name; an empty one clears
+    /// the override (back to the program/shell title).
+    pub fn commit_rename(&mut self) {
+        if let Some((idx, draft)) = self.renaming.take() {
+            if let Some(tab) = self.tabs.get_mut(idx) {
+                let name = draft.trim();
+                tab.title = (!name.is_empty()).then(|| name.to_string());
+            }
+        }
+    }
+
+    /// Abandon an in-progress rename (Escape / focus lost).
+    pub fn cancel_rename(&mut self) {
+        self.renaming = None;
     }
 
     /// Open the pane context menu for a clicked pane: focus it, then anchor at the cursor.

@@ -65,6 +65,7 @@ fn populated() -> Tty {
         focused: true,
         pointer: iced::Point::ORIGIN,
         menu: None,
+        renaming: None,
     }
 }
 
@@ -111,6 +112,25 @@ fn split_pane_view() {
     assert!(
         matches,
         "snapshot `tty-split` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn rename_bar_view() {
+    // "Rename tab" opens a focused, prefilled field under the tab strip.
+    let mut tty = populated();
+    tty.renaming = Some((0, "deploy".to_string()));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(view(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-rename.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-rename` changed — delete its PNG to re-baseline"
     );
 }
 

@@ -76,9 +76,14 @@ The same actions are reachable by **right-click**: a `mouse_area` per pane (and 
 strip's right-press hook) opens a rime `context_menu` anchored at `state.pointer` (a
 `PointerMoved` subscription tracks the cursor, since `mouse_area` reports a press but not
 its position). `state.menu: Option<(MenuKind, Point)>` records which kind is open — a
-**pane** menu (split + close pane) or a **tab** menu (new tab + split + close tab). Both
-target the active tab. The **tab strip is always shown** (even with one tab) so there's
-always a tab to right-click. `split_focused` spawns the shell; its spawn-free core
+**pane** menu (split + close pane) or a **tab** menu (new tab + rename + split + close
+tab). Both target the active tab. The **tab strip is always shown** (even with one tab)
+so there's always a tab to right-click. Because macOS delivers a **Ctrl+click** as
+`Left+Control` (not `Button::Right`), `update` also opens the menu when `ActivateTab` /
+`FocusPane` arrive with `modifiers.control()` held — so the menu is reachable without a
+two-button mouse. **Rename** (`Tab.title` override + `state.renaming`) shows a focused
+field under the strip; `Tab::label()` is the one place that resolves a tab's display name
+(custom title → program/OSC title → shell name). `split_focused` spawns the shell; its spawn-free core
 `split_with(dir, term)` is what the headless tests drive. The focus border only renders
 when a tab has **more than one pane** — a lone pane shows none.
 

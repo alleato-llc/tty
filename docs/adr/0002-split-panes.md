@@ -51,6 +51,10 @@ the common case is unchanged.
   strip is always shown** (even with a single tab) so a tab is always right-clickable.
   Phosphor only captures the left button (selection) when mouse-reporting is off, so the
   right-click reaches the `mouse_area`; when an app enables mouse-reporting it goes there.
+  macOS delivers a **Ctrl+click** as `Left+Control` rather than `Button::Right`, so
+  `update` also opens the menu when `ActivateTab` / `FocusPane` arrive with Control held
+  — the menu is reachable without a two-button mouse. The **tab menu** also offers
+  **Rename tab** (a `Tab.title` override edited in a focused field under the strip).
 
 ## Consequences
 

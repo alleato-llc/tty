@@ -56,6 +56,7 @@ fn headless(n: usize) -> Tty {
         focused: true,
         pointer: iced::Point::ORIGIN,
         menu: None,
+        renaming: None,
     }
 }
 
@@ -297,6 +298,58 @@ fn right_clicking_a_tab_activates_it_and_opens_the_tab_menu() {
         tty.menu.map(|(k, _)| k),
         Some(MenuKind::Tab),
         "and opens the tab menu"
+    );
+}
+
+#[test]
+fn ctrl_click_opens_the_menu_instead_of_activating() {
+    // macOS secondary-click arrives as Left+Control, so Ctrl+click must open the menu.
+    let mut tty = headless(2);
+    tty.active = 0;
+    tty.modifiers = Modifiers::CTRL;
+    let _ = update(&mut tty, Message::ActivateTab(1));
+    assert_eq!(
+        tty.menu.map(|(k, _)| k),
+        Some(MenuKind::Tab),
+        "ctrl+click a tab opens its menu"
+    );
+    // A plain click still just activates.
+    tty.close_menu();
+    tty.modifiers = Modifiers::default();
+    let _ = update(&mut tty, Message::ActivateTab(1));
+    assert_eq!(tty.active, 1);
+    assert!(tty.menu.is_none(), "a plain click doesn't open a menu");
+}
+
+#[test]
+fn rename_tab_sets_a_custom_label_blank_reverts_escape_cancels() {
+    let mut tty = headless(2);
+    // Rename commits a custom label and closes the editor.
+    let _ = update(&mut tty, Message::StartRename(0));
+    assert!(tty.renaming.is_some(), "the rename editor is open");
+    let _ = update(&mut tty, Message::RenameChanged("build".into()));
+    let _ = update(&mut tty, Message::RenameSubmit);
+    assert_eq!(tty.tabs[0].title.as_deref(), Some("build"));
+    assert_eq!(tty.tabs[0].label(), "build");
+    assert!(tty.renaming.is_none());
+
+    // A blank name clears the override (back to the auto label).
+    let _ = update(&mut tty, Message::StartRename(0));
+    let _ = update(&mut tty, Message::RenameChanged("   ".into()));
+    let _ = update(&mut tty, Message::RenameSubmit);
+    assert_eq!(tty.tabs[0].title, None, "blank reverts to the auto label");
+
+    // Escape cancels, leaving the name untouched.
+    tty.tabs[0].title = Some("keep".into());
+    let _ = update(&mut tty, Message::StartRename(0));
+    let _ = update(&mut tty, Message::RenameChanged("discard".into()));
+    let esc = Key::Named(iced::keyboard::key::Named::Escape);
+    let _ = update(&mut tty, Message::Key(esc, Modifiers::default()));
+    assert!(tty.renaming.is_none(), "escape closes the editor");
+    assert_eq!(
+        tty.tabs[0].title.as_deref(),
+        Some("keep"),
+        "the name is unchanged on cancel"
     );
 }
 

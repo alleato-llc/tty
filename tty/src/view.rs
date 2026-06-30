@@ -15,6 +15,11 @@ pub fn search_id() -> iced::advanced::widget::Id {
     iced::advanced::widget::Id::new("tty-search")
 }
 
+/// The rename field's text-input id (so "Rename tab" can focus it).
+pub fn rename_id() -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::new("tty-rename")
+}
+
 pub fn view(state: &Tty) -> Element<'_, Message> {
     // Unfocused-window transparency: fade every surface + text by the same factor so
     // the whole window goes translucent uniformly (opaque while focused / by default).
@@ -34,19 +39,9 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             .tabs
             .iter()
             .map(|tab| {
-                // Label from the focused pane (OSC 0/2 title, else the shell name); a •
+                // A user-set name, else the focused pane's program/shell title; a •
                 // marks unseen activity in any of the tab's panes.
-                let title = tab
-                    .panes
-                    .get(tab.focus)
-                    .map(|term| {
-                        term.screen
-                            .lock()
-                            .title
-                            .clone()
-                            .unwrap_or_else(|| term.title.clone())
-                    })
-                    .unwrap_or_default();
+                let title = tab.label();
                 let activity = tab.panes.iter().any(|(_, t)| t.activity);
                 Tab::new(if activity {
                     format!("• {title}")
@@ -65,6 +60,25 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             Message::TabRightClick, // right-click a tab → split context menu
             Message::NewTab,
         ));
+    }
+
+    // Rename bar (from the tab menu): a focused field, prefilled with the current name.
+    // Enter commits, Esc cancels.
+    if let Some((_, draft)) = &state.renaming {
+        let field = text_field("Tab name…", draft, Message::RenameChanged)
+            .id(rename_id())
+            .on_submit(Message::RenameSubmit)
+            .size(13);
+        root = root.push(
+            container(
+                row![text("Rename tab").size(12).color(t.muted), field,]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([4, 6])
+            .width(Length::Fill)
+            .style(move |_| container::background(t.surface)),
+        );
     }
 
     // The active tab's panes. A tab is a single pane until the user splits it; the
@@ -175,9 +189,13 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         use crate::state::MenuKind;
         use iced::widget::pane_grid::Direction;
         let mut items: Vec<MenuItem<Message>> = Vec::new();
-        // A tab menu leads with "New tab"; both kinds carry the four split directions.
+        // A tab menu leads with tab actions; both kinds carry the four split directions.
         if kind == MenuKind::Tab {
             items.push(MenuItem::shortcut("New tab", "⌘T", Message::NewTab));
+            items.push(MenuItem::action(
+                "Rename tab…",
+                Message::StartRename(state.active),
+            ));
             items.push(MenuItem::separator());
         }
         items.push(MenuItem::shortcut(
@@ -356,24 +374,28 @@ fn palette_section(state: &Tty) -> Element<'_, Message> {
 }
 
 fn status_text(state: &Tty) -> (String, String) {
-    let Some(term) = state.active_term() else {
+    let Some(tab) = state.tabs.get(state.active) else {
         return (String::new(), String::new());
     };
-    let (cols, rows, title) = {
-        let s = term.screen.lock();
-        (s.cols, s.rows, s.title.clone())
+    let (cols, rows) = match tab.focused() {
+        Some(term) => {
+            let s = term.screen.lock();
+            (s.cols, s.rows)
+        }
+        None => (0, 0),
     };
     let tabs = if state.tabs.len() > 1 {
         format!(" · {} tabs", state.tabs.len())
     } else {
         String::new()
     };
-    let panes = match state.tabs.get(state.active).map(|t| t.panes.len()) {
-        Some(n) if n > 1 => format!(" · {n} panes"),
-        _ => String::new(),
+    let panes = if tab.panes.len() > 1 {
+        format!(" · {} panes", tab.panes.len())
+    } else {
+        String::new()
     };
     (
-        title.unwrap_or_else(|| term.title.clone()),
+        tab.label(),
         format!("{cols}×{rows}{tabs}{panes} · {}px", state.font_size as u32),
     )
 }
