@@ -107,6 +107,11 @@ pub struct Tty {
     pub base16_input: String,
     /// Whether the window currently has focus (drives the unfocused-opacity effect).
     pub focused: bool,
+    /// Last known cursor position (window-relative), used to anchor the right-click menu.
+    pub pointer: iced::Point,
+    /// When `Some`, the pane context menu is open, anchored at this point. It acts on the
+    /// active tab's focused pane (a right-click focuses/activates its target first).
+    pub pane_menu: Option<iced::Point>,
 }
 
 impl Tty {
@@ -135,9 +140,30 @@ impl Tty {
             settings_section: 0,
             base16_input: String::new(),
             focused: true,
+            pointer: iced::Point::ORIGIN,
+            pane_menu: None,
         };
         tty.new_tab();
         tty
+    }
+
+    /// Open the pane context menu for a clicked pane: focus it, then anchor the menu at
+    /// the current pointer.
+    pub fn open_pane_menu(&mut self, pane: pane_grid::Pane) {
+        self.focus_pane(pane);
+        self.pane_menu = Some(self.pointer);
+    }
+
+    /// Open the pane context menu from a right-clicked tab: activate the tab, then anchor
+    /// the menu at the current pointer (it acts on that tab's focused pane).
+    pub fn open_tab_menu(&mut self, idx: usize) {
+        self.activate(idx);
+        self.pane_menu = Some(self.pointer);
+    }
+
+    /// Dismiss the pane context menu.
+    pub fn close_menu(&mut self) {
+        self.pane_menu = None;
     }
 
     /// The whole-window opacity to render with right now: opaque while focused, the

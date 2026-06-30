@@ -67,8 +67,9 @@ Thin glue, mirroring `fed`'s module shape:
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. Everything else becomes PTY input via `phosphor::input`.
 - **`view`** — the `rime` `tabs` strip (only when >1 tab), a `pane_grid` over the active
-  tab's panes (each pane a `phosphor` terminal in a container whose border turns the
-  accent color when focused), and a `rime` `status_bar`.
+  tab's panes (each pane a `phosphor` terminal; the focused one's border turns accent
+  only when the tab has >1 pane), and a `rime` `status_bar`. A right-click on a pane or
+  tab opens a `rime` `context_menu` (split / close) anchored at the tracked pointer.
 - **`subscription`** — key events + **one always-on output stream** fed by
   `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
 - **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome

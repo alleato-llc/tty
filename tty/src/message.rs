@@ -15,11 +15,23 @@ pub enum Message {
     Select(pane_grid::Pane, Option<String>),
     /// Bytes a pane's terminal widget produced (mouse reporting) to send to its PTY.
     PtyBytes(pane_grid::Pane, Vec<u8>),
-    /// Focus the pane that was clicked. (Split / focus-move / close are keyboard chords
+    /// Focus the pane that was clicked. (Keyboard split / focus-move / close are chords
     /// handled directly in `update::handle_key`, like the other ⌘ shortcuts.)
     FocusPane(pane_grid::Pane),
     /// Drag-resize a split divider.
     ResizeSplit(pane_grid::ResizeEvent),
+    /// The cursor moved (window-relative) — tracked so a right-click can anchor a menu.
+    PointerMoved(iced::Point),
+    /// Right-click on a pane — open the split context menu over it.
+    PaneRightClick(pane_grid::Pane),
+    /// Right-click on a tab — open the split context menu for that tab.
+    TabRightClick(usize),
+    /// A "Split <dir>" context-menu item was chosen.
+    Split(pane_grid::Direction),
+    /// The "Close pane" context-menu item was chosen.
+    ClosePane,
+    /// Dismiss the pane context menu (an item was chosen, or a click landed outside).
+    CloseMenu,
     /// A clipboard read for ⌘V resolved — paste into the active shell.
     Pasted(Option<String>),
     /// The `⌘F` find query changed.

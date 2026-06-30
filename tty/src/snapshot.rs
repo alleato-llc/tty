@@ -63,6 +63,8 @@ fn populated() -> Tty {
         settings_section: 0,
         base16_input: String::new(),
         focused: true,
+        pointer: iced::Point::ORIGIN,
+        pane_menu: None,
     }
 }
 

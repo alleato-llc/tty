@@ -41,8 +41,14 @@ the common case is unchanged.
   widget-driven `FocusPane` (click) and `ResizeSplit` (drag) flow through `Message`.
 - **Spawn seam for tests.** `split_focused` spawns the shell; its spawn-free core
   `split_with(dir, term)` lets the headless behavior tests inject a pty-less pane.
-- **Focus affordance.** The focused pane's container border turns the accent color
-  (others use the hairline), and it fades with the rest of the window when unfocused.
+- **Focus affordance.** When a tab has more than one pane, the focused pane's container
+  border turns the accent color (others use the hairline) and fades with the window when
+  unfocused. A lone pane shows no border (no stray accent rectangle).
+- **Right-click menu.** A `mouse_area` per pane (and the tab strip's right-press hook)
+  opens a rime `context_menu` with Split Left/Right/Up/Down + Close pane, anchored at the
+  tracked pointer — the same actions as the chords, for discoverability. Phosphor only
+  captures the left button (selection) when mouse-reporting is off, so the right-click
+  reaches the `mouse_area`; when an app enables mouse-reporting, the click goes to it.
 
 ## Consequences
 

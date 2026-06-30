@@ -50,7 +50,7 @@ cargo clippy --all-targets -- -D warnings
 
 - `⌘T` / `⌘N` new tab · `⌘1`–`⌘9` jump to tab
 - `⌥⌘`+arrows split the focused pane (←/→/↑/↓) · `⌃⌘`+arrows move focus between panes ·
-  drag a divider to resize
+  drag a divider to resize · **right-click** a pane (or tab) for a split menu
 - `⌘W` close the focused pane (the last pane → close the tab; the last tab → quit)
 - `⌘+` / `⌘−` font zoom · `⌘0` reset
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell

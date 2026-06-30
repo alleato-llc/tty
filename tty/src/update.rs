@@ -17,6 +17,20 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::PtyBytes(pane, bytes) => state.write_pane(pane, &bytes),
         Message::FocusPane(pane) => state.focus_pane(pane),
         Message::ResizeSplit(e) => state.resize_split(e.split, e.ratio),
+        Message::PointerMoved(p) => state.pointer = p,
+        Message::PaneRightClick(pane) => state.open_pane_menu(pane),
+        Message::TabRightClick(idx) => state.open_tab_menu(idx),
+        Message::Split(dir) => {
+            state.split_focused(dir);
+            state.close_menu();
+        }
+        Message::ClosePane => {
+            state.close_menu();
+            if !state.close_focused_pane() {
+                return iced::exit();
+            }
+        }
+        Message::CloseMenu => state.close_menu(),
         Message::Pasted(Some(text)) => state.paste(&text),
         Message::Pasted(None) => {}
         Message::SearchChanged(q) => state.search = Some(q),

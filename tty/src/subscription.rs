@@ -37,6 +37,10 @@ pub fn subscription(_state: &Tty) -> Subscription<Message> {
         }
         Event::Window(iced::window::Event::Focused) => Some(Message::Focused(true)),
         Event::Window(iced::window::Event::Unfocused) => Some(Message::Focused(false)),
+        // Track the cursor so a right-click can anchor the pane context menu there.
+        Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+            Some(Message::PointerMoved(position))
+        }
         _ => None,
     });
 

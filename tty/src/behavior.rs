@@ -54,6 +54,8 @@ fn headless(n: usize) -> Tty {
         settings_section: 0,
         base16_input: String::new(),
         focused: true,
+        pointer: iced::Point::ORIGIN,
+        pane_menu: None,
     }
 }
 
@@ -260,6 +262,38 @@ fn closing_a_pane_keeps_the_tab_until_the_last_pane() {
     assert_eq!(tty.tabs.len(), 1);
     // Closing the last pane of the last tab signals exit.
     assert!(!tty.close_focused_pane(), "no panes left anywhere → exit");
+}
+
+#[test]
+fn right_click_focuses_the_pane_and_opens_the_menu_at_the_pointer() {
+    use iced::widget::pane_grid::Direction;
+    use iced::Point;
+    let mut tty = headless(1);
+    // Two panes; focus the left one, then right-click the right one.
+    tty.split_with(Direction::Right, screen_term("right"));
+    let right = tty.tabs[0].focus;
+    tty.focus_dir(Direction::Left);
+    assert_ne!(tty.tabs[0].focus, right);
+    let _ = update(&mut tty, Message::PointerMoved(Point::new(120.0, 80.0)));
+    let _ = update(&mut tty, Message::PaneRightClick(right));
+    assert_eq!(tty.tabs[0].focus, right, "right-click focuses its pane");
+    assert_eq!(
+        tty.pane_menu,
+        Some(Point::new(120.0, 80.0)),
+        "the menu anchors at the last pointer position"
+    );
+    // Dismissing clears it.
+    let _ = update(&mut tty, Message::CloseMenu);
+    assert!(tty.pane_menu.is_none());
+}
+
+#[test]
+fn right_clicking_a_tab_activates_it_and_opens_the_menu() {
+    let mut tty = headless(2);
+    tty.active = 0;
+    let _ = update(&mut tty, Message::TabRightClick(1));
+    assert_eq!(tty.active, 1, "right-clicking a tab activates it");
+    assert!(tty.pane_menu.is_some(), "and opens the split menu");
 }
 
 #[test]

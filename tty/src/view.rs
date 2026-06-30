@@ -1,10 +1,10 @@
-use iced::widget::{column, container, pane_grid, row, scrollable, text, Column};
+use iced::widget::{column, container, mouse_area, pane_grid, row, scrollable, text, Column};
 use iced::{Border, Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, labeled, section, select, slider, status_bar, stepper, tabs, text_field,
-    tooltip, Tab, TooltipPosition,
+    button, color_field, context_menu, labeled, section, select, slider, status_bar, stepper, tabs,
+    text_field, tooltip, MenuItem, Tab, TooltipPosition,
 };
 
 use crate::message::Message;
@@ -62,7 +62,7 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             Message::ActivateTab,
             Message::CloseTab,
             Message::HoverTab,
-            |_| Message::Tick, // no per-tab context menu yet
+            Message::TabRightClick, // right-click a tab → split context menu
             Message::NewTab,
         ));
     }
@@ -78,6 +78,9 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             let font = state.font;
             let size = state.font_size;
             let search = state.search.clone();
+            // A focus border only earns its keep when there's more than one pane to tell
+            // apart — a single pane shows none (no stray accent rectangle).
+            let multi = tab.panes.len() > 1;
             pane_grid(&tab.panes, move |pane, term, _maximized| {
                 let is_focused = pane == focus && window_focused;
                 let term_widget = phosphor::terminal(
@@ -91,18 +94,28 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                     move |b| Message::PtyBytes(pane, b),
                 )
                 .find(search.clone());
-                // An accent border marks the focused pane so it's clear where typing goes.
+                // When split, an accent border marks the focused pane so it's clear where
+                // typing goes; the others get a hairline.
                 let border_color = if is_focused { accent } else { hairline };
-                pane_grid::Content::new(container(term_widget).padding(6).style(move |_| {
-                    container::Style {
-                        border: Border {
+                let bordered = container(term_widget).padding(6).style(move |_| {
+                    let border = if multi {
+                        Border {
                             color: border_color,
                             width: 1.0,
                             radius: 0.0.into(),
-                        },
+                        }
+                    } else {
+                        Border::default()
+                    };
+                    container::Style {
+                        border,
                         ..container::background(bg)
                     }
-                }))
+                });
+                // Right-click anywhere in the pane opens the split context menu over it.
+                pane_grid::Content::new(
+                    mouse_area(bordered).on_right_press(Message::PaneRightClick(pane)),
+                )
             })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -141,7 +154,7 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         .style(move |_| container::background(bg));
 
     // The settings panel floats over the terminal when ⌘, is open.
-    if state.show_settings {
+    let base: Element<'_, Message> = if state.show_settings {
         rime::widgets::settings(
             chrome,
             &["Appearance", "Palette"],
@@ -153,6 +166,23 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         )
     } else {
         chrome.into()
+    };
+
+    // The right-click pane menu (split / close) floats above everything, anchored at the
+    // click. Its actions target the active tab's focused pane.
+    if let Some(at) = state.pane_menu {
+        use iced::widget::pane_grid::Direction;
+        let items = [
+            MenuItem::shortcut("Split left", "⌥⌘←", Message::Split(Direction::Left)),
+            MenuItem::shortcut("Split right", "⌥⌘→", Message::Split(Direction::Right)),
+            MenuItem::shortcut("Split up", "⌥⌘↑", Message::Split(Direction::Up)),
+            MenuItem::shortcut("Split down", "⌥⌘↓", Message::Split(Direction::Down)),
+            MenuItem::separator(),
+            MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane),
+        ];
+        context_menu(base, &items, at, Message::CloseMenu)
+    } else {
+        base
     }
 }
 
