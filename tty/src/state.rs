@@ -123,7 +123,7 @@ impl Tty {
 
     /// Set the unfocused-window opacity (`1.0` = off). Persisted.
     pub fn set_unfocused_opacity(&mut self, opacity: f32) {
-        self.settings.unfocused_opacity = Some(opacity.clamp(0.3, 1.0));
+        self.settings.unfocused_opacity = Some(opacity.clamp(crate::settings::MIN_OPACITY, 1.0));
         self.settings.save();
     }
 

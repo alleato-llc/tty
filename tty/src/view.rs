@@ -4,7 +4,7 @@ use iced::{Element, Length};
 use rime::theme;
 use rime::widgets::{
     button, color_field, labeled, section, select, slider, status_bar, stepper, tabs, text_field,
-    Tab,
+    tooltip, Tab, TooltipPosition,
 };
 
 use crate::message::Message;
@@ -172,16 +172,24 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             Message::FontSizeStep(1.0),
         ),
         // Transparency that kicks in only when the window loses focus. Shown as a
-        // 0–70% transparency amount; stored as the resulting opacity (1 − amount).
+        // 0–95% transparency amount; stored as the resulting opacity (1 − amount).
         section("Window"),
         {
             let transparency = 1.0 - state.settings.unfocused_opacity();
-            slider(
-                "Transparency (unfocused)",
-                0.0..=0.7,
+            let max = 1.0 - crate::settings::MIN_OPACITY;
+            let control = slider(
+                "Transparency On Blur",
+                0.0..=max,
                 transparency,
                 format!("{}%", (transparency * 100.0).round() as i32),
                 |t| Message::SetUnfocusedOpacity(1.0 - t),
+            );
+            tooltip(
+                control,
+                "Fades the whole window when it loses focus, so what's behind it \
+                 shows through. At 0% it stays opaque. The window is always solid \
+                 while focused.",
+                TooltipPosition::Top,
             )
         },
     ]

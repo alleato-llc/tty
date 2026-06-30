@@ -11,6 +11,10 @@ use rime::theme::{color_hex, parse_color};
 
 use phosphor::TerminalStyle;
 
+/// The lowest unfocused opacity we allow (5% → 95% transparency). A floor keeps the
+/// window from fading to fully invisible and unrecoverable.
+pub const MIN_OPACITY: f32 = 0.05;
+
 /// A custom terminal palette as hex strings (so it round-trips through JSON cleanly).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
@@ -59,10 +63,12 @@ impl Settings {
         }
     }
 
-    /// The unfocused-window terminal opacity (`1.0` = opaque/off), clamped so the
-    /// window can never become fully invisible.
+    /// The unfocused-window opacity (`1.0` = opaque/off), clamped so the window can
+    /// never become fully invisible (down to 5% opacity / 95% transparency).
     pub fn unfocused_opacity(&self) -> f32 {
-        self.unfocused_opacity.unwrap_or(1.0).clamp(0.3, 1.0)
+        self.unfocused_opacity
+            .unwrap_or(1.0)
+            .clamp(MIN_OPACITY, 1.0)
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).

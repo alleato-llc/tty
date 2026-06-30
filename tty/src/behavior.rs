@@ -189,10 +189,14 @@ fn unfocused_opacity_applies_only_when_unfocused() {
     assert_eq!(tty.window_opacity(), 0.6, "translucent while unfocused");
     let _ = update(&mut tty, Message::Focused(true));
     assert_eq!(tty.window_opacity(), 1.0, "always opaque while focused");
-    // Never fully invisible.
+    // Never fully invisible — clamped to the minimum opacity (95% max transparency).
     tty.settings.unfocused_opacity = Some(0.0);
     tty.focused = false;
-    assert!(tty.window_opacity() >= 0.3, "clamped away from invisible");
+    assert_eq!(
+        tty.window_opacity(),
+        crate::settings::MIN_OPACITY,
+        "clamped away from invisible"
+    );
 }
 
 #[test]
