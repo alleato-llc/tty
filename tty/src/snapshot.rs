@@ -17,7 +17,7 @@ use cathode::screen::TerminalScreen;
 
 use crate::state::{MenuKind, Tab, Term, Tty, DEFAULT_FONT_SIZE};
 use crate::theme::Theme;
-use crate::view::view;
+use crate::view::root_view;
 
 /// A tab wrapping a screen pre-painted by feeding `bytes` through the parser (no shell).
 fn painted_term(title: &str, cols: usize, rows: usize, bytes: &[u8]) -> Term {
@@ -66,14 +66,27 @@ fn populated() -> Tty {
         pointer: iced::Point::ORIGIN,
         menu: None,
         renaming: None,
+        main_window: Some(iced::window::Id::unique()),
+        focused_window: None,
+        detached: std::collections::HashMap::new(),
+        detach_origin: std::collections::HashMap::new(),
+        tab_drag: None,
+        window_bounds: std::collections::HashMap::new(),
+        last_detached_move: None,
     }
+}
+
+/// Render the main (tabbed) chrome of `tty` for a snapshot — the daemon's `root_view`
+/// keyed on the main window.
+fn main_chrome(tty: &Tty) -> iced::Element<'_, crate::message::Message> {
+    root_view(tty, tty.main_window.expect("populated sets a main window"))
 }
 
 #[test]
 fn terminal_view() {
     let tty = populated();
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
-    let mut sim = iced_test::Simulator::new(view(&tty));
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
         .snapshot(&crate::state::theme(&tty))
         .expect("render snapshot");
@@ -92,7 +105,9 @@ fn split_pane_view() {
     // Split the active tab into two side-by-side panes (the new one, on the right, takes
     // focus and gets the accent border).
     let mut tty = populated();
+    let win = tty.main_window.unwrap();
     tty.split_with(
+        win,
         Direction::Right,
         painted_term(
             "zsh",
@@ -102,7 +117,7 @@ fn split_pane_view() {
         ),
     );
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
-    let mut sim = iced_test::Simulator::new(view(&tty));
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
         .snapshot(&crate::state::theme(&tty))
         .expect("render snapshot");
@@ -121,7 +136,7 @@ fn rename_bar_view() {
     let mut tty = populated();
     tty.renaming = Some((0, "deploy".to_string()));
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
-    let mut sim = iced_test::Simulator::new(view(&tty));
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
         .snapshot(&crate::state::theme(&tty))
         .expect("render snapshot");
@@ -135,6 +150,31 @@ fn rename_bar_view() {
 }
 
 #[test]
+fn detached_window_view() {
+    // A tab torn off into its own window: just its terminal, a slim strip with the
+    // Reattach button, and a status bar — no tab strip.
+    let mut tty = populated();
+    let tab = tty.tabs.remove(0);
+    tty.active = 0;
+    let win = iced::window::Id::unique();
+    tty.detached.insert(win, tab);
+    tty.detach_origin.insert(win, 0);
+    tty.focused_window = Some(win);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(root_view(&tty, win));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-detached.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-detached` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn tab_context_menu_view() {
     // Right-clicking a tab opens its menu (new tab / split / close tab).
     let mut tty = populated();
@@ -142,7 +182,7 @@ fn tab_context_menu_view() {
     tty.pointer = at;
     tty.menu = Some((MenuKind::Tab, at));
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
-    let mut sim = iced_test::Simulator::new(view(&tty));
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
         .snapshot(&crate::state::theme(&tty))
         .expect("render snapshot");

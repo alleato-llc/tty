@@ -69,15 +69,33 @@ Thin glue, mirroring `fed`'s module shape:
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. Everything else becomes PTY input via `phosphor::input`.
-- **`view`** — the `rime` `tabs` strip (shown only with >1 tab, matching fed / fed-ide),
-  a `pane_grid` over the active tab's panes (each pane a `phosphor` terminal; the focused
-  one's border turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A
-  right-click (or `⌃`-click, macOS's secondary-click) opens a `rime` `context_menu` at
-  the tracked pointer — a pane menu (split + close pane) or a tab menu (new tab + rename
-  + split + close tab), per `state.menu`. "Rename tab" shows a focused field under the
-  strip; `Tab::label()` resolves a tab's display name (custom → program title → shell).
-- **`subscription`** — key events + **one always-on output stream** fed by
-  `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
+- **`view`** — window-aware: `root_view(state, window)` routes a **detached** window to a
+  lean `detached_view` (the tab's `pane_grid` + a Reattach button + a status bar) and every
+  other window to `main_view` — the `rime` `tabs` strip (shown only with >1 tab, matching
+  fed / fed-ide), a `pane_grid` over the active tab's panes (each pane a `phosphor`
+  terminal; the focused one's border turns accent only when the tab has >1 pane), and a
+  `rime` `status_bar`. A right-click (or `⌃`-click, macOS's secondary-click) opens a `rime`
+  `context_menu` at the tracked pointer — a pane menu (split + close pane) or a tab menu
+  (new tab + rename + **detach** + split + close tab), per `state.menu`. "Rename tab" shows
+  a focused field under the strip; `Tab::label()` resolves a tab's display name (custom →
+  program title → shell). Pane messages carry the originating `window::Id` so a click /
+  resize / selection routes to the right tab.
+- **`subscription`** — key events + per-window geometry (`Focused`/`Resized`/`Moved` via
+  `listen_with`'s window id) + `window::close_events` + **one always-on output stream** fed
+  by `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
+  While a detached window is settling after a drag, a short-lived timer polls the drag-dock
+  debounce.
+
+## Windows (detachable tabs)
+
+tty runs on iced's **`daemon`** model (not `application`) so it can open extra OS windows
+for **detached tabs** (ADR 0003): a daemon's `view`/`title`/`theme` take a `window::Id`,
+letting each window render different content. `boot` opens the main window and records
+`Tty::main_window`. A whole `Tab` (its owned `pane_grid::State<Term>`) is the detachable
+unit — detaching moves it out of `tabs` into `detached: HashMap<window::Id, Tab>` and back
+on reattach; `reap_dead`/`drain_effects` walk both. A daemon keeps running after its last
+window closes, so closing the **main** window calls `iced::exit()` (tearing down every
+detached window + shell). Detached terminals are **ephemeral** — no session is persisted.
 - **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome
   `Palette` with a `phosphor::TerminalStyle`. Named themes come from rime's shared
   `builtin_themes()` catalog (8, the same list fed-ide shows), each with a base16 ANSI

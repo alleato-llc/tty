@@ -52,8 +52,13 @@ cargo clippy --all-targets -- -D warnings
 - `⌥⌘`+arrows split the focused pane (←/→/↑/↓) · `⌃⌘`+arrows move focus between panes ·
   drag a divider to resize
 - **right-click** (or **⌃-click**) a pane for a split menu, or a **tab** for
-  new-tab / rename / split / close-tab
-- `⌘W` close the focused pane (the last pane → close the tab; the last tab → quit)
+  new-tab / rename / **detach** / split / close-tab
+- **detach a tab into its own window**: right-click → **Detach Tab**, or drag a tab down
+  out of the strip. Dock it back with the **Reattach** button, by closing the window, or
+  by dragging the window onto the tab strip. (Detached terminals are ephemeral — they
+  close with the app.)
+- `⌘W` close the focused pane (in the main window the last pane → close the tab → quit; in
+  a detached window the last pane → close the window)
 - `⌘+` / `⌘−` font zoom · `⌘0` reset
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell
 - line editing: `⌥←/→` move by word · `⌘←/→` to line start/end · `⌥⌫` delete a word ·

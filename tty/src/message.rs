@@ -9,17 +9,20 @@ pub enum Message {
     Key(Key, Modifiers),
     /// Keyboard modifiers changed.
     ModifiersChanged(Modifiers),
-    /// A pane's terminal widget reports the grid that now fits (pane, cols, rows).
-    Resize(pane_grid::Pane, usize, usize),
-    /// A pane's selection changed (drag) — cached for ⌘C copy when it's the focused pane.
-    Select(pane_grid::Pane, Option<String>),
+    /// A pane's terminal widget reports the grid that now fits (window, pane, cols, rows).
+    /// The window id disambiguates panes across tabs/windows (`pane_grid::Pane` ids are
+    /// only unique within one `pane_grid::State`).
+    Resize(iced::window::Id, pane_grid::Pane, usize, usize),
+    /// A pane's selection changed (drag) — cached for ⌘C copy when it's the focused pane
+    /// of the reporting window's tab.
+    Select(iced::window::Id, pane_grid::Pane, Option<String>),
     /// Bytes a pane's terminal widget produced (mouse reporting) to send to its PTY.
-    PtyBytes(pane_grid::Pane, Vec<u8>),
+    PtyBytes(iced::window::Id, pane_grid::Pane, Vec<u8>),
     /// Focus the pane that was clicked. (Keyboard split / focus-move / close are chords
     /// handled directly in `update::handle_key`, like the other ⌘ shortcuts.)
-    FocusPane(pane_grid::Pane),
+    FocusPane(iced::window::Id, pane_grid::Pane),
     /// Drag-resize a split divider.
-    ResizeSplit(pane_grid::ResizeEvent),
+    ResizeSplit(iced::window::Id, pane_grid::ResizeEvent),
     /// The cursor moved (window-relative) — tracked so a right-click can anchor a menu.
     PointerMoved(iced::Point),
     /// Right-click on a pane — open the split context menu over it.
@@ -54,8 +57,6 @@ pub enum Message {
     HoverTab(Option<usize>),
     /// Periodic redraw, so PTY output appears.
     Tick,
-    /// The window was resized to this height (for the status bar's edge band).
-    WindowResized(f32),
     /// Open/close the settings panel (`⌘,`).
     ToggleSettings,
     /// Switch the settings panel to section `i` (Appearance / Palette).
@@ -80,4 +81,25 @@ pub enum Message {
     SetUnfocusedOpacity(f32),
     /// Toggle inking the active tab with the accent color.
     SetTabHighlight(bool),
+
+    // ---- multi-window: detachable tabs ----
+    /// Detach the main strip's tab `idx` into its own OS window.
+    DetachTab(usize),
+    /// A detached window's "Reattach" button — dock its tab back into the main strip.
+    ReattachTab(iced::window::Id),
+    /// A window gained focus — route the keyboard to that window's tab.
+    WindowFocused(iced::window::Id),
+    /// A window finished closing — exit on the main window, reattach a detached one.
+    WindowClosed(iced::window::Id),
+    /// A window moved (drives the drag-to-dock bounds + release debounce).
+    WindowMoved(iced::window::Id, iced::Point),
+    /// A window was resized (the main window's height feeds the status bar's edge band).
+    WindowResizedAt(iced::window::Id, iced::Size),
+    /// A fetched on-screen window position (the initial placement `Moved` never reports).
+    WindowPosition(iced::window::Id, Option<iced::Point>),
+    /// Poll the drag-release debounce for drag-to-dock (only armed while a detached
+    /// window is settling).
+    CheckDragReattach,
+    /// Global left-button release — completes a tab tear-off drag, if one is armed.
+    PointerReleased,
 }

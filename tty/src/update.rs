@@ -7,29 +7,34 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
     match message {
         Message::Key(key, mods) => return handle_key(state, key, mods),
         Message::ModifiersChanged(mods) => state.modifiers = mods,
-        Message::Resize(pane, cols, rows) => state.resize_pane(pane, cols, rows),
-        Message::Select(pane, text) => {
-            // Only the focused pane's selection feeds ⌘C; ignore stray drags elsewhere.
-            if state.tabs.get(state.active).map(|t| t.focus) == Some(pane) {
+        Message::Resize(win, pane, cols, rows) => state.resize_pane(win, pane, cols, rows),
+        Message::Select(win, pane, text) => {
+            // Only the focused pane of the reporting window's tab feeds ⌘C; ignore stray
+            // drags elsewhere (incl. background windows).
+            if state.tab_for(win).map(|t| t.focus) == Some(pane) {
                 state.selection = text;
             }
         }
-        Message::PtyBytes(pane, bytes) => state.write_pane(pane, &bytes),
+        Message::PtyBytes(win, pane, bytes) => state.write_pane(win, pane, &bytes),
         // A plain click focuses the pane; Ctrl+click is macOS's secondary-click (it
-        // arrives as Left+Control, not a right button), so treat it as "open the menu".
-        Message::FocusPane(pane) => {
-            if state.modifiers.control() {
+        // arrives as Left+Control, not a right button), so treat it as "open the menu" —
+        // but only in the main window (detached windows carry no context menu in v1).
+        Message::FocusPane(win, pane) => {
+            if state.modifiers.control() && state.main_window == Some(win) {
                 state.open_pane_menu(pane);
             } else {
-                state.focus_pane(pane);
+                state.focus_pane(win, pane);
             }
         }
-        Message::ResizeSplit(e) => state.resize_split(e.split, e.ratio),
+        Message::ResizeSplit(win, e) => state.resize_split(win, e.split, e.ratio),
         Message::PointerMoved(p) => state.pointer = p,
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
         Message::TabRightClick(idx) => state.open_tab_menu(idx),
         Message::Split(dir) => {
-            state.split_focused(dir);
+            // The context menu is main-window only; split the main active tab.
+            if let Some(main) = state.main_window {
+                state.split_focused(main, dir);
+            }
             state.close_menu();
         }
         Message::ClosePane => {
@@ -46,7 +51,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::RenameChanged(text) => state.set_rename_draft(text),
         Message::RenameSubmit => state.commit_rename(),
-        Message::Pasted(Some(text)) => state.paste(&text),
+        Message::Pasted(Some(text)) => {
+            // ⌘V resolved — paste into whichever window held focus when it was pressed.
+            if let Some(win) = state.keyboard_window() {
+                state.paste(win, &text);
+            }
+        }
         Message::Pasted(None) => {}
         Message::SearchChanged(q) => state.search = Some(q),
         Message::SearchSubmit => state.search = None,
@@ -60,27 +70,33 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 return iced::exit();
             }
         }
-        // Plain click activates the tab; Ctrl+click (macOS secondary-click) opens its menu.
+        // Plain click activates the tab and arms a possible tear-off detach; Ctrl+click
+        // (macOS secondary-click) opens its menu.
         Message::ActivateTab(idx) => {
             if state.modifiers.control() {
                 state.open_tab_menu(idx);
             } else {
                 state.activate(idx);
+                state.tab_drag = Some((idx, state.pointer));
             }
         }
         Message::HoverTab(i) => state.hovered_tab = i,
         Message::Tick => {
             // Surface any OSC 52 clipboard request and light background-activity dots.
             let clip = state.drain_effects();
-            // Reap tabs whose shell exited (`exit`); quit when the last one goes.
-            if !state.reap_dead() {
+            // Reap tabs whose shell exited across all windows; close any detached window
+            // whose tab fully died, and quit when nothing remains anywhere.
+            let (any, closed) = state.reap_dead();
+            let mut tasks: Vec<iced::Task<Message>> =
+                closed.into_iter().map(iced::window::close).collect();
+            if !any {
                 return iced::exit();
             }
             if let Some(text) = clip {
-                return iced::clipboard::write(text);
+                tasks.push(iced::clipboard::write(text));
             }
+            return iced::Task::batch(tasks);
         }
-        Message::WindowResized(h) => state.window_height = h,
         Message::ToggleSettings => state.toggle_settings(),
         Message::SettingsSection(i) => state.settings_section = i,
         Message::SetTheme(name) => state.set_theme(&name),
@@ -93,6 +109,58 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::Focused(f) => state.focused = f,
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
+
+        // ---- multi-window: detachable tabs (ADR 0003) ----
+        Message::DetachTab(idx) => {
+            if let Some(task) = state.detach_tab(idx) {
+                return task;
+            }
+        }
+        Message::ReattachTab(id) => {
+            // Dock the tab back, THEN close its window. Removing it from `detached` first
+            // means the ensuing `WindowClosed` finds nothing to reattach (no-op).
+            state.reattach_window(id);
+            return iced::window::close(id);
+        }
+        Message::WindowFocused(id) => {
+            // Any tty window gaining focus makes the app "focused" (drives the global
+            // unfocused-opacity fade) and routes the keyboard to that window's tab.
+            state.focused = true;
+            state.focus_window(id);
+        }
+        Message::WindowMoved(id, pos) => crate::detach_drag::on_moved(state, id, pos),
+        Message::WindowResizedAt(id, size) => {
+            if state.main_window == Some(id) {
+                state.window_height = size.height;
+            }
+            crate::detach_drag::on_resized(state, id, size);
+        }
+        Message::WindowPosition(id, pos) => {
+            if let Some(p) = pos {
+                crate::detach_drag::set_position(state, id, p);
+            }
+        }
+        Message::CheckDragReattach => {
+            if let crate::detach_drag::Settle::Reattach(id) = crate::detach_drag::poll_settle(state)
+            {
+                state.reattach_window(id);
+                return iced::window::close(id);
+            }
+        }
+        Message::WindowClosed(id) => {
+            // The daemon keeps running after its last window closes, so closing the main
+            // window must explicitly exit (tearing down every detached window + its
+            // shell). An OS-close of a detached window docks its tab back.
+            if state.main_window == Some(id) {
+                return iced::exit();
+            }
+            state.reattach_window(id);
+        }
+        Message::PointerReleased => {
+            if let Some(task) = state.finish_tab_drag() {
+                return task;
+            }
+        }
     }
     iced::Task::none()
 }
@@ -114,6 +182,13 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
             return iced::Task::none();
         }
     }
+    // Chords and typing act on the focused window's tab (the main strip, or a detached
+    // window). `keyboard_window` falls back to the main window.
+    let Some(win) = state.keyboard_window() else {
+        return iced::Task::none();
+    };
+    let is_main = state.main_window == Some(win);
+
     // Pane chords: ⌥⌘ + arrow splits the focused pane toward that direction; ⌃⌘ + arrow
     // moves focus to the neighbour. Checked before the PTY fallthrough so the arrows
     // don't also reach the shell.
@@ -121,11 +196,11 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
         if let Key::Named(named) = &key {
             if let Some(dir) = arrow_direction(*named) {
                 if mods.alt() {
-                    state.split_focused(dir);
+                    state.split_focused(win, dir);
                     return iced::Task::none();
                 }
                 if mods.control() {
-                    state.focus_dir(dir);
+                    state.focus_dir(win, dir);
                     return iced::Task::none();
                 }
             }
@@ -136,22 +211,31 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     if mods.command() {
         if let Key::Character(s) = &key {
             match s.as_str() {
-                "t" | "n" => {
+                // Tab/settings/find chrome lives only in the main window, so a detached
+                // window ignores these (a no-op rather than acting on the hidden strip).
+                "t" | "n" if is_main => {
                     state.new_tab();
                     return iced::Task::none();
                 }
                 "w" => {
-                    if !state.close_focused_pane() {
-                        return iced::exit();
+                    // ⌘W closes the focused pane. In the main window the last pane closes
+                    // the tab → quits; in a detached window the last pane closes the
+                    // window (without reattaching).
+                    if is_main {
+                        if !state.close_focused_pane() {
+                            return iced::exit();
+                        }
+                    } else if let Some(close) = state.close_detached_focused_pane(win) {
+                        return iced::window::close(close);
                     }
                     return iced::Task::none();
                 }
-                // ⌘, opens/closes the settings panel.
-                "," => {
+                // ⌘, opens/closes the settings panel (main window only).
+                "," if is_main => {
                     state.toggle_settings();
                     return iced::Task::none();
                 }
-                // Zoom: ⌘+ / ⌘= grow, ⌘− shrink, ⌘0 reset.
+                // Zoom: ⌘+ / ⌘= grow, ⌘− shrink, ⌘0 reset. Global (one font size).
                 "+" | "=" => {
                     state.zoom(1.0);
                     return iced::Task::none();
@@ -172,17 +256,18 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                         None => iced::Task::none(),
                     };
                 }
-                // ⌘V pastes the system clipboard into the active shell (read is async).
+                // ⌘V pastes the system clipboard into the focused shell (read is async).
                 "v" => return iced::clipboard::read().map(Message::Pasted),
-                // ⌘F toggles the scrollback find bar; opening focuses its field.
-                "f" => {
+                // ⌘F toggles the scrollback find bar (main window only); opening focuses
+                // its field.
+                "f" if is_main => {
                     return if state.toggle_search() {
                         iced::widget::operation::focus(crate::view::search_id())
                     } else {
                         iced::Task::none()
                     };
                 }
-                d if d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
+                d if is_main && d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
                     let n = d.parse::<usize>().unwrap_or(0);
                     if (1..=state.tabs.len()).contains(&n) {
                         state.activate(n - 1);
@@ -194,8 +279,8 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
         }
     }
     // Otherwise the keystroke is terminal input (arrow keys honor the app's DECCKM mode).
-    if let Some(bytes) = phosphor::input::to_bytes(&key, mods, state.active_app_cursor()) {
-        state.write_focused(&bytes);
+    if let Some(bytes) = phosphor::input::to_bytes(&key, mods, state.app_cursor_for(win)) {
+        state.write_focused(win, &bytes);
     }
     iced::Task::none()
 }

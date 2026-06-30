@@ -1,4 +1,6 @@
-use iced::widget::{column, container, mouse_area, pane_grid, row, scrollable, text, Column};
+use iced::widget::{
+    column, container, mouse_area, pane_grid, row, scrollable, text, Column, Space,
+};
 use iced::{Border, Element, Length};
 
 use rime::theme;
@@ -20,7 +22,26 @@ pub fn rename_id() -> iced::advanced::widget::Id {
     iced::advanced::widget::Id::new("tty-rename")
 }
 
-pub fn view(state: &Tty) -> Element<'_, Message> {
+/// The daemon's per-window view: a detached window shows just its tab; every other
+/// window is the full tabbed chrome.
+pub fn root_view(state: &Tty, window: iced::window::Id) -> Element<'_, Message> {
+    match state.detached.get(&window) {
+        Some(tab) => detached_view(state, window, tab),
+        None => main_view(state),
+    }
+}
+
+/// The daemon's per-window title: a detached window takes its tab's label.
+pub fn title(state: &Tty, window: iced::window::Id) -> String {
+    match state.detached.get(&window) {
+        Some(tab) => tab.label(),
+        None => "tty".to_string(),
+    }
+}
+
+/// Render the full tabbed chrome (the main window; detached windows use
+/// [`detached_view`]).
+fn main_view(state: &Tty) -> Element<'_, Message> {
     // Unfocused-window transparency: fade every surface + text by the same factor so
     // the whole window goes translucent uniformly (opaque while focused / by default).
     let op = state.window_opacity();
@@ -91,6 +112,10 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
     // `pane_grid` lays the split tree out, drags its dividers, and reports focus clicks.
     let accent = t.accent;
     let hairline = t.hairline;
+    // The pane closures emit window-tagged messages so a click/resize/selection routes to
+    // the right tab (`pane_grid::Pane` ids collide across tabs). Headless renders set no
+    // main window, so synthesize a throwaway id there.
+    let win = state.main_window.unwrap_or_else(iced::window::Id::unique);
     let body: Element<'_, Message> = match state.tabs.get(state.active) {
         Some(tab) => {
             let focus = tab.focus;
@@ -109,9 +134,9 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                     font,
                     size,
                     is_focused,
-                    move |c, r| Message::Resize(pane, c, r),
-                    move |sel| Message::Select(pane, sel),
-                    move |b| Message::PtyBytes(pane, b),
+                    move |c, r| Message::Resize(win, pane, c, r),
+                    move |sel| Message::Select(win, pane, sel),
+                    move |b| Message::PtyBytes(win, pane, b),
                 )
                 .find(search.clone());
                 // When split, an accent border marks the focused pane so it's clear where
@@ -140,8 +165,8 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .spacing(4)
-            .on_click(Message::FocusPane)
-            .on_resize(8, Message::ResizeSplit)
+            .on_click(move |pane| Message::FocusPane(win, pane))
+            .on_resize(8, move |e| Message::ResizeSplit(win, e))
             .into()
         }
         None => container(text("no terminal").color(t.muted))
@@ -202,6 +227,10 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                 "Rename tab…",
                 Message::StartRename(state.active),
             ));
+            items.push(MenuItem::action(
+                "Detach Tab",
+                Message::DetachTab(state.active),
+            ));
             items.push(MenuItem::separator());
         }
         items.push(MenuItem::shortcut(
@@ -240,6 +269,99 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
     } else {
         base
     }
+}
+
+/// A detached tab in its own window (ADR 0003): just the tab's pane tree, a slim strip
+/// with a **Reattach** button, and a status bar — no tab strip / settings / find / pane
+/// menu (those chrome affordances live only in the main window). Splitting still works
+/// via the ⌥⌘-arrow chords, which route to the focused window.
+fn detached_view<'a>(
+    state: &'a Tty,
+    window: iced::window::Id,
+    tab: &'a crate::state::Tab,
+) -> Element<'a, Message> {
+    let op = state.window_opacity();
+    let _scope = theme::enter(crate::theme::fade_palette(state.theme.palette, op));
+    let t = theme::tokens();
+    let style = crate::theme::fade_style(state.theme.terminal, op);
+    let bg = style.bg;
+    let accent = t.accent;
+    let hairline = t.hairline;
+
+    let focus = tab.focus;
+    let window_focused = state.focused_window == Some(window);
+    let font = state.font;
+    let size = state.font_size;
+    let multi = tab.panes.len() > 1;
+
+    let body = pane_grid(&tab.panes, move |pane, term, _maximized| {
+        let is_focused = pane == focus && window_focused;
+        let term_widget = phosphor::terminal(
+            term.screen.clone(),
+            style,
+            font,
+            size,
+            is_focused,
+            move |c, r| Message::Resize(window, pane, c, r),
+            move |sel| Message::Select(window, pane, sel),
+            move |b| Message::PtyBytes(window, pane, b),
+        )
+        .find(None);
+        let border_color = if is_focused { accent } else { hairline };
+        let bordered = container(term_widget).padding(6).style(move |_| {
+            let border = if multi {
+                Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                }
+            } else {
+                Border::default()
+            };
+            container::Style {
+                border,
+                ..container::background(bg)
+            }
+        });
+        pane_grid::Content::new(bordered)
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .spacing(4)
+    .on_click(move |pane| Message::FocusPane(window, pane))
+    .on_resize(8, move |e| Message::ResizeSplit(window, e));
+
+    // Slim strip: the tab name on the left, a Reattach button on the right.
+    let strip = container(
+        row![
+            text(tab.label()).size(13).color(t.ink),
+            Space::new().width(Length::Fill),
+            button::ghost("Reattach", Message::ReattachTab(window)),
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding([4, 10])
+    .style(move |_| container::background(t.surface));
+
+    let (cols, rows) = tab
+        .focused()
+        .map(|term| {
+            let s = term.screen.lock();
+            (s.cols, s.rows)
+        })
+        .unwrap_or((0, 0));
+    let status = format!("{cols}×{rows} · {}px", size as u32);
+
+    container(column![
+        strip,
+        container(body).width(Length::Fill).height(Length::Fill),
+        status_bar(&tab.label(), &status),
+    ])
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(move |_| container::background(bg))
+    .into()
 }
 
 /// The body of the active settings section.

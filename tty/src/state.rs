@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use parking_lot::Mutex;
 
@@ -10,8 +12,13 @@ use iced::Font;
 use cathode::pty::PtySession;
 use cathode::screen::TerminalScreen;
 
+use crate::message::Message;
 use crate::settings::Settings;
 use crate::theme::Theme;
+
+/// How far a tab must be dragged down out of the strip before the press becomes a
+/// tear-off detach (a short drag is just a click / reorder gesture).
+pub const TAB_TEAR_THRESHOLD: f32 = 50.0;
 
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 /// Zoom clamp (⌘+/⌘−).
@@ -138,6 +145,23 @@ pub struct Tty {
     pub menu: Option<(MenuKind, iced::Point)>,
     /// When `Some`, a tab is being renamed: its index and the in-progress draft text.
     pub renaming: Option<(usize, String)>,
+
+    // ---- multi-window: detachable tabs (ADR 0003) ----
+    /// The main window's id (the tabbed strip). Set once in `boot`.
+    pub main_window: Option<iced::window::Id>,
+    /// Which window currently has keyboard focus — chords/typing route to its tab.
+    pub focused_window: Option<iced::window::Id>,
+    /// Tabs torn off into their own OS windows. The owned pane tree moves here and back.
+    pub detached: HashMap<iced::window::Id, Tab>,
+    /// The main-strip index each detached tab came from, so reattach drops it back there.
+    pub detach_origin: HashMap<iced::window::Id, usize>,
+    /// An armed tab tear-off: the pressed tab index + the pointer at press. A drag past
+    /// [`TAB_TEAR_THRESHOLD`] on release detaches it.
+    pub tab_drag: Option<(usize, iced::Point)>,
+    /// Each window's last-known outer bounds (for the drag-to-dock heuristic).
+    pub window_bounds: HashMap<iced::window::Id, iced::Rectangle>,
+    /// The most recent detached-window move + when, debounced by `detach_drag`.
+    pub last_detached_move: Option<(iced::window::Id, Instant)>,
 }
 
 /// Which right-click menu is open — a tab's (split + tab actions) or a pane's (split +
@@ -177,6 +201,13 @@ impl Tty {
             pointer: iced::Point::ORIGIN,
             menu: None,
             renaming: None,
+            main_window: None,
+            focused_window: None,
+            detached: HashMap::new(),
+            detach_origin: HashMap::new(),
+            tab_drag: None,
+            window_bounds: HashMap::new(),
+            last_detached_move: None,
         };
         tty.new_tab();
         tty
@@ -214,9 +245,12 @@ impl Tty {
         self.renaming = None;
     }
 
-    /// Open the pane context menu for a clicked pane: focus it, then anchor at the cursor.
+    /// Open the pane context menu for a clicked pane in the main window: focus it, then
+    /// anchor at the cursor. (Detached windows carry no context menu in v1.)
     pub fn open_pane_menu(&mut self, pane: pane_grid::Pane) {
-        self.focus_pane(pane);
+        if let Some(main) = self.main_window {
+            self.focus_pane(main, pane);
+        }
         self.menu = Some((MenuKind::Pane, self.pointer));
     }
 
@@ -343,6 +377,39 @@ impl Tty {
         self.tabs.get(self.active).and_then(Tab::focused)
     }
 
+    /// The `Tab` a window hosts: the main window shows the active tab; a detached window
+    /// shows its own tab. The linchpin for routing window-tagged pane messages.
+    pub fn tab_for(&self, window: iced::window::Id) -> Option<&Tab> {
+        if self.main_window == Some(window) {
+            self.tabs.get(self.active)
+        } else {
+            self.detached.get(&window)
+        }
+    }
+
+    /// Mutable [`tab_for`](Self::tab_for).
+    pub fn tab_for_mut(&mut self, window: iced::window::Id) -> Option<&mut Tab> {
+        if self.main_window == Some(window) {
+            self.tabs.get_mut(self.active)
+        } else {
+            self.detached.get_mut(&window)
+        }
+    }
+
+    /// The window the keyboard should act on: the focused window, else the main window.
+    pub fn keyboard_window(&self) -> Option<iced::window::Id> {
+        self.focused_window.or(self.main_window)
+    }
+
+    /// The DEC application-cursor-keys mode of `window`'s focused pane (affects arrow
+    /// bytes).
+    pub fn app_cursor_for(&self, window: iced::window::Id) -> bool {
+        self.tab_for(window)
+            .and_then(Tab::focused)
+            .map(|t| t.screen.lock().app_cursor_keys)
+            .unwrap_or(false)
+    }
+
     /// Make tab `idx` active and clear the unseen-activity dot on all its panes (the
     /// whole tab — every pane — becomes visible).
     pub fn activate(&mut self, idx: usize) {
@@ -364,25 +431,29 @@ impl Tty {
         }
     }
 
-    /// Split the active tab's focused pane toward `dir`, spawning a fresh shell there
-    /// (seeded with the focused pane's cwd) and focusing it. Left/Right split the column
-    /// (vertical divider); Up/Down split the row (horizontal divider).
-    pub fn split_focused(&mut self, dir: pane_grid::Direction) {
-        let cwd = self.active_term().and_then(|t| t.screen.lock().cwd.clone());
+    /// Split `window`'s focused pane toward `dir`, spawning a fresh shell there (seeded
+    /// with the focused pane's cwd) and focusing it. Left/Right split the column (vertical
+    /// divider); Up/Down split the row (horizontal divider).
+    pub fn split_focused(&mut self, window: iced::window::Id, dir: pane_grid::Direction) {
+        let cwd = self
+            .tab_for(window)
+            .and_then(Tab::focused)
+            .and_then(|t| t.screen.lock().cwd.clone());
         if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
-            self.split_with(dir, term);
+            self.split_with(window, dir, term);
         }
     }
 
-    /// Place `term` as a new pane split off the focused one toward `dir`, and focus it.
-    /// (The spawn-free core of [`split_focused`], so tests can inject a pty-less pane.)
-    pub fn split_with(&mut self, dir: pane_grid::Direction, term: Term) {
+    /// Place `term` as a new pane split off `window`'s focused pane toward `dir`, and
+    /// focus it. (The spawn-free core of [`split_focused`], so tests can inject a pty-less
+    /// pane.)
+    pub fn split_with(&mut self, window: iced::window::Id, dir: pane_grid::Direction, term: Term) {
         use pane_grid::{Axis, Direction};
         let axis = match dir {
             Direction::Left | Direction::Right => Axis::Vertical,
             Direction::Up | Direction::Down => Axis::Horizontal,
         };
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+        if let Some(tab) = self.tab_for_mut(window) {
             if let Some((new_pane, _split)) = tab.panes.split(axis, tab.focus, term) {
                 // `split` always places the newcomer after the target (right/below); for
                 // Left/Up, swap so the new shell lands on the requested side.
@@ -394,25 +465,26 @@ impl Tty {
         }
     }
 
-    /// Move focus to the neighbouring pane in `dir` (no-op at the edge).
-    pub fn focus_dir(&mut self, dir: pane_grid::Direction) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+    /// Move focus to the neighbouring pane in `dir` within `window`'s tab (no-op at the
+    /// edge).
+    pub fn focus_dir(&mut self, window: iced::window::Id, dir: pane_grid::Direction) {
+        if let Some(tab) = self.tab_for_mut(window) {
             if let Some(p) = tab.panes.adjacent(tab.focus, dir) {
                 tab.focus = p;
             }
         }
     }
 
-    /// Focus a specific pane in the active tab (a click landed on it).
-    pub fn focus_pane(&mut self, pane: pane_grid::Pane) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+    /// Focus a specific pane in `window`'s tab (a click landed on it).
+    pub fn focus_pane(&mut self, window: iced::window::Id, pane: pane_grid::Pane) {
+        if let Some(tab) = self.tab_for_mut(window) {
             tab.focus = pane;
         }
     }
 
-    /// Drag-resize the divider at `split` to `ratio` (0..=1).
-    pub fn resize_split(&mut self, split: pane_grid::Split, ratio: f32) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+    /// Drag-resize the divider at `split` to `ratio` (0..=1) in `window`'s tab.
+    pub fn resize_split(&mut self, window: iced::window::Id, split: pane_grid::Split, ratio: f32) {
+        if let Some(tab) = self.tab_for_mut(window) {
             tab.panes.resize(split, ratio);
         }
     }
@@ -431,18 +503,12 @@ impl Tty {
         self.close_tab(self.active)
     }
 
-    /// The active tab's DEC application-cursor-keys mode (affects arrow-key bytes).
-    pub fn active_app_cursor(&self) -> bool {
-        self.active_term()
-            .map(|t| t.screen.lock().app_cursor_keys)
-            .unwrap_or(false)
-    }
-
-    /// Paste `text` into the active shell, wrapping it in bracketed-paste markers when
-    /// the app enabled mode 2004 (so multi-line paste can't auto-execute).
-    pub fn paste(&mut self, text: &str) {
+    /// Paste `text` into `window`'s focused shell, wrapping it in bracketed-paste markers
+    /// when the app enabled mode 2004 (so multi-line paste can't auto-execute).
+    pub fn paste(&mut self, window: iced::window::Id, text: &str) {
         let bracketed = self
-            .active_term()
+            .tab_for(window)
+            .and_then(Tab::focused)
             .map(|t| t.screen.lock().bracketed_paste)
             .unwrap_or(false);
         let mut bytes = Vec::new();
@@ -453,32 +519,39 @@ impl Tty {
         if bracketed {
             bytes.extend_from_slice(b"\x1b[201~");
         }
-        self.write_focused(&bytes);
+        self.write_focused(window, &bytes);
     }
 
     /// Per-redraw housekeeping: light activity dots on background tabs that produced
     /// output or rang the bell, clear the active tab's dot, and surface any OSC 52
-    /// clipboard-write request for the host to put on the system clipboard.
+    /// clipboard-write request for the host to put on the system clipboard. Walks both
+    /// the main strip and the detached windows (a detached tab is always on-screen in its
+    /// own window, so it never carries a dot).
     pub fn drain_effects(&mut self) -> Option<String> {
         let active = self.active;
         let mut clip = None;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             for (_, term) in tab.panes.iter_mut() {
-                let (bell, requested) = {
-                    let mut s = term.screen.lock();
-                    (s.take_bell(), s.take_clipboard())
-                };
+                let (signal, requested) = drain_pane(term);
                 if let Some(c) = requested {
                     clip = Some(c);
                 }
-                let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
                 // Every pane of the active tab is on screen, so it never carries a dot;
                 // a background tab's panes light one on output or a bell.
                 if i == active {
                     term.activity = false;
-                } else if was_dirty || bell {
+                } else if signal {
                     term.activity = true;
                 }
+            }
+        }
+        for tab in self.detached.values_mut() {
+            for (_, term) in tab.panes.iter_mut() {
+                let (_signal, requested) = drain_pane(term);
+                if let Some(c) = requested {
+                    clip = Some(c);
+                }
+                term.activity = false;
             }
         }
         clip
@@ -496,10 +569,10 @@ impl Tty {
         true
     }
 
-    /// Forward `bytes` to a specific pane's shell in the active tab (mouse reporting
+    /// Forward `bytes` to a specific pane's shell in `window`'s tab (mouse reporting
     /// targets the pane under the cursor).
-    pub fn write_pane(&mut self, pane: pane_grid::Pane, bytes: &[u8]) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+    pub fn write_pane(&mut self, window: iced::window::Id, pane: pane_grid::Pane, bytes: &[u8]) {
+        if let Some(tab) = self.tab_for_mut(window) {
             if let Some(term) = tab.panes.get_mut(pane) {
                 if let Some(pty) = term.pty.as_mut() {
                     if let Err(e) = pty.write_bytes(bytes) {
@@ -510,17 +583,23 @@ impl Tty {
         }
     }
 
-    /// Forward `bytes` to the active tab's focused pane (keyboard / paste).
-    pub fn write_focused(&mut self, bytes: &[u8]) {
-        if let Some(focus) = self.tabs.get(self.active).map(|t| t.focus) {
-            self.write_pane(focus, bytes);
+    /// Forward `bytes` to `window`'s focused pane (keyboard / paste).
+    pub fn write_focused(&mut self, window: iced::window::Id, bytes: &[u8]) {
+        if let Some(focus) = self.tab_for(window).map(|t| t.focus) {
+            self.write_pane(window, focus, bytes);
         }
     }
 
-    /// Resize one pane's grid + PTY (SIGWINCH) to what its widget reports fits. Only the
-    /// active tab's panes are on screen, so only they report.
-    pub fn resize_pane(&mut self, pane: pane_grid::Pane, cols: usize, rows: usize) {
-        if let Some(tab) = self.tabs.get(self.active) {
+    /// Resize one pane's grid + PTY (SIGWINCH) to what its widget reports fits, in
+    /// `window`'s tab.
+    pub fn resize_pane(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        cols: usize,
+        rows: usize,
+    ) {
+        if let Some(tab) = self.tab_for(window) {
             if let Some(term) = tab.panes.get(pane) {
                 term.screen.lock().resize(cols, rows);
                 if let Some(pty) = term.pty.as_ref() {
@@ -540,46 +619,163 @@ impl Tty {
         self.font_size = DEFAULT_FONT_SIZE;
     }
 
-    /// Drop panes whose shell has exited, then any tab left with no live pane. Returns
-    /// `false` when nothing remains (the app should exit). Keeps focus + active valid.
-    pub fn reap_dead(&mut self) -> bool {
+    /// Drop panes whose shell has exited, then any tab left with no live pane — across
+    /// both the main strip and the detached windows. Returns `(any_tabs_remain, windows
+    /// to close)`: the caller closes each dead detached window's OS window, and exits when
+    /// no tabs remain anywhere. Keeps focus + active valid.
+    pub fn reap_dead(&mut self) -> (bool, Vec<iced::window::Id>) {
         let active_alive = self.tabs.get(self.active).is_some_and(Tab::has_live_pane);
         for tab in self.tabs.iter_mut() {
-            // Close dead panes one at a time; `close` is a no-op on a tab's last pane,
-            // so an all-dead tab keeps a single (dead) pane and is dropped by `retain`.
-            loop {
-                let dead = tab
-                    .panes
-                    .iter()
-                    .find(|(_, t)| !t.alive.load(Ordering::Relaxed))
-                    .map(|(p, _)| *p);
-                let Some(dead) = dead else { break };
-                if tab.panes.close(dead).is_none() {
-                    break;
-                }
-            }
-            // The focused pane may have just been reaped — fall back to any survivor.
-            if tab.panes.get(tab.focus).is_none() {
-                if let Some((&p, _)) = tab.panes.iter().next() {
-                    tab.focus = p;
-                }
-            }
+            reap_tab_panes(tab);
         }
         self.tabs.retain(Tab::has_live_pane);
-        if self.tabs.is_empty() {
-            return false;
+
+        // Detached tabs: reap their panes, then collect windows whose tab fully died.
+        let mut dead_windows = Vec::new();
+        for (win, tab) in self.detached.iter_mut() {
+            reap_tab_panes(tab);
+            if !tab.has_live_pane() {
+                dead_windows.push(*win);
+            }
         }
+        for win in &dead_windows {
+            self.detached.remove(win);
+            self.detach_origin.remove(win);
+            self.window_bounds.remove(win);
+        }
+
+        let any = !self.tabs.is_empty() || !self.detached.is_empty();
         // If the active tab died, fall back to the last; otherwise just clamp.
-        if !active_alive || self.active >= self.tabs.len() {
+        if !self.tabs.is_empty() && (!active_alive || self.active >= self.tabs.len()) {
             self.active = self.tabs.len() - 1;
         }
-        true
+        (any, dead_windows)
+    }
+
+    // ---- detach / reattach (ADR 0003) ----
+
+    /// Detach the main strip's tab `idx` into its own OS window. The owned `Tab` moves
+    /// into `detached`; if that would empty the main strip, a fresh shell tab is spawned
+    /// so the main window is never empty. Returns the task that opens the window (and
+    /// fetches both windows' positions to align the drag-dock band).
+    pub fn detach_tab(&mut self, idx: usize) -> Option<iced::Task<Message>> {
+        self.menu = None;
+        if idx >= self.tabs.len() {
+            return None;
+        }
+        let tab = self.tabs.remove(idx);
+        if self.tabs.is_empty() {
+            self.new_tab();
+        } else {
+            self.active = self.active.min(self.tabs.len() - 1);
+        }
+        let size = iced::Size::new(720.0, 600.0);
+        let (id, open) = iced::window::open(iced::window::Settings {
+            size,
+            ..Default::default()
+        });
+        self.detached.insert(id, tab);
+        self.detach_origin.insert(id, idx);
+        crate::detach_drag::on_opened(self, id, size);
+        let open = open.then(move |id| {
+            iced::window::position(id).map(move |p| Message::WindowPosition(id, p))
+        });
+        match self.main_window {
+            Some(main) => Some(iced::Task::batch([
+                open,
+                iced::window::position(main).map(move |p| Message::WindowPosition(main, p)),
+            ])),
+            None => Some(open),
+        }
+    }
+
+    /// Dock a detached window's tab back into the main strip at its origin index.
+    pub fn reattach_window(&mut self, window: iced::window::Id) {
+        if let Some(tab) = self.detached.remove(&window) {
+            let at = self
+                .detach_origin
+                .remove(&window)
+                .unwrap_or(usize::MAX)
+                .min(self.tabs.len());
+            self.tabs.insert(at, tab);
+            self.active = at;
+            self.window_bounds.remove(&window);
+        }
+    }
+
+    /// Complete an armed tab tear-off on pointer release: a drag past
+    /// [`TAB_TEAR_THRESHOLD`] detaches the pressed tab; a short drag is just a click.
+    pub fn finish_tab_drag(&mut self) -> Option<iced::Task<Message>> {
+        let (idx, start) = self.tab_drag.take()?;
+        if self.pointer.y - start.y > TAB_TEAR_THRESHOLD {
+            self.detach_tab(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Record which window has the keyboard (chords/typing route to its tab).
+    pub fn focus_window(&mut self, window: iced::window::Id) {
+        self.focused_window = Some(window);
+    }
+
+    /// Close the focused pane of a detached `window`. Returns `Some(window)` to close
+    /// when its last pane went — the tab is removed from `detached` *first*, so the
+    /// ensuing `WindowClosed` no-ops instead of reattaching (⌘W through the last pane
+    /// kills the window; an OS-close reattaches). `None` means the pane closed in place.
+    pub fn close_detached_focused_pane(
+        &mut self,
+        window: iced::window::Id,
+    ) -> Option<iced::window::Id> {
+        let tab = self.detached.get_mut(&window)?;
+        if let Some((_term, sibling)) = tab.panes.close(tab.focus) {
+            tab.focus = sibling;
+            return None;
+        }
+        self.detached.remove(&window);
+        self.detach_origin.remove(&window);
+        self.window_bounds.remove(&window);
+        Some(window)
     }
 }
 
 impl Default for Tty {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Take a pane's pending bell + OSC 52 clipboard request and clear its dirty flag.
+/// Returns `(produced_signal, clipboard_request)` — `produced_signal` is true if the
+/// pane wrote output or rang the bell (drives the background-activity dot).
+fn drain_pane(term: &mut Term) -> (bool, Option<String>) {
+    let (bell, requested) = {
+        let mut s = term.screen.lock();
+        (s.take_bell(), s.take_clipboard())
+    };
+    let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
+    (was_dirty || bell, requested)
+}
+
+/// Close every pane in `tab` whose shell has exited (one at a time; `close` is a no-op
+/// on the last pane, so an all-dead tab keeps a single dead pane for the caller's
+/// `retain`/`has_live_pane` check). Re-points focus at a survivor if it was reaped.
+fn reap_tab_panes(tab: &mut Tab) {
+    loop {
+        let dead = tab
+            .panes
+            .iter()
+            .find(|(_, t)| !t.alive.load(Ordering::Relaxed))
+            .map(|(p, _)| *p);
+        let Some(dead) = dead else { break };
+        if tab.panes.close(dead).is_none() {
+            break;
+        }
+    }
+    if tab.panes.get(tab.focus).is_none() {
+        if let Some((&p, _)) = tab.panes.iter().next() {
+            tab.focus = p;
+        }
     }
 }
 
