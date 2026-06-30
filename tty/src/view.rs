@@ -71,7 +71,7 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                 Message::PtyBytes,
             )
             .find(state.search.clone())
-            .retro(state.theme.scanlines, state.theme.vignette),
+            .retro(state.theme.scanlines, state.theme.curvature),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -164,9 +164,9 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
         slider(
             "Screen curve",
             0.0..=1.0,
-            state.theme.vignette,
-            pct(state.theme.vignette),
-            Message::SetVignette,
+            state.theme.curvature,
+            pct(state.theme.curvature),
+            Message::SetCurvature,
         ),
     ]
     .spacing(14)

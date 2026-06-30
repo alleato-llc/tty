@@ -38,7 +38,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SettingsSection(i) => state.settings_section = i,
         Message::SetTheme(choice) => state.set_theme(&choice),
         Message::SetScanlines(v) => state.set_scanlines(v),
-        Message::SetVignette(v) => state.set_vignette(v),
+        Message::SetCurvature(v) => state.set_curvature(v),
         Message::FontSizeStep(delta) => state.step_font_size(delta),
         Message::Base16Changed(s) => state.base16_input = s,
         Message::ApplyBase16 => state.apply_base16(),

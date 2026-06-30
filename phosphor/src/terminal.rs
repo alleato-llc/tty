@@ -120,10 +120,11 @@ pub struct Terminal<Message> {
     /// Case-insensitive scrollback search: matching runs are highlighted.
     find: Option<String>,
     /// The signature "phosphor" look — two independent CRT dimensions, each `0.0`
-    /// (off) … `1.0` (exaggerated): `scanlines` are the horizontal refresh lines,
-    /// `vignette` is the darkened curve of the CRT glass toward the edges.
+    /// (off) … `1.0` (exaggerated): `scanlines` are the horizontal refresh lines;
+    /// `curvature` physically bows the grid like the bulge of CRT glass (a real
+    /// geometric barrel warp of every cell's position) and darkens the curved edges.
     scanlines: f32,
-    vignette: f32,
+    curvature: f32,
 }
 
 impl<Message> Terminal<Message> {
@@ -134,11 +135,11 @@ impl<Message> Terminal<Message> {
     }
 
     /// Set the retro CRT overlay intensities, each clamped to `0.0..=1.0`:
-    /// `scanlines` (the refresh lines) and `vignette` (the glass curve). `0, 0`
-    /// disables the overlay entirely.
-    pub fn retro(mut self, scanlines: f32, vignette: f32) -> Self {
+    /// `scanlines` (the refresh lines) and `curvature` (the geometric glass-bulge
+    /// warp + coupled edge darkening). `0, 0` disables the overlay entirely.
+    pub fn retro(mut self, scanlines: f32, curvature: f32) -> Self {
         self.scanlines = scanlines.clamp(0.0, 1.0);
-        self.vignette = vignette.clamp(0.0, 1.0);
+        self.curvature = curvature.clamp(0.0, 1.0);
         self
     }
 }
@@ -168,7 +169,7 @@ pub fn terminal<Message>(
         on_mouse: Box::new(on_mouse),
         find: None,
         scanlines: 0.0,
-        vignette: 0.0,
+        curvature: 0.0,
     }
 }
 
@@ -360,6 +361,115 @@ fn indexed(i: u8, style: &TerminalStyle) -> Color {
     }
     let v = (8 + (i - 232) * 10) as u8;
     Color::from_rgb8(v, v, v)
+}
+
+impl<Message> Terminal<Message> {
+    /// Draw one row cell-by-cell through the curvature `cell_quad`, so the grid
+    /// physically bows. Mirrors the fast per-run path (background, selection, search,
+    /// foreground glyphs, underline) but per cell — each glyph is repositioned and
+    /// scaled to its warped box, which is what makes the screen read as curved.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_row_warped<R: text::Renderer<Font = Font>>(
+        &self,
+        renderer: &mut R,
+        bounds: Rectangle,
+        screen: &TerminalScreen,
+        history: usize,
+        line: usize,
+        y: f32,
+        cols: usize,
+        sel: Option<((usize, usize), (usize, usize))>,
+        cell_quad: &impl Fn(usize, f32, usize) -> Rectangle,
+    ) {
+        let line_h = self.line_height();
+        let tint = |renderer: &mut R, c: usize, color: Color| {
+            let q = cell_quad(c, y, 1);
+            fill_rect(renderer, q.x, q.y, q.width, q.height, color);
+        };
+
+        // Background cells (non-default only — the container bg shows through elsewhere).
+        for c in 0..cols {
+            if let Some(bg) = self.cell_colors(&cell_at(screen, history, line, c)).1 {
+                tint(renderer, c, bg);
+            }
+        }
+
+        // Selection tint.
+        if let Some((a, b)) = sel {
+            if line >= a.0 && line <= b.0 {
+                let s = if line == a.0 { a.1 } else { 0 };
+                let e = if line == b.0 {
+                    b.1
+                } else {
+                    cols.saturating_sub(1)
+                };
+                for c in s..=e.min(cols.saturating_sub(1)) {
+                    tint(renderer, c, self.style.selection);
+                }
+            }
+        }
+
+        // Search highlight — every case-insensitive match on this line.
+        if let Some(query) = self.find.as_deref() {
+            let cells: Vec<char> = (0..cols)
+                .map(|c| cell_at(screen, history, line, c).ch)
+                .collect();
+            let needle: Vec<char> = query.chars().collect();
+            let hl = Color {
+                a: 0.45,
+                ..self.style.ansi[11]
+            };
+            let mut s = 0;
+            while !needle.is_empty() && s + needle.len() <= cells.len() {
+                if (0..needle.len()).all(|k| cells[s + k].eq_ignore_ascii_case(&needle[k])) {
+                    for c in s..s + needle.len() {
+                        tint(renderer, c, hl);
+                    }
+                    s += needle.len();
+                } else {
+                    s += 1;
+                }
+            }
+        }
+
+        // Foreground glyphs, one per cell so the row genuinely bows. Each glyph is
+        // scaled to its warped box (smaller toward the edges); the size is quantized
+        // to ½px so the glyph atlas doesn't gain an entry per pixel of curve.
+        let mut c = 0;
+        while c < cols {
+            let cell = cell_at(screen, history, line, c);
+            if cell.width == 0 {
+                c += 1;
+                continue;
+            }
+            let span = cell.width.max(1) as usize;
+            if cell.ch != ' ' && cell.ch != '\0' {
+                let (fg, _) = self.cell_colors(&cell);
+                let q = cell_quad(c, y, span);
+                let size = ((self.font_size * (q.height / line_h)) * 2.0).round() / 2.0;
+                renderer.fill_text(
+                    text::Text {
+                        content: cell.ch.to_string(),
+                        bounds: Size::new(q.width.max(1.0), q.height),
+                        size: size.max(3.0).into(),
+                        line_height: text::LineHeight::Absolute(q.height.into()),
+                        font: self.variant(cell.bold, cell.italic),
+                        align_x: text::Alignment::Left,
+                        align_y: alignment::Vertical::Top,
+                        shaping: text::Shaping::Advanced,
+                        wrapping: text::Wrapping::None,
+                    },
+                    Point::new(q.x, q.y),
+                    fg,
+                    bounds,
+                );
+                if cell.underline {
+                    fill_rect(renderer, q.x, q.y + q.height - 1.0, q.width, 1.0, fg);
+                }
+            }
+            c += span;
+        }
+    }
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Terminal<Message>
@@ -597,6 +707,42 @@ where
         let top = view_top(total, rows, state.scroll);
         let sel = state.selection.map(order);
 
+        // Geometric CRT warp: bow the grid like the bulge of curved glass. `k = 0`
+        // is the identity (flat); higher `k` compresses cells toward the edges so the
+        // whole grid reads as a screen curving toward the viewer. `warp` maps any
+        // point inside `bounds`; `cell_quad` returns the warped axis-aligned box for a
+        // `span`-wide cell at column `c`, row top `ry` (the unit the per-cell warped
+        // path draws with).
+        let k = self.curvature * 0.55;
+        // Center the warp on the grid the cells actually fill (anchored at the top-left
+        // of `bounds`), not the whole widget — so it stays symmetric even when the grid
+        // is narrower/shorter than the widget (a partial last row, an oversized pane).
+        let grid_w = (cols as f32 * cell_w).min(bounds.width).max(1.0);
+        let drawn_rows = rows.min(total.saturating_sub(top)).max(1);
+        let grid_h = (drawn_rows as f32 * line_h).min(bounds.height).max(1.0);
+        let (cx, cy) = (bounds.x + grid_w / 2.0, bounds.y + grid_h / 2.0);
+        let (hw, hh) = (grid_w / 2.0, grid_h / 2.0);
+        let warp = move |px: f32, py: f32| -> Point {
+            if k <= 0.0 || hw <= 0.0 || hh <= 0.0 {
+                return Point::new(px, py);
+            }
+            let (nx, ny) = ((px - cx) / hw, (py - cy) / hh);
+            let f = 1.0 / (1.0 + k * (nx * nx + ny * ny));
+            Point::new(cx + (px - cx) * f, cy + (py - cy) * f)
+        };
+        let cell_quad = move |c: usize, ry: f32, span: usize| -> Rectangle {
+            let x0 = bounds.x + c as f32 * cell_w;
+            let tl = warp(x0, ry);
+            let br = warp(x0 + span as f32 * cell_w, ry + line_h);
+            // +0.6 overlap closes the hairline seams between adjacent warped cells.
+            Rectangle {
+                x: tl.x,
+                y: tl.y,
+                width: (br.x - tl.x).max(0.5) + 0.6,
+                height: (br.y - tl.y).max(0.5) + 0.6,
+            }
+        };
+
         renderer.with_layer(bounds, |renderer| {
             for vr in 0..rows {
                 let line = top + vr;
@@ -604,6 +750,16 @@ where
                     break;
                 }
                 let y = bounds.y + vr as f32 * line_h;
+
+                // Curved path: draw this row cell-by-cell through the warp so the grid
+                // physically bows. Kept separate from the fast per-run path below, which
+                // stays the default when curvature is off (`k == 0`).
+                if k > 0.0 {
+                    self.draw_row_warped(
+                        renderer, bounds, &screen, history, line, y, cols, sel, &cell_quad,
+                    );
+                    continue;
+                }
 
                 // Background runs.
                 let mut c = 0;
@@ -757,22 +913,28 @@ where
                 let cvr = (history + screen.cursor_row).saturating_sub(top);
                 if cvr < rows {
                     let under = screen.cell(screen.cursor_row, screen.cursor_col);
-                    let span = (under.width.max(1) as f32) * cell_w;
-                    let cx = bounds.x + screen.cursor_col as f32 * cell_w;
-                    let cy = bounds.y + cvr as f32 * line_h;
-                    let bar = (self.font_size * 0.12).clamp(1.5, 3.0);
+                    // Warp the cursor cell through the same transform (identity when
+                    // curvature is off, so the flat path is unchanged).
+                    let q = cell_quad(
+                        screen.cursor_col,
+                        bounds.y + cvr as f32 * line_h,
+                        under.width.max(1) as usize,
+                    );
+                    let (cx, cy, span, ch_h) = (q.x, q.y, q.width, q.height);
+                    let vscale = ch_h / line_h;
+                    let bar = (self.font_size * 0.12).clamp(1.5, 3.0) * vscale;
                     match screen.cursor_shape {
                         CursorShape::Block => {
-                            fill_rect(renderer, cx, cy, span, line_h, self.style.cursor);
+                            fill_rect(renderer, cx, cy, span, ch_h, self.style.cursor);
                             // Re-draw the covered glyph in the background color (inverse).
                             let ch = under.ch;
                             if ch != ' ' {
                                 renderer.fill_text(
                                     text::Text {
                                         content: ch.to_string(),
-                                        bounds: Size::new(span.max(1.0), line_h),
-                                        size: self.font_size.into(),
-                                        line_height: text::LineHeight::Absolute(line_h.into()),
+                                        bounds: Size::new(span.max(1.0), ch_h),
+                                        size: (self.font_size * vscale).into(),
+                                        line_height: text::LineHeight::Absolute(ch_h.into()),
                                         font: self.font,
                                         align_x: text::Alignment::Left,
                                         align_y: alignment::Vertical::Top,
@@ -786,17 +948,10 @@ where
                             }
                         }
                         CursorShape::Underline => {
-                            fill_rect(
-                                renderer,
-                                cx,
-                                cy + line_h - bar,
-                                span,
-                                bar,
-                                self.style.cursor,
-                            );
+                            fill_rect(renderer, cx, cy + ch_h - bar, span, bar, self.style.cursor);
                         }
                         CursorShape::Bar => {
-                            fill_rect(renderer, cx, cy, bar, line_h, self.style.cursor);
+                            fill_rect(renderer, cx, cy, bar, ch_h, self.style.cursor);
                         }
                     }
                 }
@@ -819,12 +974,12 @@ where
                     sy += pitch;
                 }
             }
-            // Vignette: the darkened curve of the CRT glass. Several nested edge frames
-            // with a quadratic falloff fake a gradient — darkest at the very edge,
-            // fading inward — so it reads as curved glass, not a flat border.
-            if self.vignette > 0.0 {
-                let depth = (self.font_size * 1.6).max(14.0) * (0.5 + self.vignette);
-                let max_a = 0.10 + 0.40 * self.vignette;
+            // Edge darkening coupled to the curve: the bowed glass falls away into
+            // shadow at the rim. Several nested edge frames with a quadratic falloff
+            // fake a gradient — darkest at the very edge, fading inward.
+            if self.curvature > 0.0 {
+                let depth = (self.font_size * 1.6).max(14.0) * (0.5 + self.curvature);
+                let max_a = 0.10 + 0.40 * self.curvature;
                 const LAYERS: usize = 6;
                 let thick = (depth / LAYERS as f32).ceil();
                 for i in 0..LAYERS {

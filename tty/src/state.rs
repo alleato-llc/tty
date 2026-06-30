@@ -113,9 +113,9 @@ impl Tty {
         self.apply_settings();
     }
 
-    /// Set the vignette / glass-curve intensity (`0.0`..=`1.0`).
-    pub fn set_vignette(&mut self, v: f32) {
-        self.settings.vignette = Some(v.clamp(0.0, 1.0));
+    /// Set the curvature / glass-bulge intensity (`0.0`..=`1.0`).
+    pub fn set_curvature(&mut self, v: f32) {
+        self.settings.curvature = Some(v.clamp(0.0, 1.0));
         self.apply_settings();
     }
 
