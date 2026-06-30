@@ -1,4 +1,5 @@
 use iced::keyboard::{Key, Modifiers};
+use iced::Color;
 
 /// Everything the UI can ask `tty` to do.
 #[derive(Debug, Clone)]
@@ -31,4 +32,22 @@ pub enum Message {
     Tick,
     /// The window was resized to this height (for the status bar's edge band).
     WindowResized(f32),
+    /// Open/close the settings panel (`⌘,`).
+    ToggleSettings,
+    /// Switch the settings panel to section `i` (Appearance / Palette).
+    SettingsSection(usize),
+    /// Pick the dark/light chrome theme (`"dark"` / `"light"`).
+    SetTheme(String),
+    /// Toggle the retro CRT overlay.
+    ToggleRetro,
+    /// Nudge the font size by `±1` from the settings stepper.
+    FontSizeStep(f32),
+    /// The base16 paste box changed.
+    Base16Changed(String),
+    /// Import the base16 colors in the paste box as the terminal palette.
+    ApplyBase16,
+    /// Drop the custom palette, back to the built-in dark/light colors.
+    ResetPalette,
+    /// Edit one palette slot (`0..16` = ANSI, `16`=fg, `17`=bg, `18`=cursor).
+    EditColor(usize, Color),
 }

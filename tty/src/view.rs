@@ -1,8 +1,11 @@
-use iced::widget::{container, text, Column};
+use iced::widget::{column, container, row, scrollable, text, Column};
 use iced::{Element, Length};
 
 use rime::theme;
-use rime::widgets::{status_bar, tabs, text_field, Tab};
+use rime::widgets::{
+    button, color_field, labeled, section, select, status_bar, stepper, tabs, text_field, toggle,
+    Tab,
+};
 
 use crate::message::Message;
 use crate::state::Tty;
@@ -67,7 +70,8 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                 Message::Select,
                 Message::PtyBytes,
             )
-            .find(state.search.clone()),
+            .find(state.search.clone())
+            .retro(state.theme.retro),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -98,11 +102,125 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
     let (left, right) = status_text(state);
     root = root.push(status_bar(&left, &right));
 
-    container(root)
+    let chrome = container(root)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(move |_| container::background(bg))
-        .into()
+        .style(move |_| container::background(bg));
+
+    // The settings panel floats over the terminal when ⌘, is open.
+    if state.show_settings {
+        rime::widgets::settings(
+            chrome,
+            &["Appearance", "Palette"],
+            state.settings_section,
+            Message::SettingsSection,
+            settings_body(state),
+            None,
+            Message::ToggleSettings,
+        )
+    } else {
+        chrome.into()
+    }
+}
+
+/// The body of the active settings section.
+fn settings_body(state: &Tty) -> Element<'_, Message> {
+    match state.settings_section {
+        1 => palette_section(state),
+        _ => appearance_section(state),
+    }
+}
+
+/// Appearance: dark/light theme, font size, the retro overlay.
+fn appearance_section(state: &Tty) -> Element<'_, Message> {
+    let themes = ["Dark".to_string(), "Light".to_string()];
+    let current = match state.theme.choice {
+        rime::theme::ThemeChoice::Light => "Light",
+        _ => "Dark",
+    }
+    .to_string();
+    let theme_pick = select(themes, Some(current), |s: String| {
+        Message::SetTheme(s.to_lowercase())
+    });
+
+    column![
+        section("Appearance"),
+        labeled("Theme", theme_pick),
+        stepper(
+            "Font size",
+            format!("{}px", state.font_size as u32),
+            Message::FontSizeStep(-1.0),
+            Message::FontSizeStep(1.0),
+        ),
+        toggle("Retro CRT overlay", state.theme.retro, Message::ToggleRetro),
+    ]
+    .spacing(14)
+    .into()
+}
+
+/// Palette: import a base16 scheme, or tweak the 16 ANSI colors + fg/bg/cursor directly.
+fn palette_section(state: &Tty) -> Element<'_, Message> {
+    let import = column![
+        labeled(
+            "base16 scheme",
+            text_field(
+                "Paste 16 hex colors (base00…base0F)",
+                &state.base16_input,
+                Message::Base16Changed,
+            ),
+        ),
+        row![
+            button::primary("Import", Message::ApplyBase16),
+            button::secondary("Reset to default", Message::ResetPalette),
+        ]
+        .spacing(8),
+    ]
+    .spacing(8);
+
+    // The live palette, slot by slot. Editing one composes onto the current colors.
+    let style = state.theme.terminal;
+    let labels = [
+        "ANSI 0 · black",
+        "ANSI 1 · red",
+        "ANSI 2 · green",
+        "ANSI 3 · yellow",
+        "ANSI 4 · blue",
+        "ANSI 5 · magenta",
+        "ANSI 6 · cyan",
+        "ANSI 7 · white",
+        "ANSI 8 · br black",
+        "ANSI 9 · br red",
+        "ANSI 10 · br green",
+        "ANSI 11 · br yellow",
+        "ANSI 12 · br blue",
+        "ANSI 13 · br magenta",
+        "ANSI 14 · br cyan",
+        "ANSI 15 · br white",
+    ];
+    let mut swatches = Column::new().spacing(8);
+    for (i, label) in labels.iter().enumerate() {
+        swatches = swatches.push(color_field(label, style.ansi[i], move |c| {
+            Message::EditColor(i, c)
+        }));
+    }
+    swatches = swatches
+        .push(color_field("Foreground", style.fg, |c| {
+            Message::EditColor(16, c)
+        }))
+        .push(color_field("Background", style.bg, |c| {
+            Message::EditColor(17, c)
+        }))
+        .push(color_field("Cursor", style.cursor, |c| {
+            Message::EditColor(18, c)
+        }));
+
+    scrollable(
+        column![section("Palette"), import, swatches]
+            .spacing(14)
+            .padding([0, 8]),
+    )
+    .height(Length::Fill)
+    .into()
 }
 
 fn status_text(state: &Tty) -> (String, String) {

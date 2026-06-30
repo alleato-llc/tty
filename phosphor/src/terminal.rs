@@ -119,12 +119,20 @@ pub struct Terminal<Message> {
     on_mouse: Box<dyn Fn(Vec<u8>) -> Message>,
     /// Case-insensitive scrollback search: matching runs are highlighted.
     find: Option<String>,
+    /// Retro CRT overlay (scanlines + vignette) — the signature "phosphor" look.
+    retro: bool,
 }
 
 impl<Message> Terminal<Message> {
     /// Highlight every case-insensitive occurrence of `query` (the `⌘F` search).
     pub fn find(mut self, query: Option<String>) -> Self {
         self.find = query.filter(|q| !q.is_empty());
+        self
+    }
+
+    /// Enable the retro CRT overlay (scanlines + edge vignette).
+    pub fn retro(mut self, on: bool) -> Self {
+        self.retro = on;
         self
     }
 }
@@ -153,6 +161,7 @@ pub fn terminal<Message>(
         on_select: Box::new(on_select),
         on_mouse: Box::new(on_mouse),
         find: None,
+        retro: false,
     }
 }
 
@@ -784,6 +793,44 @@ where
                         }
                     }
                 }
+            }
+
+            // Retro "phosphor" overlay: dim scanlines every few pixels + a soft edge
+            // vignette. Cheap (output-driven repaint means it's not redrawn at idle).
+            if self.retro {
+                let scan = Color {
+                    a: 0.10,
+                    ..Color::BLACK
+                };
+                let mut sy = bounds.y;
+                while sy < bounds.y + bounds.height {
+                    fill_rect(renderer, bounds.x, sy, bounds.width, 1.0, scan);
+                    sy += 3.0;
+                }
+                // Vignette: faint dark bands hugging each edge.
+                let edge = Color {
+                    a: 0.18,
+                    ..Color::BLACK
+                };
+                let band = (self.font_size * 0.9).max(8.0);
+                fill_rect(renderer, bounds.x, bounds.y, bounds.width, band, edge);
+                fill_rect(
+                    renderer,
+                    bounds.x,
+                    bounds.y + bounds.height - band,
+                    bounds.width,
+                    band,
+                    edge,
+                );
+                fill_rect(renderer, bounds.x, bounds.y, band, bounds.height, edge);
+                fill_rect(
+                    renderer,
+                    bounds.x + bounds.width - band,
+                    bounds.y,
+                    band,
+                    bounds.height,
+                    edge,
+                );
             }
         });
     }

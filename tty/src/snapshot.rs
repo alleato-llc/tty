@@ -58,6 +58,10 @@ fn populated() -> Tty {
         hovered_tab: None,
         selection: None,
         search: None,
+        settings: Default::default(),
+        show_settings: false,
+        settings_section: 0,
+        base16_input: String::new(),
     }
 }
 

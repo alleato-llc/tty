@@ -49,12 +49,20 @@ pub struct Tty {
     pub selection: Option<String>,
     /// The scrollback search query when the `⌘F` find bar is open (`None` = closed).
     pub search: Option<String>,
+    /// Persisted preferences (theme, font, retro, custom palette).
+    pub settings: Settings,
+    /// Whether the `⌘,` settings panel is open.
+    pub show_settings: bool,
+    /// The active settings section (0 = Appearance, 1 = Palette).
+    pub settings_section: usize,
+    /// The base16 paste box's contents (16 hex colors to import).
+    pub base16_input: String,
 }
 
 impl Tty {
     pub fn new() -> Self {
         let settings = Settings::load();
-        let theme = Theme::new(settings.theme_choice());
+        let theme = Theme::from_settings(&settings);
         // A terminal needs a monospace face; honor a user font override if it sets one.
         let font = settings
             .font_family
@@ -72,9 +80,74 @@ impl Tty {
             hovered_tab: None,
             selection: None,
             search: None,
+            settings,
+            show_settings: false,
+            settings_section: 0,
+            base16_input: String::new(),
         };
         tty.new_tab();
         tty
+    }
+
+    /// Open/close the settings panel.
+    pub fn toggle_settings(&mut self) {
+        self.show_settings = !self.show_settings;
+    }
+
+    /// Rebuild the live theme from the current settings and persist them. Every settings
+    /// mutation funnels through here so the panel, disk, and render all stay in step.
+    fn apply_settings(&mut self) {
+        self.theme = Theme::from_settings(&self.settings);
+        self.settings.save();
+    }
+
+    /// Pick the dark/light chrome theme.
+    pub fn set_theme(&mut self, choice: &str) {
+        self.settings.theme = Some(choice.to_string());
+        self.apply_settings();
+    }
+
+    /// Toggle the retro CRT overlay.
+    pub fn toggle_retro(&mut self) {
+        self.settings.retro = Some(!self.settings.retro());
+        self.apply_settings();
+    }
+
+    /// Nudge the font size from the settings stepper (clamped, persisted).
+    pub fn step_font_size(&mut self, delta: f32) {
+        self.zoom(delta);
+        self.settings.font_size = Some(self.font_size);
+        self.settings.save();
+    }
+
+    /// Import the base16 colors in `base16_input` as the terminal palette. No-op if the
+    /// box doesn't hold exactly 16 parseable hex colors.
+    pub fn apply_base16(&mut self) {
+        if let Some(style) = crate::theme::base16::parse(&self.base16_input) {
+            self.settings.set_palette(&style);
+            self.apply_settings();
+        }
+    }
+
+    /// Drop the custom palette, back to the built-in dark/light colors.
+    pub fn reset_palette(&mut self) {
+        self.settings.palette = None;
+        self.apply_settings();
+    }
+
+    /// Edit one palette slot (`0..16` = ANSI, `16`=fg, `17`=bg, `18`=cursor), starting
+    /// from the live palette so single-color tweaks compose.
+    pub fn edit_color(&mut self, idx: usize, color: iced::Color) {
+        let mut style = self.theme.terminal;
+        match idx {
+            0..=15 => style.ansi[idx] = color,
+            16 => style.fg = color,
+            17 => style.bg = color,
+            18 => style.cursor = color,
+            _ => return,
+        }
+        self.settings.set_palette(&style);
+        self.apply_settings();
     }
 
     /// Toggle the `⌘F` find bar. Opening returns the search-field id to focus.

@@ -47,6 +47,10 @@ fn headless(n: usize) -> Tty {
         hovered_tab: None,
         selection: None,
         search: None,
+        settings: Default::default(),
+        show_settings: false,
+        settings_section: 0,
+        base16_input: String::new(),
     }
 }
 
@@ -149,6 +153,22 @@ fn search_toggles_open_and_closed() {
     assert_eq!(tty.search.as_deref(), Some(""));
     assert!(!tty.toggle_search(), "closing returns false");
     assert_eq!(tty.search, None);
+}
+
+#[test]
+fn settings_panel_toggles_and_switches_section() {
+    let mut tty = headless(1);
+    assert!(!tty.show_settings);
+    // ⌘, opens it.
+    let _ = update(&mut tty, Message::Key(Key::Character(",".into()), cmd()));
+    assert!(tty.show_settings);
+    // Switch to the Palette section.
+    let _ = update(&mut tty, Message::SettingsSection(1));
+    assert_eq!(tty.settings_section, 1);
+    // Escape closes it (without going to the shell).
+    let esc = Key::Named(iced::keyboard::key::Named::Escape);
+    let _ = update(&mut tty, Message::Key(esc, Modifiers::default()));
+    assert!(!tty.show_settings);
 }
 
 #[test]

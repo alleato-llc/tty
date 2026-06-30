@@ -34,15 +34,30 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
         }
         Message::WindowResized(h) => state.window_height = h,
+        Message::ToggleSettings => state.toggle_settings(),
+        Message::SettingsSection(i) => state.settings_section = i,
+        Message::SetTheme(choice) => state.set_theme(&choice),
+        Message::ToggleRetro => state.toggle_retro(),
+        Message::FontSizeStep(delta) => state.step_font_size(delta),
+        Message::Base16Changed(s) => state.base16_input = s,
+        Message::ApplyBase16 => state.apply_base16(),
+        Message::ResetPalette => state.reset_palette(),
+        Message::EditColor(idx, color) => state.edit_color(idx, color),
     }
     iced::Task::none()
 }
 
 fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message> {
-    // Escape closes the find bar (when open) instead of going to the shell.
-    if state.search.is_some() && matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
-        state.search = None;
-        return iced::Task::none();
+    // Escape closes the settings panel / find bar (when open) instead of going to the shell.
+    if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.show_settings {
+            state.show_settings = false;
+            return iced::Task::none();
+        }
+        if state.search.is_some() {
+            state.search = None;
+            return iced::Task::none();
+        }
     }
     // App chords use the platform *command* modifier (⌘ on macOS) so Ctrl stays a
     // real terminal control code (Ctrl+C, Ctrl+D, …) sent to the shell.
@@ -57,6 +72,11 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                     if !state.close_tab(state.active) {
                         return iced::exit();
                     }
+                    return iced::Task::none();
+                }
+                // ⌘, opens/closes the settings panel.
+                "," => {
+                    state.toggle_settings();
                     return iced::Task::none();
                 }
                 // Zoom: ⌘+ / ⌘= grow, ⌘− shrink, ⌘0 reset.
