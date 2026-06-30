@@ -81,7 +81,9 @@ fn terminal_for(name: &str) -> TerminalStyle {
         "gruvbox dark" => &GRUVBOX16,
         "solarized dark" => &SOLARIZED_DARK16,
         "solarized light" => &SOLARIZED_LIGHT16,
-        "github" => &GITHUB16,
+        "github light" => &GITHUB16,
+        "neon nights" => &NEON16,
+        "phosphor" => &PHOSPHOR16,
         "dracula" => &DRACULA16,
         _ => return TerminalStyle::default_dark(),
     };
@@ -150,6 +152,16 @@ const SOLARIZED_LIGHT16: [&str; 16] = [
 const GITHUB16: [&str; 16] = [
     "#ffffff","#f6f8fa","#eaeef2","#6e7781","#57606a","#24292f","#1f2328","#1f2328",
     "#cf222e","#bc4c00","#9a6700","#116329","#1b7c83","#0969da","#8250df","#cf222e",
+];
+#[rustfmt::skip]
+const NEON16: [&str; 16] = [
+    "#262335","#2a2139","#392c55","#848bbd","#b6b3c8","#f9f2ff","#ffffff","#ffffff",
+    "#fe4450","#ff8b39","#fede5d","#72f1b8","#36f9f6","#ff7edb","#f97e72","#fe4450",
+];
+#[rustfmt::skip]
+const PHOSPHOR16: [&str; 16] = [
+    "#040805","#0a140b","#123a1e","#1f8a3a","#2f7a4a","#3df06a","#5dff8a","#8aff6a",
+    "#ff5c5c","#ff9e3d","#d6c34a","#5dff8a","#5fe0ff","#8aff6a","#ff6ac1","#2f7a4a",
 ];
 
 /// base16 scheme support. A scheme is 16 colors `base00`..`base0F`; we map them to the
