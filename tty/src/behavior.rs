@@ -17,7 +17,7 @@ use iced::Font;
 use cathode::screen::TerminalScreen;
 
 use crate::message::Message;
-use crate::state::{Tab, Term, Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::state::{MenuKind, Tab, Term, Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use crate::theme::Theme;
 use crate::update::update;
 
@@ -55,7 +55,7 @@ fn headless(n: usize) -> Tty {
         base16_input: String::new(),
         focused: true,
         pointer: iced::Point::ORIGIN,
-        pane_menu: None,
+        menu: None,
     }
 }
 
@@ -278,22 +278,26 @@ fn right_click_focuses_the_pane_and_opens_the_menu_at_the_pointer() {
     let _ = update(&mut tty, Message::PaneRightClick(right));
     assert_eq!(tty.tabs[0].focus, right, "right-click focuses its pane");
     assert_eq!(
-        tty.pane_menu,
-        Some(Point::new(120.0, 80.0)),
-        "the menu anchors at the last pointer position"
+        tty.menu,
+        Some((MenuKind::Pane, Point::new(120.0, 80.0))),
+        "a pane menu anchors at the last pointer position"
     );
     // Dismissing clears it.
     let _ = update(&mut tty, Message::CloseMenu);
-    assert!(tty.pane_menu.is_none());
+    assert!(tty.menu.is_none());
 }
 
 #[test]
-fn right_clicking_a_tab_activates_it_and_opens_the_menu() {
+fn right_clicking_a_tab_activates_it_and_opens_the_tab_menu() {
     let mut tty = headless(2);
     tty.active = 0;
     let _ = update(&mut tty, Message::TabRightClick(1));
     assert_eq!(tty.active, 1, "right-clicking a tab activates it");
-    assert!(tty.pane_menu.is_some(), "and opens the split menu");
+    assert_eq!(
+        tty.menu.map(|(k, _)| k),
+        Some(MenuKind::Tab),
+        "and opens the tab menu"
+    );
 }
 
 #[test]

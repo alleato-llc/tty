@@ -16,9 +16,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 
 - Tabbed terminal (`⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`), close-last-quits, `exit`-aware.
 - **Split panes** — `⌥⌘`+arrows split the focused pane in any direction, `⌃⌘`+arrows move
-  focus, drag a divider to resize, `⌘W` closes the focused pane (→ tab → quit). Each pane
-  is an independent shell; built on iced's `pane_grid`. (Option B below — splits only, no
-  persistence.)
+  focus, drag a divider to resize, `⌘W` closes the focused pane (→ tab → quit). Or
+  right-click a pane (split / close pane) or a tab (new tab / split / close tab). Each
+  pane is an independent shell; built on iced's `pane_grid`. (Option B below — splits
+  only, no persistence.)
 - Full ANSI rendering: 16 / 256 / truecolor + bold, dim, italic, underline, inverse.
 - Scrollback + mouse select / `⌘C` copy.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).

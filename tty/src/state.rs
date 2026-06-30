@@ -109,9 +109,17 @@ pub struct Tty {
     pub focused: bool,
     /// Last known cursor position (window-relative), used to anchor the right-click menu.
     pub pointer: iced::Point,
-    /// When `Some`, the pane context menu is open, anchored at this point. It acts on the
-    /// active tab's focused pane (a right-click focuses/activates its target first).
-    pub pane_menu: Option<iced::Point>,
+    /// When `Some`, a right-click context menu is open: its kind (tab vs pane, which
+    /// picks the item set) and the point to anchor it at. Both act on the active tab.
+    pub menu: Option<(MenuKind, iced::Point)>,
+}
+
+/// Which right-click menu is open — a tab's (split + tab actions) or a pane's (split +
+/// close pane). Both target the active tab's focused pane for splits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuKind {
+    Tab,
+    Pane,
 }
 
 impl Tty {
@@ -141,29 +149,28 @@ impl Tty {
             base16_input: String::new(),
             focused: true,
             pointer: iced::Point::ORIGIN,
-            pane_menu: None,
+            menu: None,
         };
         tty.new_tab();
         tty
     }
 
-    /// Open the pane context menu for a clicked pane: focus it, then anchor the menu at
-    /// the current pointer.
+    /// Open the pane context menu for a clicked pane: focus it, then anchor at the cursor.
     pub fn open_pane_menu(&mut self, pane: pane_grid::Pane) {
         self.focus_pane(pane);
-        self.pane_menu = Some(self.pointer);
+        self.menu = Some((MenuKind::Pane, self.pointer));
     }
 
-    /// Open the pane context menu from a right-clicked tab: activate the tab, then anchor
-    /// the menu at the current pointer (it acts on that tab's focused pane).
+    /// Open the tab context menu from a right-clicked tab: activate the tab, then anchor
+    /// at the cursor (its actions target that tab / its focused pane).
     pub fn open_tab_menu(&mut self, idx: usize) {
         self.activate(idx);
-        self.pane_menu = Some(self.pointer);
+        self.menu = Some((MenuKind::Tab, self.pointer));
     }
 
-    /// Dismiss the pane context menu.
+    /// Dismiss any open context menu.
     pub fn close_menu(&mut self) {
-        self.pane_menu = None;
+        self.menu = None;
     }
 
     /// The whole-window opacity to render with right now: opaque while focused, the

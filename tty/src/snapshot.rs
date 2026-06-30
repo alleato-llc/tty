@@ -15,7 +15,7 @@ use iced::Font;
 use cathode::parser::TermParser;
 use cathode::screen::TerminalScreen;
 
-use crate::state::{Tab, Term, Tty, DEFAULT_FONT_SIZE};
+use crate::state::{MenuKind, Tab, Term, Tty, DEFAULT_FONT_SIZE};
 use crate::theme::Theme;
 use crate::view::view;
 
@@ -64,7 +64,7 @@ fn populated() -> Tty {
         base16_input: String::new(),
         focused: true,
         pointer: iced::Point::ORIGIN,
-        pane_menu: None,
+        menu: None,
     }
 }
 
@@ -111,5 +111,26 @@ fn split_pane_view() {
     assert!(
         matches,
         "snapshot `tty-split` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn tab_context_menu_view() {
+    // Right-clicking a tab opens its menu (new tab / split / close tab).
+    let mut tty = populated();
+    let at = iced::Point::new(64.0, 44.0);
+    tty.pointer = at;
+    tty.menu = Some((MenuKind::Tab, at));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(view(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-tab-menu.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-tab-menu` changed — delete its PNG to re-baseline"
     );
 }

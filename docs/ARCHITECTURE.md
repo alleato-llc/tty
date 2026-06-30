@@ -66,10 +66,11 @@ Thin glue, mirroring `fed`'s module shape:
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. Everything else becomes PTY input via `phosphor::input`.
-- **`view`** — the `rime` `tabs` strip (only when >1 tab), a `pane_grid` over the active
-  tab's panes (each pane a `phosphor` terminal; the focused one's border turns accent
-  only when the tab has >1 pane), and a `rime` `status_bar`. A right-click on a pane or
-  tab opens a `rime` `context_menu` (split / close) anchored at the tracked pointer.
+- **`view`** — the `rime` `tabs` strip (always shown, so a tab is always right-clickable),
+  a `pane_grid` over the active tab's panes (each pane a `phosphor` terminal; the focused
+  one's border turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A
+  right-click opens a `rime` `context_menu` at the tracked pointer — a pane menu
+  (split + close pane) or a tab menu (new tab + split + close tab), per `state.menu`.
 - **`subscription`** — key events + **one always-on output stream** fed by
   `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
 - **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome

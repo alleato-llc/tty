@@ -27,9 +27,9 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
 
     let mut root = Column::new().width(Length::Fill).height(Length::Fill);
 
-    // Tab strip — shown once there's more than one terminal. Clicking the empty area
-    // past the last tab opens a new one (also ⌘T).
-    if state.tabs.len() > 1 {
+    // Tab strip — always shown, so a tab is always there to right-click (split / tab
+    // actions). Clicking the empty area past the last tab opens a new one (also ⌘T).
+    {
         let models: Vec<Tab> = state
             .tabs
             .iter()
@@ -168,18 +168,50 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         chrome.into()
     };
 
-    // The right-click pane menu (split / close) floats above everything, anchored at the
-    // click. Its actions target the active tab's focused pane.
-    if let Some(at) = state.pane_menu {
+    // The right-click context menu floats above everything, anchored at the click. A
+    // tab's menu adds tab actions (new / close tab); a pane's adds "close pane". Both
+    // split the active tab's focused pane.
+    if let Some((kind, at)) = state.menu {
+        use crate::state::MenuKind;
         use iced::widget::pane_grid::Direction;
-        let items = [
-            MenuItem::shortcut("Split left", "⌥⌘←", Message::Split(Direction::Left)),
-            MenuItem::shortcut("Split right", "⌥⌘→", Message::Split(Direction::Right)),
-            MenuItem::shortcut("Split up", "⌥⌘↑", Message::Split(Direction::Up)),
-            MenuItem::shortcut("Split down", "⌥⌘↓", Message::Split(Direction::Down)),
-            MenuItem::separator(),
-            MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane),
-        ];
+        let mut items: Vec<MenuItem<Message>> = Vec::new();
+        // A tab menu leads with "New tab"; both kinds carry the four split directions.
+        if kind == MenuKind::Tab {
+            items.push(MenuItem::shortcut("New tab", "⌘T", Message::NewTab));
+            items.push(MenuItem::separator());
+        }
+        items.push(MenuItem::shortcut(
+            "Split left",
+            "⌥⌘←",
+            Message::Split(Direction::Left),
+        ));
+        items.push(MenuItem::shortcut(
+            "Split right",
+            "⌥⌘→",
+            Message::Split(Direction::Right),
+        ));
+        items.push(MenuItem::shortcut(
+            "Split up",
+            "⌥⌘↑",
+            Message::Split(Direction::Up),
+        ));
+        items.push(MenuItem::shortcut(
+            "Split down",
+            "⌥⌘↓",
+            Message::Split(Direction::Down),
+        ));
+        items.push(MenuItem::separator());
+        // …and close the right thing: the whole tab, or just the pane.
+        match kind {
+            MenuKind::Tab => items.push(MenuItem::shortcut(
+                "Close tab",
+                "⌘W",
+                Message::CloseTab(state.active),
+            )),
+            MenuKind::Pane => {
+                items.push(MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane))
+            }
+        }
         context_menu(base, &items, at, Message::CloseMenu)
     } else {
         base

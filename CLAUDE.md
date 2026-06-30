@@ -75,9 +75,12 @@ keyboard chords handled directly in `update::handle_key`, like the other ⌘ sho
 The same actions are reachable by **right-click**: a `mouse_area` per pane (and the tab
 strip's right-press hook) opens a rime `context_menu` anchored at `state.pointer` (a
 `PointerMoved` subscription tracks the cursor, since `mouse_area` reports a press but not
-its position), acting on the active tab's focused pane. `split_focused` spawns the shell;
-its spawn-free core `split_with(dir, term)` is what the headless tests drive. The focus
-border only renders when a tab has **more than one pane** — a lone pane shows none.
+its position). `state.menu: Option<(MenuKind, Point)>` records which kind is open — a
+**pane** menu (split + close pane) or a **tab** menu (new tab + split + close tab). Both
+target the active tab. The **tab strip is always shown** (even with one tab) so there's
+always a tab to right-click. `split_focused` spawns the shell; its spawn-free core
+`split_with(dir, term)` is what the headless tests drive. The focus border only renders
+when a tab has **more than one pane** — a lone pane shows none.
 
 ## iced
 

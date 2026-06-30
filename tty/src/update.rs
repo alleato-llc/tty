@@ -35,8 +35,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::Pasted(None) => {}
         Message::SearchChanged(q) => state.search = Some(q),
         Message::SearchSubmit => state.search = None,
-        Message::NewTab => state.new_tab(),
+        Message::NewTab => {
+            state.close_menu();
+            state.new_tab();
+        }
         Message::CloseTab(idx) => {
+            state.close_menu();
             if !state.close_tab(idx) {
                 return iced::exit();
             }

@@ -45,10 +45,12 @@ the common case is unchanged.
   border turns the accent color (others use the hairline) and fades with the window when
   unfocused. A lone pane shows no border (no stray accent rectangle).
 - **Right-click menu.** A `mouse_area` per pane (and the tab strip's right-press hook)
-  opens a rime `context_menu` with Split Left/Right/Up/Down + Close pane, anchored at the
-  tracked pointer — the same actions as the chords, for discoverability. Phosphor only
-  captures the left button (selection) when mouse-reporting is off, so the right-click
-  reaches the `mouse_area`; when an app enables mouse-reporting, the click goes to it.
+  opens a rime `context_menu` anchored at the tracked pointer — the same actions as the
+  chords, for discoverability. `state.menu` records which kind is open: a **pane** menu
+  (Split ×4 + Close pane) or a **tab** menu (New tab + Split ×4 + Close tab). The **tab
+  strip is always shown** (even with a single tab) so a tab is always right-clickable.
+  Phosphor only captures the left button (selection) when mouse-reporting is off, so the
+  right-click reaches the `mouse_area`; when an app enables mouse-reporting it goes there.
 
 ## Consequences
 
