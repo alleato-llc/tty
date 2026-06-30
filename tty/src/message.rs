@@ -78,4 +78,6 @@ pub enum Message {
     Focused(bool),
     /// Set the unfocused-window terminal opacity (`1.0` = off).
     SetUnfocusedOpacity(f32),
+    /// Toggle inking the active tab with the accent color.
+    SetTabHighlight(bool),
 }

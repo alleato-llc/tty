@@ -92,6 +92,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::EditColor(idx, color) => state.edit_color(idx, color),
         Message::Focused(f) => state.focused = f,
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
+        Message::SetTabHighlight(on) => state.set_tab_highlight(on),
     }
     iced::Task::none()
 }

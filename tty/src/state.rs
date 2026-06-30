@@ -248,6 +248,12 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Toggle inking the active tab with the accent color. Persisted.
+    pub fn set_tab_highlight(&mut self, on: bool) {
+        self.settings.tab_highlight = Some(on);
+        self.settings.save();
+    }
+
     /// Open/close the settings panel.
     pub fn toggle_settings(&mut self) {
         self.show_settings = !self.show_settings;

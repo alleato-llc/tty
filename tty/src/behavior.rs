@@ -217,6 +217,17 @@ fn unfocused_opacity_applies_only_when_unfocused() {
 }
 
 #[test]
+fn tab_highlight_toggles_and_defaults_on() {
+    let mut tty = headless(1);
+    assert!(tty.settings.tab_highlight(), "on by default");
+    let _ = update(&mut tty, Message::SetTabHighlight(false));
+    assert_eq!(tty.settings.tab_highlight, Some(false));
+    assert!(!tty.settings.tab_highlight(), "honors the explicit off");
+    let _ = update(&mut tty, Message::SetTabHighlight(true));
+    assert!(tty.settings.tab_highlight());
+}
+
+#[test]
 fn splitting_adds_a_focused_pane_to_the_tab() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(1);

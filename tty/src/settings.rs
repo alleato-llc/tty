@@ -41,6 +41,11 @@ pub struct Settings {
     /// the feature off; lower = more see-through). Focused is always opaque.
     #[serde(default)]
     pub unfocused_opacity: Option<f32>,
+    /// Ink the active tab with the accent color (`true`/absent) or with a subtler
+    /// normal-ink emphasis (`false`). Either way the active tab reads as active versus
+    /// the muted inactive tabs; this just dials the loudness.
+    #[serde(default)]
+    pub tab_highlight: Option<bool>,
 }
 
 impl Settings {
@@ -69,6 +74,11 @@ impl Settings {
         self.unfocused_opacity
             .unwrap_or(1.0)
             .clamp(MIN_OPACITY, 1.0)
+    }
+
+    /// Whether to ink the active tab with the accent (default `true`).
+    pub fn tab_highlight(&self) -> bool {
+        self.tab_highlight.unwrap_or(true)
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).

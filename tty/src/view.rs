@@ -4,7 +4,7 @@ use iced::{Border, Element, Length};
 use rime::theme;
 use rime::widgets::{
     button, color_field, context_menu, labeled, section, select, slider, status_bar, stepper, tabs,
-    text_field, tooltip, MenuItem, Tab, TooltipPosition,
+    text_field, toggle, tooltip, MenuItem, Tab, TabBarStyle, TooltipPosition,
 };
 
 use crate::message::Message;
@@ -59,6 +59,10 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
             Message::HoverTab,
             Message::TabRightClick, // right-click a tab → split context menu
             Message::NewTab,
+            TabBarStyle {
+                highlight_active: state.settings.tab_highlight(),
+                text_size: 12.0,
+            },
         ));
     }
 
@@ -171,7 +175,7 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
     let base: Element<'_, Message> = if state.show_settings {
         rime::widgets::settings(
             chrome,
-            &["Appearance", "Palette"],
+            &["Appearance", "Palette", "Keys"],
             state.settings_section,
             Message::SettingsSection,
             settings_body(state),
@@ -240,8 +244,81 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
 fn settings_body(state: &Tty) -> Element<'_, Message> {
     match state.settings_section {
         1 => palette_section(state),
+        2 => keys_section(),
         _ => appearance_section(state),
     }
+}
+
+/// Keys: a read-only reference of the keyboard shortcuts, grouped by area. This is
+/// documentation, not configuration — the bindings live in `update::handle_key` and
+/// `phosphor::input`; this list mirrors them so users don't have to hunt the README.
+fn keys_section<'a>() -> Element<'a, Message> {
+    // (group title, rows of (chord, what it does)).
+    let groups: [(&str, &[(&str, &str)]); 4] = [
+        (
+            "Tabs & panes",
+            &[
+                ("⌘T / ⌘N", "New tab"),
+                ("⌘1–⌘9", "Jump to tab"),
+                ("⌥⌘ + arrows", "Split the focused pane (←/→/↑/↓)"),
+                ("⌃⌘ + arrows", "Move focus between panes"),
+                ("drag a divider", "Resize a split"),
+                ("right-click / ⌃-click", "Tab or pane context menu"),
+                ("⌘W", "Close pane → tab → quit"),
+            ],
+        ),
+        (
+            "Line editing",
+            &[
+                ("⌥← / ⌥→", "Move by word"),
+                ("⌘← / ⌘→", "To line start / end"),
+                ("⌥⌫", "Delete a word"),
+                ("⌘⌫", "Delete to line start"),
+                ("⌘C / ⌘V", "Copy selection / paste"),
+                ("Ctrl+C", "Interrupt (real SIGINT)"),
+            ],
+        ),
+        (
+            "View",
+            &[
+                ("⌘+ / ⌘−", "Font zoom"),
+                ("⌘0", "Reset zoom"),
+                ("⌘F", "Find in scrollback"),
+                ("wheel", "Scroll back through history"),
+                ("⌘,", "Settings"),
+            ],
+        ),
+        (
+            "Find",
+            &[("Enter", "Close the find bar"), ("Esc", "Cancel")],
+        ),
+    ];
+
+    let t = theme::tokens();
+    let mut body = Column::new().spacing(14);
+    for (title, rows) in groups {
+        let mut list = Column::new().spacing(6);
+        for (chord, desc) in rows {
+            list = list.push(
+                row![
+                    container(
+                        text(*chord)
+                            .size(12)
+                            .color(t.ink)
+                            .font(iced::Font::MONOSPACE)
+                    )
+                    .width(Length::Fixed(160.0)),
+                    text(*desc).size(12).color(t.muted),
+                ]
+                .spacing(8),
+            );
+        }
+        body = body.push(column![section(title), list].spacing(8));
+    }
+
+    scrollable(body.padding(iced::Padding::ZERO.right(8)))
+        .height(Length::Fill)
+        .into()
 }
 
 /// Appearance: named theme, font family, font size.
@@ -281,6 +358,14 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             format!("{}px", state.font_size as u32),
             Message::FontSizeStep(-1.0),
             Message::FontSizeStep(1.0),
+        ),
+        // Tabs: dial how loud the active tab reads. Off swaps the accent ink for a
+        // subtler normal-ink emphasis (it still beats the muted inactive tabs).
+        section("Tabs"),
+        toggle(
+            "Highlight active tab",
+            state.settings.tab_highlight(),
+            Message::SetTabHighlight(!state.settings.tab_highlight()),
         ),
         // Transparency that kicks in only when the window loses focus. Shown as a
         // 0–95% transparency amount; stored as the resulting opacity (1 − amount).

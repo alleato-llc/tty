@@ -82,8 +82,12 @@ Thin glue, mirroring `fed`'s module shape:
   `Palette` with a `phosphor::TerminalStyle`. Named themes come from rime's shared
   `builtin_themes()` catalog (8, the same list fed-ide shows), each with a base16 ANSI
   palette; a base16 import / panel edit becomes a "Custom" palette (chrome derived from
-  the terminal colors). `tty.settings.json` persists the theme name, font family/size,
-  any custom palette, and the "Transparency On Blur" amount. `window_opacity()` drives
+  the terminal colors). The settings panel also carries a **Highlight active tab**
+  toggle (the rime `tabs` strip takes a `TabBarStyle { highlight_active, text_size }`,
+  so accent-ink vs. subtler emphasis is host-tunable) and a read-only **Keys** section
+  documenting the shortcuts. `tty.settings.json` persists the theme name, font
+  family/size, any custom palette, the active-tab highlight flag, and the
+  "Transparency On Blur" amount. `window_opacity()` drives
   a uniform per-surface fade when the window loses focus (no runtime window-opacity API
   in iced 0.14), clamped to `settings::MIN_OPACITY` so it tops out at 95% and never
   fades to an invisible, unrecoverable window.
