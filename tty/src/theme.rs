@@ -11,16 +11,12 @@ use phosphor::TerminalStyle;
 use crate::settings::Settings;
 
 /// The active look: a rime chrome [`Palette`] (status bar, tab strip), the
-/// [`TerminalStyle`] the terminal renders with, and whether the retro overlay is on.
+/// and the [`TerminalStyle`] the terminal renders with.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub choice: ThemeChoice,
     pub palette: Palette,
     pub terminal: TerminalStyle,
-    /// Retro CRT overlay intensities (`0.0`..=`1.0`): the refresh lines and the
-    /// geometric glass-bulge curvature. Both `0.0` means the overlay is off.
-    pub scanlines: f32,
-    pub curvature: f32,
 }
 
 impl Theme {
@@ -30,21 +26,17 @@ impl Theme {
             choice,
             palette: choice.palette(),
             terminal: terminal_style(choice),
-            scanlines: 0.0,
-            curvature: 0.0,
         }
     }
 
     /// Build from persisted settings: chrome from the dark/light choice, terminal from
-    /// the custom palette if set (else the default), plus the retro intensities.
+    /// the custom palette if set (else the default).
     pub fn from_settings(s: &Settings) -> Self {
         let choice = s.theme_choice();
         Self {
             choice,
             palette: choice.palette(),
             terminal: s.custom_style().unwrap_or_else(|| terminal_style(choice)),
-            scanlines: s.scanlines(),
-            curvature: s.curvature(),
         }
     }
 
@@ -149,16 +141,10 @@ mod tests {
     }
 
     #[test]
-    fn from_settings_carries_retro_and_custom_palette() {
-        let mut s = Settings {
-            scanlines: Some(0.7),
-            curvature: Some(0.4),
-            ..Settings::default()
-        };
+    fn from_settings_carries_custom_palette() {
+        let mut s = Settings::default();
         s.set_palette(&base16::parse(&sixteen()).unwrap());
         let theme = Theme::from_settings(&s);
-        assert_eq!(theme.scanlines, 0.7, "scanline intensity flows through");
-        assert_eq!(theme.curvature, 0.4, "curvature intensity flows through");
         assert_eq!(theme.terminal.bg, Color::from_rgb8(0x00, 0x00, 0x00));
     }
 }

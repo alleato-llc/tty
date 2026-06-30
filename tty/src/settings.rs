@@ -1,8 +1,8 @@
 //! tty's persisted preferences — a small `tty.settings.json` in the user config dir.
 //! The terminal counterpart of fed's `patina::Settings`, scoped to what a terminal
-//! actually needs: dark/light, font, the retro look, and an optional custom palette
-//! (the 16 ANSI colors + fg/bg/cursor) edited in the settings panel or imported from a
-//! base16 scheme.
+//! actually needs: dark/light, font, and an optional custom palette (the 16 ANSI
+//! colors + fg/bg/cursor) edited in the settings panel or imported from a base16
+//! scheme.
 
 use std::path::PathBuf;
 
@@ -30,13 +30,6 @@ pub struct Settings {
     pub font_family: Option<String>,
     #[serde(default)]
     pub font_size: Option<f32>,
-    /// The retro CRT overlay, as two independent intensities (`0.0`..=`1.0`):
-    /// `scanlines` are the horizontal refresh lines, `curvature` is the geometric
-    /// glass-bulge warp. Absent reads as `0.0` (off).
-    #[serde(default)]
-    pub scanlines: Option<f32>,
-    #[serde(default)]
-    pub curvature: Option<f32>,
     /// A custom palette overriding the built-in dark/light terminal colors.
     #[serde(default)]
     pub palette: Option<Palette>,
@@ -68,16 +61,6 @@ impl Settings {
             Some("light") => ThemeChoice::Light,
             _ => ThemeChoice::Dark,
         }
-    }
-
-    /// Scanline intensity (`0.0` = off).
-    pub fn scanlines(&self) -> f32 {
-        self.scanlines.unwrap_or(0.0).clamp(0.0, 1.0)
-    }
-
-    /// Curvature / glass-bulge intensity (`0.0` = off).
-    pub fn curvature(&self) -> f32 {
-        self.curvature.unwrap_or(0.0).clamp(0.0, 1.0)
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).

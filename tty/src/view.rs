@@ -3,8 +3,7 @@ use iced::{Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, labeled, section, select, slider, status_bar, stepper, tabs, text_field,
-    Tab,
+    button, color_field, labeled, section, select, status_bar, stepper, tabs, text_field, Tab,
 };
 
 use crate::message::Message;
@@ -70,8 +69,7 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
                 Message::Select,
                 Message::PtyBytes,
             )
-            .find(state.search.clone())
-            .retro(state.theme.scanlines, state.theme.curvature),
+            .find(state.search.clone()),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -131,7 +129,7 @@ fn settings_body(state: &Tty) -> Element<'_, Message> {
     }
 }
 
-/// Appearance: dark/light theme, font size, the retro overlay.
+/// Appearance: dark/light theme and font size.
 fn appearance_section(state: &Tty) -> Element<'_, Message> {
     let themes = ["Dark".to_string(), "Light".to_string()];
     let current = match state.theme.choice {
@@ -143,7 +141,6 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
         Message::SetTheme(s.to_lowercase())
     });
 
-    let pct = |v: f32| format!("{}%", (v * 100.0).round() as i32);
     column![
         section("Appearance"),
         labeled("Theme", theme_pick),
@@ -152,21 +149,6 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             format!("{}px", state.font_size as u32),
             Message::FontSizeStep(-1.0),
             Message::FontSizeStep(1.0),
-        ),
-        section("Retro CRT"),
-        slider(
-            "Scanlines",
-            0.0..=1.0,
-            state.theme.scanlines,
-            pct(state.theme.scanlines),
-            Message::SetScanlines,
-        ),
-        slider(
-            "Screen curve",
-            0.0..=1.0,
-            state.theme.curvature,
-            pct(state.theme.curvature),
-            Message::SetCurvature,
         ),
     ]
     .spacing(14)

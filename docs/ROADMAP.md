@@ -52,15 +52,15 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 
 ### Customization milestone
 
-- [ ] **Visual settings panel** — ✦§ — reuse rime's `settings` shell + `color_field`
-      (the same kit fed's settings use): theme, font family/size, cursor style,
-      scrollback size, keybindings — all GUI, **live preview**, no file to hand-edit.
-- [ ] **base16 import** — ✦ — paste/import any [base16](https://github.com/chriskempson/base16)
+- [x] **Visual settings panel** — ✦§ — reuse rime's `settings` shell + `color_field`
+      (the same kit fed's settings use): theme, font family/size — all GUI, no file to
+      hand-edit.
+- [x] **base16 import** — ✦ — paste/import any [base16](https://github.com/chriskempson/base16)
       scheme and the 16 ANSI colors + fg/bg/cursor + chrome palette retheme instantly.
       Taps a huge existing ecosystem with zero learning curve.
-- [ ] **Signature "phosphor" look** — ✦ — an optional retro CRT toggle (scanlines +
-      vignette + phosphor glow tint). On-brand (cathode→phosphor), fun, off by default.
-      MVP is a render overlay; a true curvature/bloom shader is a backlog item.
+- ~~**Signature "phosphor" look** (retro CRT scanlines + screen warp)~~ — **dropped.**
+      Built (an overlay + a real geometric warp) and reviewed; cut as not the look we
+      want. The cathode→phosphor *naming* stays; there's no CRT effect in the app.
 
 ---
 

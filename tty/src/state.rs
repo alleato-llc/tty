@@ -49,7 +49,7 @@ pub struct Tty {
     pub selection: Option<String>,
     /// The scrollback search query when the `⌘F` find bar is open (`None` = closed).
     pub search: Option<String>,
-    /// Persisted preferences (theme, font, retro, custom palette).
+    /// Persisted preferences (theme, font, custom palette).
     pub settings: Settings,
     /// Whether the `⌘,` settings panel is open.
     pub show_settings: bool,
@@ -104,18 +104,6 @@ impl Tty {
     /// Pick the dark/light chrome theme.
     pub fn set_theme(&mut self, choice: &str) {
         self.settings.theme = Some(choice.to_string());
-        self.apply_settings();
-    }
-
-    /// Set the scanline ("refresh lines") intensity (`0.0`..=`1.0`).
-    pub fn set_scanlines(&mut self, v: f32) {
-        self.settings.scanlines = Some(v.clamp(0.0, 1.0));
-        self.apply_settings();
-    }
-
-    /// Set the curvature / glass-bulge intensity (`0.0`..=`1.0`).
-    pub fn set_curvature(&mut self, v: f32) {
-        self.settings.curvature = Some(v.clamp(0.0, 1.0));
         self.apply_settings();
     }
 
