@@ -122,19 +122,24 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 
 ## Multiplexing — where we landed
 
-> Multiplexing = **splits/panes** and/or **persistent sessions** (detach/reattach)
-> *inside* tty, à la tmux/zellij/WezTerm. This was the single biggest fork in tty's
-> identity, because it pulls against **§ simplicity**. Three coherent stances:
+> Multiplexing = **splits/panes**, **ephemeral detach** (tear a tab into its own
+> window), and/or **persistent sessions** (survive a crash/restart) *inside* tty, à la
+> tmux/zellij/WezTerm. This was the single biggest fork in tty's identity, because it
+> pulls against **§ simplicity**. Four coherent stances:
 
 | Option | What it means | Status |
 |---|---|---|
 | **A. No multiplexing** | Lean on `tmux`/`zellij`. tty stays one clean window with tabs. | superseded by B |
 | **B. Splits only** | In-window pane splits, no persistence. | **shipped** — a bounded `pane_grid` split tree, one `phosphor` per pane, no server/protocol. The `Term` model was extended into a per-tab pane tree exactly as scoped. |
-| **C. Splits + persistent sessions** | Detach/reattach, survive crashes — a tmux replacement. | **out** — a session server + serialization is a different product. |
+| **C. Splits + ephemeral detach** | Tear a tab into its own OS window and dock it back — same process, no server. | **shipped** — a `daemon`-model multi-window tear-off; the owned `Tab` moves between windows. Detach via menu / tear-off drag; reattach via button / close / drag-dock (ADR 0003). A detached shell is ephemeral (dies with the app). |
+| **D. Persistent sessions** | Detach/reattach that **survives a crash/restart** — a session server + serialization, a tmux replacement. | **out** — a different product. |
 
-We shipped **B** the way the constraint demanded: no config language, no server. **C**
-stays off the table. The complementary bet still holds — make tty *excellent under tmux*
-(correct mouse, OSC 52, titles, clipboard) so the combo beats a heavyweight terminal.
+We shipped **B** and **C** the way the constraint demanded: no config language, no
+session server. **C** is *ephemeral* multi-window only — the line ADR 0003 draws is that
+a live tab can move between windows of the running process, but **D** (persistent
+sessions surviving restart) stays off the table. The complementary bet still holds —
+make tty *excellent under tmux* (correct mouse, OSC 52, titles, clipboard) so the combo
+beats a heavyweight terminal.
 
 ---
 
