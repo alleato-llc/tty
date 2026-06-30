@@ -19,7 +19,12 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 - Scrollback + mouse select / `⌘C` copy.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
 - **Output-driven repaint** — redraw on shell output, idle-silent (no polling tick).
-- Dark / light theme (rime `ThemeChoice`), `tty.settings.json`.
+- **Theme catalog** — 8 named themes (Dracula, Nord, Gruvbox Dark, Solarized
+  Dark/Light, GitHub Light, Neon Nights, Phosphor) shared via rime so tty and fed-ide
+  offer one identical list; persisted in `tty.settings.json`.
+- **Font family + size** — a curated monospace dropdown and `⌘±`/`⌘0` (or the panel) size.
+- **Unfocused-window transparency** — optional, configurable fade of the whole window
+  (chrome + grid + text) when it loses focus; opaque while focused.
 - Embeddable: `cathode` (engine) + `phosphor` (widget) also power fed-ide's panel.
 
 ---
@@ -55,9 +60,16 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 - [x] **Visual settings panel** — ✦§ — reuse rime's `settings` shell + `color_field`
       (the same kit fed's settings use): theme, font family/size — all GUI, no file to
       hand-edit.
+- [x] **Theme catalog (8 themes, shared via rime)** — ✦ — the named-palette set lives in
+      rime, so tty and fed-ide present one identical list; a custom/base16 palette reads
+      as "Custom".
+- [x] **Font family picker** — ✦ — a curated monospace dropdown (no free-form font DSL).
 - [x] **base16 import** — ✦ — paste/import any [base16](https://github.com/chriskempson/base16)
       scheme and the 16 ANSI colors + fg/bg/cursor + chrome palette retheme instantly.
       Taps a huge existing ecosystem with zero learning curve.
+- [x] **Unfocused-window transparency** — ✦ — an optional slider fades the whole window
+      (chrome + grid + text) when it loses focus; opaque while focused. iced 0.14 has no
+      runtime window-opacity action, so it's a uniform per-surface fade at view-time.
 - ~~**Signature "phosphor" look** (retro CRT scanlines + screen warp)~~ — **dropped.**
       Built (an overlay + a real geometric warp) and reviewed; cut as not the look we
       want. The cathode→phosphor *naming* stays; there's no CRT effect in the app.

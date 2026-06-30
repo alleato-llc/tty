@@ -51,7 +51,15 @@ cargo clippy --all-targets -- -D warnings
 - `⌘T` / `⌘N` new tab · `⌘W` close tab (or the last → quit) · `⌘1`–`⌘9` jump to tab
 - `⌘+` / `⌘−` font zoom · `⌘0` reset
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell
-- wheel to scroll back through history
+- `⌘F` find in scrollback · `⌘,` settings · wheel to scroll back through history
+
+## Customize
+
+`⌘,` opens a visual settings panel (no config file to hand-edit): pick one of 8 named
+themes (the same catalog fed-ide ships, shared via rime) or import any
+[base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
+size, and optionally fade the whole window when it loses focus. Settings persist to
+`tty.settings.json`.
 
 ## Landing page
 

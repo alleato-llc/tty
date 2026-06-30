@@ -45,10 +45,19 @@ The host enters it once at the top of `view()`:
 let _scope = theme::enter(self.theme.palette); // RAII; drops at end of view
 ```
 
-Components call `theme::tokens()` at view-time. tty's theming is deliberately tiny —
-it leans on rime's built-in `ThemeChoice` (Dracula dark / GitHub light); see
-`tty/src/theme.rs`. If you need a new reusable primitive, **add it to rime**, then
-depend on it here — don't hand-roll a styled widget.
+Components call `theme::tokens()` at view-time. tty's `theme.rs` builds on rime's
+shared catalog: `rime::theme::builtin_themes()` gives the 8 named chrome palettes
+(Dracula, Nord, Gruvbox Dark, Solarized Dark/Light, GitHub Light, Neon Nights,
+Phosphor) — the same list fed-ide shows — and tty pairs each with a `TerminalStyle`
+(its base16 ANSI palette). A base16 import / panel edit becomes a "Custom" palette that
+re-themes both the grid and the chrome. **Keep the catalog in rime**, not forked here,
+so the two apps never drift. If you need a new reusable primitive, **add it to rime**,
+then depend on it here — don't hand-roll a styled widget.
+
+The **whole window fades when unfocused** (an optional transparency setting): `view()`
+runs the palette and `TerminalStyle` through `fade_palette`/`fade_style` by
+`state.window_opacity()`, and `state::theme()` fades the iced runtime theme to match —
+iced 0.14 has no runtime window-opacity action, so the fade is uniform per-surface.
 
 ## iced
 

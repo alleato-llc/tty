@@ -67,8 +67,14 @@ Thin glue, mirroring `fed`'s module shape:
   and a `rime` `status_bar`.
 - **`subscription`** — key events + **one always-on output stream** fed by
   `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
-- **`theme` / `settings`** — tiny: `rime::theme::ThemeChoice` (Dracula/GitHub) paired
-  with a `phosphor::TerminalStyle`; `tty.settings.json` selects dark/light + font.
+- **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome
+  `Palette` with a `phosphor::TerminalStyle`. Named themes come from rime's shared
+  `builtin_themes()` catalog (8, the same list fed-ide shows), each with a base16 ANSI
+  palette; a base16 import / panel edit becomes a "Custom" palette (chrome derived from
+  the terminal colors). `tty.settings.json` persists the theme name, font family/size,
+  any custom palette, and the unfocused-transparency amount. `window_opacity()` drives
+  a uniform per-surface fade when the window loses focus (no runtime window-opacity API
+  in iced 0.14).
 
 ## Shared with fed-ide
 
