@@ -72,9 +72,10 @@ Thin glue, mirroring `fed`'s module shape:
   `builtin_themes()` catalog (8, the same list fed-ide shows), each with a base16 ANSI
   palette; a base16 import / panel edit becomes a "Custom" palette (chrome derived from
   the terminal colors). `tty.settings.json` persists the theme name, font family/size,
-  any custom palette, and the unfocused-transparency amount. `window_opacity()` drives
+  any custom palette, and the "Transparency On Blur" amount. `window_opacity()` drives
   a uniform per-surface fade when the window loses focus (no runtime window-opacity API
-  in iced 0.14).
+  in iced 0.14), clamped to `settings::MIN_OPACITY` so it tops out at 95% and never
+  fades to an invisible, unrecoverable window.
 
 ## Shared with fed-ide
 

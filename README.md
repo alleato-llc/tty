@@ -58,8 +58,8 @@ cargo clippy --all-targets -- -D warnings
 `⌘,` opens a visual settings panel (no config file to hand-edit): pick one of 8 named
 themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
-size, and optionally fade the whole window when it loses focus. Settings persist to
-`tty.settings.json`.
+size, and set **Transparency On Blur** to fade the whole window (up to 95%) when it
+loses focus. Settings persist to `tty.settings.json`.
 
 ## Landing page
 

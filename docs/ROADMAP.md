@@ -23,8 +23,8 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   Dark/Light, GitHub Light, Neon Nights, Phosphor) shared via rime so tty and fed-ide
   offer one identical list; persisted in `tty.settings.json`.
 - **Font family + size** — a curated monospace dropdown and `⌘±`/`⌘0` (or the panel) size.
-- **Unfocused-window transparency** — optional, configurable fade of the whole window
-  (chrome + grid + text) when it loses focus; opaque while focused.
+- **Transparency On Blur** — optional, configurable fade of the whole window (chrome +
+  grid + text) when it loses focus, up to 95%; opaque while focused.
 - Embeddable: `cathode` (engine) + `phosphor` (widget) also power fed-ide's panel.
 
 ---
@@ -67,8 +67,8 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 - [x] **base16 import** — ✦ — paste/import any [base16](https://github.com/chriskempson/base16)
       scheme and the 16 ANSI colors + fg/bg/cursor + chrome palette retheme instantly.
       Taps a huge existing ecosystem with zero learning curve.
-- [x] **Unfocused-window transparency** — ✦ — an optional slider fades the whole window
-      (chrome + grid + text) when it loses focus; opaque while focused. iced 0.14 has no
+- [x] **Transparency On Blur** — ✦ — a tooltipped slider fades the whole window (chrome +
+      grid + text) up to 95% when it loses focus; opaque while focused. iced 0.14 has no
       runtime window-opacity action, so it's a uniform per-surface fade at view-time.
 - ~~**Signature "phosphor" look** (retro CRT scanlines + screen warp)~~ — **dropped.**
       Built (an overlay + a real geometric warp) and reviewed; cut as not the look we

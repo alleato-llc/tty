@@ -54,10 +54,12 @@ re-themes both the grid and the chrome. **Keep the catalog in rime**, not forked
 so the two apps never drift. If you need a new reusable primitive, **add it to rime**,
 then depend on it here — don't hand-roll a styled widget.
 
-The **whole window fades when unfocused** (an optional transparency setting): `view()`
-runs the palette and `TerminalStyle` through `fade_palette`/`fade_style` by
+The **whole window fades when unfocused** ("Transparency On Blur"): `view()` runs the
+palette and `TerminalStyle` through `fade_palette`/`fade_style` by
 `state.window_opacity()`, and `state::theme()` fades the iced runtime theme to match —
-iced 0.14 has no runtime window-opacity action, so the fade is uniform per-surface.
+iced 0.14 has no runtime window-opacity action, so the fade is uniform per-surface. The
+opacity is clamped to `settings::MIN_OPACITY` (a 95% transparency cap) so the window
+can never fade to invisible.
 
 ## iced
 
