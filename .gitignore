@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# web/ landing page
+web/node_modules
+web/dist
+web/.astro
+
+.DS_Store

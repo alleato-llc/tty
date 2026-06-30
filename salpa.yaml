@@ -1,0 +1,17 @@
+# salpa drives tty's static-site deploy (S3 + CloudFront). `salpa deploy` builds
+# web/ with the node recipe and syncs web/dist to the bucket, then invalidates the
+# CloudFront distribution (found by its alias == the bucket).
+#
+# This config is the SITE deliverable only. The signed/notarized macOS app dmg is a
+# separate deliverable with its own config (salpa is one product per config): see
+# ci/salpa-tty.yaml, driven by .github/workflows/release.yml. Linux/Windows binaries
+# are plain cargo builds in that same workflow. So only `deploy` is configured here.
+#
+# These keys only INFORM the stage; the CI trigger decides when it runs.
+product: tty
+version: git
+
+deploy:
+  source: web # node recipe: npm build web/, then sync web/dist
+  bucket: tty.alleato.dev # the site bucket; --delete never touches downloads
+  invalidate: true # CloudFront alias == bucket

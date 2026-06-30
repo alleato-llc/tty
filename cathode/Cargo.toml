@@ -1,0 +1,11 @@
+[package]
+name = "cathode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+portable-pty = { workspace = true }
+vte = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }

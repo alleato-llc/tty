@@ -1,0 +1,90 @@
+name: Deploy site
+
+# The landing page in web/ deploys to the static host (tty.alleato.dev) on every
+# push to main that TOUCHES web/ (or the salpa config). If nothing under web/
+# changed, the path filter means this workflow never starts.
+#
+# Deploy is driven by `salpa deploy` (the house release tool): it builds web/ with
+# the node recipe, `aws s3 sync`s web/dist into the bucket, and invalidates the
+# CloudFront distribution (found by its alias == the bucket). The bucket and
+# invalidate flag live in salpa.yaml, not here.
+#
+# Auth is short-lived OIDC credentials (no stored keys). Required repository
+# config (Settings -> Secrets and variables -> Actions):
+#   vars.AWS_REGION           region of the deploy role (e.g. us-east-1)
+#   vars.AWS_SITE_ROLE_ARN    arn of the OIDC deploy role for tty
+#   secrets.SALPA_INSTALL_TOKEN  (optional) token to `go install` salpa if its
+#                                repo is private; omit for a public module.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "salpa.yaml"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # assume the deploy role via OIDC
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  deploy:
+    name: Build and deploy web/ with salpa
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # salpa shells out to npm (build) and aws (sync + invalidate). aws is
+      # preinstalled on the runner; node and go are set up here.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install salpa
+        env:
+          SALPA_TOKEN: ${{ secrets.SALPA_INSTALL_TOKEN }}
+        run: |
+          set -euo pipefail
+          # If salpa's module is private, authenticate the module download.
+          if [ -n "${SALPA_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${SALPA_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+            go env -w GOPRIVATE=github.com/alleato-llc/*
+          fi
+          go install github.com/alleato-llc/salpa@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # The Actions logs are public; mask the account id (embedded in the role
+      # arn) before any AWS command can echo it.
+      - name: Mask account id
+        env:
+          ROLE_ARN: ${{ vars.AWS_SITE_ROLE_ARN }}
+        run: echo "::add-mask::$(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
+
+      - name: Configure deploy credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_SITE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Builds web/, syncs web/dist to the bucket, invalidates CloudFront —
+      # all per salpa.yaml's `deploy:` block.
+      - name: Deploy
+        run: salpa deploy

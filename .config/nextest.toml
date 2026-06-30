@@ -1,0 +1,22 @@
+# cargo-nextest configuration. nextest is *the* test runner for this repo (mirroring
+# fed). Plain `cargo test` still runs the pure unit tests, but it can't express the
+# serial group below, so it races on the UI tests.
+#
+#  - snapshot::*  — render real pixels; their baselines are backend-specific (wgpu) and
+#    machine-local, so they're EXCLUDED from the default run via `default-filter`.
+#    Opt in on a matched backend:
+#        cargo nextest run --ignore-default-filter                 # whole suite
+#        cargo nextest run --ignore-default-filter -E 'test(snapshot)'
+#
+#  - snapshot::* and behavior::* — share a config dir (and the GPU), so they can't run
+#    concurrently. The `serial-ui` group runs them one-at-a-time; the rest stays parallel.
+
+[profile.default]
+default-filter = 'not test(snapshot)'
+
+[test-groups]
+serial-ui = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(snapshot) | test(behavior)'
+test-group = 'serial-ui'

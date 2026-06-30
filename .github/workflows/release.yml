@@ -1,0 +1,213 @@
+name: Release
+
+# Prebuilt binaries are the point of truth for downloads (the landing page's
+# Download buttons link to /releases/latest). A release is driven by a version TAG:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Two paths attach to one GitHub Release:
+#   • Linux + Windows — plain `cargo build` packaged as tar.gz / zip.
+#   • macOS — a SIGNED, NOTARIZED, universal (Intel + Apple Silicon) .dmg, built by
+#     `salpa` (our house release tool) via the rust recipe. tty ships as Tty.app.
+#
+# rime is a sibling path dependency (../rime/rime), so every Rust job checks it
+# out next to tty. See ci.yml for the RIME_DEPLOY_TOKEN note.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the release + upload the binaries
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Gate the whole release on the test suite: nothing is created, built, or published
+  # until tests pass on the tagged commit (tag pushes bypass branch protection, so the
+  # release must run them itself). Runs the unit + headless-behavior tiers via nextest;
+  # snapshots are excluded by the default-filter in .config/nextest.toml.
+  test:
+    name: Test (release gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tty
+        uses: actions/checkout@v4
+        with:
+          path: tty
+      - name: Checkout rime (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/rime
+          path: rime
+          token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install graphics/windowing libraries (iced + wgpu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev xvfb
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tty
+      - name: Test (unit + behavior)
+        working-directory: tty
+        run: xvfb-run -a cargo nextest run
+
+  # Cut the (empty) release first so every build job only attaches assets to it.
+  # Gated on `test` so a red suite blocks the release before anything is published.
+  create-release:
+    name: Create GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+
+  # Linux + Windows: unsigned binary, one archive per platform.
+  build:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    steps:
+      - name: Checkout tty
+        uses: actions/checkout@v4
+        with:
+          path: tty
+      - name: Checkout rime (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/rime
+          path: rime
+          token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install graphics/windowing libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Build
+        working-directory: tty
+        run: cargo build --release --target ${{ matrix.target }} --bins
+
+      # Package the `tty` binary (+ README, and LICENSE) into one archive named
+      # tty-<version>-<target>.<ext>.
+      - name: Package
+        shell: bash
+        working-directory: tty
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage="tty-${version}-${{ matrix.target }}"
+          mkdir "$stage"
+          bindir="target/${{ matrix.target }}/release"
+          cp README.md "$stage/" || true
+          [ -f LICENSE ] && cp LICENSE "$stage/" || true
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            cp "$bindir/tty.exe" "$stage/"
+            7z a "${stage}.zip" "$stage" >/dev/null
+          else
+            cp "$bindir/tty" "$stage/"
+            tar czf "${stage}.tar.gz" "$stage"
+          fi
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: tty/tty-*-${{ matrix.target }}.${{ matrix.ext }}
+          fail_on_unmatched_files: true
+
+  # macOS: a signed + notarized universal .dmg, built and uploaded by salpa (the
+  # rust recipe: cargo both arches → lipo → .app → codesign hardened runtime → dmg →
+  # notarytool → staple → gh release upload). One runner produces both arches
+  # (rustup cross-compiles x86_64 from Apple Silicon).
+  #
+  # Required secrets (Settings -> Secrets and variables -> Actions):
+  #   BUILD_CERTIFICATE_BASE64      base64 of the Developer ID Application .p12
+  #   P12_PASSWORD                  password for that .p12
+  #   APPLE_ID                      Apple ID email for notarytool
+  #   APPLE_APP_SPECIFIC_PASSWORD   app-specific password for that Apple ID
+  #   APPLE_TEAM_ID                 the 10-char Developer Team ID
+  #   RIME_DEPLOY_TOKEN             (if rime is private) read token for the checkout
+  #   SALPA_INSTALL_TOKEN           (optional) token to `go install` salpa if private
+  build-macos:
+    name: Build macOS (signed, notarized)
+    needs: create-release
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tty
+    steps:
+      - name: Checkout tty
+        uses: actions/checkout@v4
+        with:
+          path: tty
+      - name: Checkout rime (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/rime
+          path: rime
+          token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install salpa
+        env:
+          SALPA_TOKEN: ${{ secrets.SALPA_INSTALL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${SALPA_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${SALPA_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+            go env -w GOPRIVATE=github.com/alleato-llc/*
+          fi
+          go install github.com/alleato-llc/salpa@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # Build (sign + notarize + staple) then publish (gh release upload) the app.
+      # salpa reads target/release and Cargo.toml from this working dir.
+      - name: Build & publish signed dmg
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          salpa build   --config ci/salpa-tty.yaml --version "$version"
+          salpa publish --config ci/salpa-tty.yaml --version "$version"

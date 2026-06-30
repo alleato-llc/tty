@@ -1,0 +1,52 @@
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+
+[workspace]
+members = ["cathode", "phosphor", "tty"]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1"
+dirs = "5"
+parking_lot = "0.12"
+portable-pty = "0.9"
+serde_json = "1"
+thiserror = "2"
+toml = "0.8"
+tracing = "0.1"
+vte = "0.15"
+
+[workspace.dependencies.iced]
+features = [
+    "canvas",
+    "tokio",
+    "advanced",
+]
+version = "0.14"
+
+# rime is a sibling path dependency, laid down next to this repo (../rime/rime) —
+# the same arrangement fed uses. See CLAUDE.md.
+[workspace.dependencies.rime]
+path = "../rime/rime"
+
+[workspace.dependencies.serde]
+features = ["derive"]
+version = "1"
+
+[workspace.dependencies.tokio]
+features = ["full"]
+version = "1"
+
+[workspace.dependencies.tracing-subscriber]
+features = ["env-filter"]
+version = "0.3"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"

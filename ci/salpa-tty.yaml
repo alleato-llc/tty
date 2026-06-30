@@ -1,0 +1,26 @@
+# salpa config for the `tty` app's signed, notarized macOS build — the universal
+# .dmg attached to the GitHub release. Driven by .github/workflows/release.yml:
+#
+#   salpa build   --config ci/salpa-tty.yaml --version <v>   # build + sign + notarize
+#   salpa publish --config ci/salpa-tty.yaml --version <v>   # upload the dmg to tag v<v>
+#
+# salpa is one product per config. The static-site deploy is a different deliverable —
+# that's the root salpa.yaml.
+#
+# tty ships as `Tty.app` (not a bare `tty` binary on PATH) so it never shadows the
+# POSIX `tty(1)` command for normal users.
+ecosystem: rust
+product: Tty
+version: git # overridden by --version <tag> in CI
+
+build:
+  bin: tty # the cargo binary inside Tty.app
+  bundle_id: dev.tty.terminal
+  universal: true # one dmg for Intel + Apple Silicon (cargo both arches + lipo)
+  sign: "Developer ID Application" # matches the cert imported from BUILD_CERTIFICATE_BASE64
+  notarize: true
+  staple: true
+  package: dmg # → Tty-<version>.dmg
+
+publish:
+  github: true # gh release upload Tty-<version>.dmg to tag v<version>

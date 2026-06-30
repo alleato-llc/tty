@@ -1,0 +1,10 @@
+[package]
+name = "phosphor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cathode = { path = "../cathode" }
+iced = { workspace = true }
+parking_lot = { workspace = true }

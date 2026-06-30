@@ -1,0 +1,51 @@
+---
+import "../styles/global.css";
+import ThemeToggle from "../components/ThemeToggle.tsx";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script is:inline>
+      // Resolve the theme before first paint: a stored choice wins, otherwise
+      // follow the system and keep following it until the user picks. Dark is
+      // tty's Dracula; light is GitHub Light.
+      (() => {
+        const saved = localStorage.getItem("tty-theme");
+        const media = matchMedia("(prefers-color-scheme: dark)");
+        const apply = (mode) => (document.documentElement.dataset.theme = mode);
+        apply(saved ?? (media.matches ? "dark" : "light"));
+        media.addEventListener("change", (e) => {
+          if (!localStorage.getItem("tty-theme")) {
+            apply(e.matches ? "dark" : "light");
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="chrome">
+      <a class="wordmark" href="/">tty<span class="dot">.</span></a>
+      <ThemeToggle client:load />
+    </header>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
