@@ -7,9 +7,16 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
     match message {
         Message::Key(key, mods) => return handle_key(state, key, mods),
         Message::ModifiersChanged(mods) => state.modifiers = mods,
-        Message::Resize(cols, rows) => state.resize_active(cols, rows),
-        Message::Select(text) => state.selection = text,
-        Message::PtyBytes(bytes) => state.write_active(&bytes),
+        Message::Resize(pane, cols, rows) => state.resize_pane(pane, cols, rows),
+        Message::Select(pane, text) => {
+            // Only the focused pane's selection feeds ⌘C; ignore stray drags elsewhere.
+            if state.tabs.get(state.active).map(|t| t.focus) == Some(pane) {
+                state.selection = text;
+            }
+        }
+        Message::PtyBytes(pane, bytes) => state.write_pane(pane, &bytes),
+        Message::FocusPane(pane) => state.focus_pane(pane),
+        Message::ResizeSplit(e) => state.resize_split(e.split, e.ratio),
         Message::Pasted(Some(text)) => state.paste(&text),
         Message::Pasted(None) => {}
         Message::SearchChanged(q) => state.search = Some(q),
@@ -61,6 +68,23 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
             return iced::Task::none();
         }
     }
+    // Pane chords: ⌥⌘ + arrow splits the focused pane toward that direction; ⌃⌘ + arrow
+    // moves focus to the neighbour. Checked before the PTY fallthrough so the arrows
+    // don't also reach the shell.
+    if mods.command() {
+        if let Key::Named(named) = &key {
+            if let Some(dir) = arrow_direction(*named) {
+                if mods.alt() {
+                    state.split_focused(dir);
+                    return iced::Task::none();
+                }
+                if mods.control() {
+                    state.focus_dir(dir);
+                    return iced::Task::none();
+                }
+            }
+        }
+    }
     // App chords use the platform *command* modifier (⌘ on macOS) so Ctrl stays a
     // real terminal control code (Ctrl+C, Ctrl+D, …) sent to the shell.
     if mods.command() {
@@ -71,7 +95,7 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                     return iced::Task::none();
                 }
                 "w" => {
-                    if !state.close_tab(state.active) {
+                    if !state.close_focused_pane() {
                         return iced::exit();
                     }
                     return iced::Task::none();
@@ -125,7 +149,22 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     }
     // Otherwise the keystroke is terminal input (arrow keys honor the app's DECCKM mode).
     if let Some(bytes) = phosphor::input::to_bytes(&key, mods, state.active_app_cursor()) {
-        state.write_active(&bytes);
+        state.write_focused(&bytes);
     }
     iced::Task::none()
+}
+
+/// Map an arrow key to a `pane_grid` direction (for the split / focus chords).
+fn arrow_direction(
+    named: iced::keyboard::key::Named,
+) -> Option<iced::widget::pane_grid::Direction> {
+    use iced::keyboard::key::Named;
+    use iced::widget::pane_grid::Direction;
+    Some(match named {
+        Named::ArrowLeft => Direction::Left,
+        Named::ArrowRight => Direction::Right,
+        Named::ArrowUp => Direction::Up,
+        Named::ArrowDown => Direction::Down,
+        _ => return None,
+    })
 }

@@ -56,15 +56,19 @@ the read loop):
 
 Thin glue, mirroring `fed`'s module shape:
 
-- **`state`** — `Tty { tabs: Vec<Term>, active, theme, font, font_size, … }`. A
-  `Term` is a `screen` + an `Option<PtySession>` (`None` only in tests) + an `alive`
-  flag the read loop clears on shell exit. Methods: `new_tab`/`close_tab` (last close
-  → quit), `write_active`, `resize_active`, `zoom`/`reset_zoom`, `reap_dead`.
+- **`state`** — `Tty { tabs: Vec<Tab>, active, theme, font, font_size, … }`. A `Tab` is
+  a `pane_grid::State<Term>` split tree plus its focused `Pane` (a single pane until the
+  user splits). A `Term` is a `screen` + an `Option<PtySession>` (`None` only in tests)
+  + an `alive` flag the read loop clears on shell exit. Methods target the active tab's
+  focused pane: `split_focused`/`focus_dir`/`close_focused_pane`, `write_focused`/
+  `write_pane`, `resize_pane`, `new_tab`/`close_tab`, `zoom`/`reset_zoom`. `reap_dead`
+  drops dead panes, then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
-  terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy. Everything
-  else becomes PTY input via `phosphor::input`.
-- **`view`** — the `rime` `tabs` strip (only when >1 tab), the `phosphor` terminal,
-  and a `rime` `status_bar`.
+  terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
+  split / `⌃⌘`+arrows move focus. Everything else becomes PTY input via `phosphor::input`.
+- **`view`** — the `rime` `tabs` strip (only when >1 tab), a `pane_grid` over the active
+  tab's panes (each pane a `phosphor` terminal in a container whose border turns the
+  accent color when focused), and a `rime` `status_bar`.
 - **`subscription`** — key events + **one always-on output stream** fed by
   `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
 - **`theme` / `settings`** — a `Theme { palette, terminal }` pairing a rime chrome

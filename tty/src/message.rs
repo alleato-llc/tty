@@ -1,4 +1,5 @@
 use iced::keyboard::{Key, Modifiers};
+use iced::widget::pane_grid;
 use iced::Color;
 
 /// Everything the UI can ask `tty` to do.
@@ -8,12 +9,17 @@ pub enum Message {
     Key(Key, Modifiers),
     /// Keyboard modifiers changed.
     ModifiersChanged(Modifiers),
-    /// The terminal widget reports the grid that now fits (cols, rows).
-    Resize(usize, usize),
-    /// The terminal selection changed (drag) — cached for ⌘C copy.
-    Select(Option<String>),
-    /// Bytes the terminal widget produced (mouse reporting) to send to the PTY.
-    PtyBytes(Vec<u8>),
+    /// A pane's terminal widget reports the grid that now fits (pane, cols, rows).
+    Resize(pane_grid::Pane, usize, usize),
+    /// A pane's selection changed (drag) — cached for ⌘C copy when it's the focused pane.
+    Select(pane_grid::Pane, Option<String>),
+    /// Bytes a pane's terminal widget produced (mouse reporting) to send to its PTY.
+    PtyBytes(pane_grid::Pane, Vec<u8>),
+    /// Focus the pane that was clicked. (Split / focus-move / close are keyboard chords
+    /// handled directly in `update::handle_key`, like the other ⌘ shortcuts.)
+    FocusPane(pane_grid::Pane),
+    /// Drag-resize a split divider.
+    ResizeSplit(pane_grid::ResizeEvent),
     /// A clipboard read for ⌘V resolved — paste into the active shell.
     Pasted(Option<String>),
     /// The `⌘F` find query changed.

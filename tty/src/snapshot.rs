@@ -15,7 +15,7 @@ use iced::Font;
 use cathode::parser::TermParser;
 use cathode::screen::TerminalScreen;
 
-use crate::state::{Term, Tty, DEFAULT_FONT_SIZE};
+use crate::state::{Tab, Term, Tty, DEFAULT_FONT_SIZE};
 use crate::theme::Theme;
 use crate::view::view;
 
@@ -48,7 +48,7 @@ fn populated() -> Tty {
     );
     let second = painted_term("zsh", 56, 6, b"$ ");
     Tty {
-        tabs: vec![tab, second],
+        tabs: vec![Tab::new(tab), Tab::new(second)],
         active: 0,
         theme: Theme::default(),
         font: Font::MONOSPACE,
@@ -80,5 +80,34 @@ fn terminal_view() {
     assert!(
         matches,
         "snapshot `tty-terminal` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn split_pane_view() {
+    use iced::widget::pane_grid::Direction;
+    // Split the active tab into two side-by-side panes (the new one, on the right, takes
+    // focus and gets the accent border).
+    let mut tty = populated();
+    tty.split_with(
+        Direction::Right,
+        painted_term(
+            "zsh",
+            28,
+            6,
+            b"$ cargo test\r\n\x1b[32m   Compiling\x1b[0m tty\r\n$ ",
+        ),
+    );
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(view(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-split.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-split` changed — delete its PNG to re-baseline"
     );
 }

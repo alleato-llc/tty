@@ -15,6 +15,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 ## Shipped
 
 - Tabbed terminal (`⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`), close-last-quits, `exit`-aware.
+- **Split panes** — `⌥⌘`+arrows split the focused pane in any direction, `⌃⌘`+arrows move
+  focus, drag a divider to resize, `⌘W` closes the focused pane (→ tab → quit). Each pane
+  is an independent shell; built on iced's `pane_grid`. (Option B below — splits only, no
+  persistence.)
 - Full ANSI rendering: 16 / 256 / truecolor + bold, dim, italic, underline, inverse.
 - Scrollback + mouse select / `⌘C` copy.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
@@ -115,25 +119,21 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 
 ---
 
-## Under consideration: multiplexing (needs a decision)
+## Multiplexing — where we landed
 
-> You asked to think about this more. Here's the framing. Multiplexing = **splits/panes**
-> and/or **persistent sessions** (detach/reattach) *inside* tty, à la tmux/zellij/WezTerm.
+> Multiplexing = **splits/panes** and/or **persistent sessions** (detach/reattach)
+> *inside* tty, à la tmux/zellij/WezTerm. This was the single biggest fork in tty's
+> identity, because it pulls against **§ simplicity**. Three coherent stances:
 
-It's the single biggest fork in tty's identity, because it pulls directly against
-**§ simplicity**. Three coherent stances:
+| Option | What it means | Status |
+|---|---|---|
+| **A. No multiplexing** | Lean on `tmux`/`zellij`. tty stays one clean window with tabs. | superseded by B |
+| **B. Splits only** | In-window pane splits, no persistence. | **shipped** — a bounded `pane_grid` split tree, one `phosphor` per pane, no server/protocol. The `Term` model was extended into a per-tab pane tree exactly as scoped. |
+| **C. Splits + persistent sessions** | Detach/reattach, survive crashes — a tmux replacement. | **out** — a session server + serialization is a different product. |
 
-| Option | What it means | Pro | Con |
-|---|---|---|---|
-| **A. No multiplexing (current)** | Lean on `tmux`/`zellij`. tty stays one clean window with tabs. | Maximal focus; smallest surface; fastest to a great 1.0. | Users who want panes reach for tmux (which many already run). |
-| **B. Splits only** | In-window pane splits (`⌘D`/`⌘⇧D`), no persistence. | The 80% people actually want; no server/protocol. | Real complexity: focus model, per-pane PTY/resize, layout tree, copy-mode-ish nav. Pulls chrome toward iTerm. |
-| **C. Splits + persistent sessions** | Detach/reattach, survive crashes — a tmux replacement. | A genuine differentiator; "tmux without the config." | Large: a session server, serialization, reconnect protocol. Risks becoming the thing we said we wouldn't. |
-
-**Leaning:** **A for 1.0**, and *consider* **B** later **only if** it can be done without
-a config language or a server — a bounded split tree reusing `phosphor` per pane, with
-the existing `Term` model extended. **C** is probably a "no" — it's a different product.
-A cheap middle path: make tty *excellent under tmux* (correct mouse, OSC 52, titles,
-clipboard) so the combo beats a heavyweight terminal. **Decision pending your call.**
+We shipped **B** the way the constraint demanded: no config language, no server. **C**
+stays off the table. The complementary bet still holds — make tty *excellent under tmux*
+(correct mouse, OSC 52, titles, clipboard) so the combo beats a heavyweight terminal.
 
 ---
 

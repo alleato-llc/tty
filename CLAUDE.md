@@ -61,6 +61,21 @@ iced 0.14 has no runtime window-opacity action, so the fade is uniform per-surfa
 opacity is clamped to `settings::MIN_OPACITY` (a 95% transparency cap) so the window
 can never fade to invisible.
 
+## Tabs are pane trees
+
+A tab is **not** one terminal — it's a `Tab { panes: pane_grid::State<Term>, focus }`
+(`state.rs`), a tree of split panes that starts as a single pane. iced 0.14's built-in
+`pane_grid` owns the split tree, drag-to-resize dividers, focus, and cardinal
+`adjacent()` navigation, so we don't hand-roll any of it (and nothing about splits
+belongs in rime — `pane_grid` is an iced widget, not reusable chrome). The "active tab,
+focused pane" is the target of all input: `write_focused`/`resize_pane`/`paste`/the ⌘C
+selection read `tabs[active].panes.get(focus)`; `drain_effects`/`reap_dead` walk **every
+pane of every tab**. Split (`⌥⌘`+arrow) / focus-move (`⌃⌘`+arrow) / close (`⌘W`) are
+keyboard chords handled directly in `update::handle_key`, like the other ⌘ shortcuts;
+only the widget-driven `FocusPane` (click) and `ResizeSplit` (drag) flow through
+`Message`. `split_focused` spawns the shell; its spawn-free core `split_with(dir, term)`
+is what the headless tests drive.
+
 ## iced
 
 iced is pinned at **0.14**. Before writing iced code (the `phosphor` custom widget,

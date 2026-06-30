@@ -48,7 +48,10 @@ cargo clippy --all-targets -- -D warnings
 
 ## Keys
 
-- `⌘T` / `⌘N` new tab · `⌘W` close tab (or the last → quit) · `⌘1`–`⌘9` jump to tab
+- `⌘T` / `⌘N` new tab · `⌘1`–`⌘9` jump to tab
+- `⌥⌘`+arrows split the focused pane (←/→/↑/↓) · `⌃⌘`+arrows move focus between panes ·
+  drag a divider to resize
+- `⌘W` close the focused pane (the last pane → close the tab; the last tab → quit)
 - `⌘+` / `⌘−` font zoom · `⌘0` reset
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell
 - `⌘F` find in scrollback · `⌘,` settings · wheel to scroll back through history

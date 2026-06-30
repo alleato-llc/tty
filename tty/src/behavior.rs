@@ -17,7 +17,7 @@ use iced::Font;
 use cathode::screen::TerminalScreen;
 
 use crate::message::Message;
-use crate::state::{Term, Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::state::{Tab, Term, Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use crate::theme::Theme;
 use crate::update::update;
 
@@ -33,9 +33,11 @@ fn screen_term(title: &str) -> Term {
     }
 }
 
-/// A `Tty` with `n` pty-less tabs — bypasses `Tty::new` (which spawns a shell).
+/// A `Tty` with `n` pty-less single-pane tabs — bypasses `Tty::new` (which spawns a shell).
 fn headless(n: usize) -> Tty {
-    let tabs = (0..n).map(|i| screen_term(&format!("sh{i}"))).collect();
+    let tabs = (0..n)
+        .map(|i| Tab::new(screen_term(&format!("sh{i}"))))
+        .collect();
     Tty {
         tabs,
         active: 0,
@@ -118,19 +120,28 @@ fn cmd_digit_activates_that_tab() {
 #[test]
 fn select_then_caches_for_copy() {
     let mut tty = headless(1);
-    let _ = update(&mut tty, Message::Select(Some("hello".into())));
+    let pane = tty.tabs[0].focus;
+    let _ = update(&mut tty, Message::Select(pane, Some("hello".into())));
     assert_eq!(tty.selection.as_deref(), Some("hello"));
-    let _ = update(&mut tty, Message::Select(None));
+    let _ = update(&mut tty, Message::Select(pane, None));
     assert_eq!(tty.selection, None);
 }
 
 #[test]
 fn reap_drops_exited_tabs_and_quits_on_the_last() {
     let mut tty = headless(2);
-    tty.tabs[0].alive.store(false, Ordering::Relaxed);
+    tty.tabs[0]
+        .focused()
+        .unwrap()
+        .alive
+        .store(false, Ordering::Relaxed);
     assert!(tty.reap_dead(), "one live tab remains");
     assert_eq!(tty.tabs.len(), 1);
-    tty.tabs[0].alive.store(false, Ordering::Relaxed);
+    tty.tabs[0]
+        .focused()
+        .unwrap()
+        .alive
+        .store(false, Ordering::Relaxed);
     assert!(!tty.reap_dead(), "no tabs left → exit");
 }
 
@@ -140,7 +151,10 @@ fn app_cursor_mode_follows_the_screen() {
     assert!(!tty.active_app_cursor());
     // The shell enables DECCKM (application cursor keys).
     let mut parser = cathode::parser::TermParser::new();
-    parser.process(b"\x1b[?1h", &mut tty.tabs[0].screen.lock());
+    parser.process(
+        b"\x1b[?1h",
+        &mut tty.tabs[0].focused().unwrap().screen.lock(),
+    );
     assert!(tty.active_app_cursor());
 }
 
@@ -200,14 +214,73 @@ fn unfocused_opacity_applies_only_when_unfocused() {
 }
 
 #[test]
+fn splitting_adds_a_focused_pane_to_the_tab() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    assert_eq!(tty.tabs[0].panes.len(), 1);
+    let first = tty.tabs[0].focus;
+    tty.split_with(Direction::Right, screen_term("split"));
+    assert_eq!(tty.tabs[0].panes.len(), 2, "a split adds a pane");
+    assert_eq!(tty.tabs.len(), 1, "splitting stays within one tab");
+    assert_ne!(tty.tabs[0].focus, first, "focus moves to the new pane");
+}
+
+#[test]
+fn focus_dir_moves_between_neighbours() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    let left = tty.tabs[0].focus;
+    // Split right; focus is now the right pane. ← returns to the left, → comes back.
+    tty.split_with(Direction::Right, screen_term("right"));
+    let right = tty.tabs[0].focus;
+    tty.focus_dir(Direction::Left);
+    assert_eq!(tty.tabs[0].focus, left, "← moves to the left neighbour");
+    tty.focus_dir(Direction::Right);
+    assert_eq!(tty.tabs[0].focus, right, "→ moves back to the right");
+    // No neighbour past the edge — focus stays put.
+    tty.focus_dir(Direction::Right);
+    assert_eq!(tty.tabs[0].focus, right, "no-op at the edge");
+}
+
+#[test]
+fn closing_a_pane_keeps_the_tab_until_the_last_pane() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(2);
+    // Split the active tab into two panes, then close one: the tab survives.
+    tty.split_with(Direction::Down, screen_term("lower"));
+    assert_eq!(tty.tabs[0].panes.len(), 2);
+    assert!(
+        tty.close_focused_pane(),
+        "closing one pane keeps the app running"
+    );
+    assert_eq!(tty.tabs[0].panes.len(), 1, "the sibling pane remains");
+    assert_eq!(tty.tabs.len(), 2, "the tab itself is untouched");
+    // Closing the now-single pane closes the whole tab.
+    assert!(tty.close_focused_pane(), "still one tab left");
+    assert_eq!(tty.tabs.len(), 1);
+    // Closing the last pane of the last tab signals exit.
+    assert!(!tty.close_focused_pane(), "no panes left anywhere → exit");
+}
+
+#[test]
 fn drain_lights_background_activity_and_clears_active() {
     let mut tty = headless(2);
     // Output on the inactive tab 1; active tab 0 has none.
-    tty.tabs[1].dirty.store(true, Ordering::Relaxed);
+    tty.tabs[1]
+        .focused()
+        .unwrap()
+        .dirty
+        .store(true, Ordering::Relaxed);
     let _ = tty.drain_effects();
-    assert!(tty.tabs[1].activity, "background output lights a dot");
-    assert!(!tty.tabs[0].activity, "the active tab never carries a dot");
+    assert!(
+        tty.tabs[1].focused().unwrap().activity,
+        "background output lights a dot"
+    );
+    assert!(
+        !tty.tabs[0].focused().unwrap().activity,
+        "the active tab never carries a dot"
+    );
     // Switching to it clears the dot.
     tty.activate(1);
-    assert!(!tty.tabs[1].activity);
+    assert!(!tty.tabs[1].focused().unwrap().activity);
 }

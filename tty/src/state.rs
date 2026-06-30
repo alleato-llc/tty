@@ -4,6 +4,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use iced::keyboard::Modifiers;
+use iced::widget::pane_grid;
 use iced::Font;
 
 use cathode::pty::PtySession;
@@ -53,10 +54,38 @@ pub struct Term {
     pub activity: bool,
 }
 
-/// The whole app: a stack of terminal tabs + theme/font chrome. The terminal counterpart
-/// of `fed` — thin glue over `cathode` (engine) + `phosphor` (widget) + `rime`.
+/// One tab: a tree of terminal panes (a single pane until the user splits) plus which
+/// pane currently has focus. The split tree, drag-to-resize dividers, and cardinal
+/// navigation are owned by iced's `pane_grid::State`; we just hold a `Term` per pane.
+pub struct Tab {
+    pub panes: pane_grid::State<Term>,
+    pub focus: pane_grid::Pane,
+}
+
+impl Tab {
+    /// A new tab wrapping a single shell pane.
+    pub fn new(term: Term) -> Self {
+        let (panes, focus) = pane_grid::State::new(term);
+        Self { panes, focus }
+    }
+
+    /// The focused pane's terminal.
+    pub fn focused(&self) -> Option<&Term> {
+        self.panes.get(self.focus)
+    }
+
+    /// Whether any pane in this tab still has a live shell.
+    fn has_live_pane(&self) -> bool {
+        self.panes
+            .iter()
+            .any(|(_, t)| t.alive.load(Ordering::Relaxed))
+    }
+}
+
+/// The whole app: a stack of tabs (each a pane tree) + theme/font chrome. The terminal
+/// counterpart of `fed` — thin glue over `cathode` (engine) + `phosphor` (widget) + `rime`.
 pub struct Tty {
-    pub tabs: Vec<Term>,
+    pub tabs: Vec<Tab>,
     pub active: usize,
     pub theme: Theme,
     pub font: Font,
@@ -211,26 +240,97 @@ impl Tty {
         }
     }
 
+    /// The active tab's focused pane terminal.
     pub fn active_term(&self) -> Option<&Term> {
-        self.tabs.get(self.active)
+        self.tabs.get(self.active).and_then(Tab::focused)
     }
 
-    /// Make tab `idx` active and clear its unseen-activity dot.
+    /// Make tab `idx` active and clear the unseen-activity dot on all its panes (the
+    /// whole tab — every pane — becomes visible).
     pub fn activate(&mut self, idx: usize) {
-        if idx < self.tabs.len() {
+        if let Some(tab) = self.tabs.get_mut(idx) {
             self.active = idx;
-            self.tabs[idx].activity = false;
+            for (_, term) in tab.panes.iter_mut() {
+                term.activity = false;
+            }
         }
     }
 
     /// Spawn a shell in a new tab and make it active. The new shell starts in the
-    /// active tab's reported working directory (OSC 7) when known.
+    /// active pane's reported working directory (OSC 7) when known.
     pub fn new_tab(&mut self) {
         let cwd = self.active_term().and_then(|t| t.screen.lock().cwd.clone());
         if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
-            self.tabs.push(term);
+            self.tabs.push(Tab::new(term));
             self.active = self.tabs.len() - 1;
         }
+    }
+
+    /// Split the active tab's focused pane toward `dir`, spawning a fresh shell there
+    /// (seeded with the focused pane's cwd) and focusing it. Left/Right split the column
+    /// (vertical divider); Up/Down split the row (horizontal divider).
+    pub fn split_focused(&mut self, dir: pane_grid::Direction) {
+        let cwd = self.active_term().and_then(|t| t.screen.lock().cwd.clone());
+        if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
+            self.split_with(dir, term);
+        }
+    }
+
+    /// Place `term` as a new pane split off the focused one toward `dir`, and focus it.
+    /// (The spawn-free core of [`split_focused`], so tests can inject a pty-less pane.)
+    pub fn split_with(&mut self, dir: pane_grid::Direction, term: Term) {
+        use pane_grid::{Axis, Direction};
+        let axis = match dir {
+            Direction::Left | Direction::Right => Axis::Vertical,
+            Direction::Up | Direction::Down => Axis::Horizontal,
+        };
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            if let Some((new_pane, _split)) = tab.panes.split(axis, tab.focus, term) {
+                // `split` always places the newcomer after the target (right/below); for
+                // Left/Up, swap so the new shell lands on the requested side.
+                if matches!(dir, Direction::Left | Direction::Up) {
+                    tab.panes.swap(tab.focus, new_pane);
+                }
+                tab.focus = new_pane;
+            }
+        }
+    }
+
+    /// Move focus to the neighbouring pane in `dir` (no-op at the edge).
+    pub fn focus_dir(&mut self, dir: pane_grid::Direction) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            if let Some(p) = tab.panes.adjacent(tab.focus, dir) {
+                tab.focus = p;
+            }
+        }
+    }
+
+    /// Focus a specific pane in the active tab (a click landed on it).
+    pub fn focus_pane(&mut self, pane: pane_grid::Pane) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.focus = pane;
+        }
+    }
+
+    /// Drag-resize the divider at `split` to `ratio` (0..=1).
+    pub fn resize_split(&mut self, split: pane_grid::Split, ratio: f32) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.panes.resize(split, ratio);
+        }
+    }
+
+    /// Close the active tab's focused pane. Closing the last pane in a tab closes the
+    /// tab; closing the last tab returns `false` (the caller exits). The dropped `Term`
+    /// drops its `PtySession`, ending that shell.
+    pub fn close_focused_pane(&mut self) -> bool {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            if let Some((_term, sibling)) = tab.panes.close(tab.focus) {
+                tab.focus = sibling;
+                return true;
+            }
+        }
+        // It was the tab's only pane → close the whole tab.
+        self.close_tab(self.active)
     }
 
     /// The active tab's DEC application-cursor-keys mode (affects arrow-key bytes).
@@ -255,7 +355,7 @@ impl Tty {
         if bracketed {
             bytes.extend_from_slice(b"\x1b[201~");
         }
-        self.write_active(&bytes);
+        self.write_focused(&bytes);
     }
 
     /// Per-redraw housekeeping: light activity dots on background tabs that produced
@@ -264,21 +364,24 @@ impl Tty {
     pub fn drain_effects(&mut self) -> Option<String> {
         let active = self.active;
         let mut clip = None;
-        for (i, term) in self.tabs.iter_mut().enumerate() {
-            let (bell, requested) = {
-                let mut s = term.screen.lock();
-                (s.take_bell(), s.take_clipboard())
-            };
-            if let Some(c) = requested {
-                clip = Some(c);
+        for (i, tab) in self.tabs.iter_mut().enumerate() {
+            for (_, term) in tab.panes.iter_mut() {
+                let (bell, requested) = {
+                    let mut s = term.screen.lock();
+                    (s.take_bell(), s.take_clipboard())
+                };
+                if let Some(c) = requested {
+                    clip = Some(c);
+                }
+                let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
+                // Every pane of the active tab is on screen, so it never carries a dot;
+                // a background tab's panes light one on output or a bell.
+                if i == active {
+                    term.activity = false;
+                } else if was_dirty || bell {
+                    term.activity = true;
+                }
             }
-            let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
-            if (was_dirty || bell) && i != active {
-                term.activity = true;
-            }
-        }
-        if let Some(t) = self.tabs.get_mut(active) {
-            t.activity = false;
         }
         clip
     }
@@ -295,23 +398,36 @@ impl Tty {
         true
     }
 
-    /// Forward `bytes` to the active tab's shell.
-    pub fn write_active(&mut self, bytes: &[u8]) {
-        if let Some(term) = self.tabs.get_mut(self.active) {
-            if let Some(pty) = term.pty.as_mut() {
-                if let Err(e) = pty.write_bytes(bytes) {
-                    tracing::warn!("PTY write failed: {e}");
+    /// Forward `bytes` to a specific pane's shell in the active tab (mouse reporting
+    /// targets the pane under the cursor).
+    pub fn write_pane(&mut self, pane: pane_grid::Pane, bytes: &[u8]) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            if let Some(term) = tab.panes.get_mut(pane) {
+                if let Some(pty) = term.pty.as_mut() {
+                    if let Err(e) = pty.write_bytes(bytes) {
+                        tracing::warn!("PTY write failed: {e}");
+                    }
                 }
             }
         }
     }
 
-    /// Resize the active tab's grid + PTY (SIGWINCH) to what the widget reports fits.
-    pub fn resize_active(&mut self, cols: usize, rows: usize) {
-        if let Some(term) = self.tabs.get(self.active) {
-            term.screen.lock().resize(cols, rows);
-            if let Some(pty) = term.pty.as_ref() {
-                let _ = pty.resize(cols as u16, rows as u16);
+    /// Forward `bytes` to the active tab's focused pane (keyboard / paste).
+    pub fn write_focused(&mut self, bytes: &[u8]) {
+        if let Some(focus) = self.tabs.get(self.active).map(|t| t.focus) {
+            self.write_pane(focus, bytes);
+        }
+    }
+
+    /// Resize one pane's grid + PTY (SIGWINCH) to what its widget reports fits. Only the
+    /// active tab's panes are on screen, so only they report.
+    pub fn resize_pane(&mut self, pane: pane_grid::Pane, cols: usize, rows: usize) {
+        if let Some(tab) = self.tabs.get(self.active) {
+            if let Some(term) = tab.panes.get(pane) {
+                term.screen.lock().resize(cols, rows);
+                if let Some(pty) = term.pty.as_ref() {
+                    let _ = pty.resize(cols as u16, rows as u16);
+                }
             }
         }
     }
@@ -326,14 +442,32 @@ impl Tty {
         self.font_size = DEFAULT_FONT_SIZE;
     }
 
-    /// Drop tabs whose shell has exited. Returns `false` when none remain (the app
-    /// should exit). Keeps the active tab valid.
+    /// Drop panes whose shell has exited, then any tab left with no live pane. Returns
+    /// `false` when nothing remains (the app should exit). Keeps focus + active valid.
     pub fn reap_dead(&mut self) -> bool {
-        let active_alive = self
-            .tabs
-            .get(self.active)
-            .is_some_and(|t| t.alive.load(Ordering::Relaxed));
-        self.tabs.retain(|t| t.alive.load(Ordering::Relaxed));
+        let active_alive = self.tabs.get(self.active).is_some_and(Tab::has_live_pane);
+        for tab in self.tabs.iter_mut() {
+            // Close dead panes one at a time; `close` is a no-op on a tab's last pane,
+            // so an all-dead tab keeps a single (dead) pane and is dropped by `retain`.
+            loop {
+                let dead = tab
+                    .panes
+                    .iter()
+                    .find(|(_, t)| !t.alive.load(Ordering::Relaxed))
+                    .map(|(p, _)| *p);
+                let Some(dead) = dead else { break };
+                if tab.panes.close(dead).is_none() {
+                    break;
+                }
+            }
+            // The focused pane may have just been reaped — fall back to any survivor.
+            if tab.panes.get(tab.focus).is_none() {
+                if let Some((&p, _)) = tab.panes.iter().next() {
+                    tab.focus = p;
+                }
+            }
+        }
+        self.tabs.retain(Tab::has_live_pane);
         if self.tabs.is_empty() {
             return false;
         }

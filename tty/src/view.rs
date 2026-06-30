@@ -1,5 +1,5 @@
-use iced::widget::{column, container, row, scrollable, text, Column};
-use iced::{Element, Length};
+use iced::widget::{column, container, pane_grid, row, scrollable, text, Column};
+use iced::{Border, Element, Length};
 
 use rime::theme;
 use rime::widgets::{
@@ -33,15 +33,22 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         let models: Vec<Tab> = state
             .tabs
             .iter()
-            .map(|term| {
-                // Prefer the program-set title (OSC 0/2); a • marks unseen activity.
-                let title = term
-                    .screen
-                    .lock()
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| term.title.clone());
-                Tab::new(if term.activity {
+            .map(|tab| {
+                // Label from the focused pane (OSC 0/2 title, else the shell name); a •
+                // marks unseen activity in any of the tab's panes.
+                let title = tab
+                    .panes
+                    .get(tab.focus)
+                    .map(|term| {
+                        term.screen
+                            .lock()
+                            .title
+                            .clone()
+                            .unwrap_or_else(|| term.title.clone())
+                    })
+                    .unwrap_or_default();
+                let activity = tab.panes.iter().any(|(_, t)| t.activity);
+                Tab::new(if activity {
                     format!("• {title}")
                 } else {
                     title
@@ -60,26 +67,50 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
         ));
     }
 
-    // The active terminal.
-    let body: Element<'_, Message> = match state.active_term() {
-        Some(term) => container(
-            phosphor::terminal(
-                term.screen.clone(),
-                style,
-                state.font,
-                state.font_size,
-                true,
-                Message::Resize,
-                Message::Select,
-                Message::PtyBytes,
-            )
-            .find(state.search.clone()),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(6)
-        .style(move |_| container::background(bg))
-        .into(),
+    // The active tab's panes. A tab is a single pane until the user splits it; the
+    // `pane_grid` lays the split tree out, drags its dividers, and reports focus clicks.
+    let accent = t.accent;
+    let hairline = t.hairline;
+    let body: Element<'_, Message> = match state.tabs.get(state.active) {
+        Some(tab) => {
+            let focus = tab.focus;
+            let window_focused = state.focused;
+            let font = state.font;
+            let size = state.font_size;
+            let search = state.search.clone();
+            pane_grid(&tab.panes, move |pane, term, _maximized| {
+                let is_focused = pane == focus && window_focused;
+                let term_widget = phosphor::terminal(
+                    term.screen.clone(),
+                    style,
+                    font,
+                    size,
+                    is_focused,
+                    move |c, r| Message::Resize(pane, c, r),
+                    move |sel| Message::Select(pane, sel),
+                    move |b| Message::PtyBytes(pane, b),
+                )
+                .find(search.clone());
+                // An accent border marks the focused pane so it's clear where typing goes.
+                let border_color = if is_focused { accent } else { hairline };
+                pane_grid::Content::new(container(term_widget).padding(6).style(move |_| {
+                    container::Style {
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..container::background(bg)
+                    }
+                }))
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(4)
+            .on_click(Message::FocusPane)
+            .on_resize(8, Message::ResizeSplit)
+            .into()
+        }
         None => container(text("no terminal").color(t.muted))
             .padding(6)
             .into(),
@@ -275,8 +306,12 @@ fn status_text(state: &Tty) -> (String, String) {
     } else {
         String::new()
     };
+    let panes = match state.tabs.get(state.active).map(|t| t.panes.len()) {
+        Some(n) if n > 1 => format!(" · {n} panes"),
+        _ => String::new(),
+    };
     (
         title.unwrap_or_else(|| term.title.clone()),
-        format!("{cols}×{rows}{tabs} · {}px", state.font_size as u32),
+        format!("{cols}×{rows}{tabs}{panes} · {}px", state.font_size as u32),
     )
 }
