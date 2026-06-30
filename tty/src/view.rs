@@ -32,9 +32,11 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
 
     let mut root = Column::new().width(Length::Fill).height(Length::Fill);
 
-    // Tab strip — always shown, so a tab is always there to right-click (split / tab
-    // actions). Clicking the empty area past the last tab opens a new one (also ⌘T).
-    {
+    // Tab strip — shown only when there's more than one tab (matching fed / fed-ide):
+    // a lone tab carries no strip. Tab actions (rename / close / split-by-tab) live on
+    // the strip's right-click menu; a single pane is still right-clickable for a split.
+    // Clicking the empty area past the last tab opens a new one (also ⌘T).
+    if state.tabs.len() > 1 {
         let models: Vec<Tab> = state
             .tabs
             .iter()

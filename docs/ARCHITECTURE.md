@@ -69,7 +69,7 @@ Thin glue, mirroring `fed`'s module shape:
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. Everything else becomes PTY input via `phosphor::input`.
-- **`view`** — the `rime` `tabs` strip (always shown, so a tab is always right-clickable),
+- **`view`** — the `rime` `tabs` strip (shown only with >1 tab, matching fed / fed-ide),
   a `pane_grid` over the active tab's panes (each pane a `phosphor` terminal; the focused
   one's border turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A
   right-click (or `⌃`-click, macOS's secondary-click) opens a `rime` `context_menu` at
