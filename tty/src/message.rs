@@ -38,8 +38,10 @@ pub enum Message {
     SettingsSection(usize),
     /// Pick the dark/light chrome theme (`"dark"` / `"light"`).
     SetTheme(String),
-    /// Toggle the retro CRT overlay.
-    ToggleRetro,
+    /// Set the retro scanline ("refresh lines") intensity (`0.0`..=`1.0`).
+    SetScanlines(f32),
+    /// Set the retro vignette / glass-curve intensity (`0.0`..=`1.0`).
+    SetVignette(f32),
     /// Nudge the font size by `±1` from the settings stepper.
     FontSizeStep(f32),
     /// The base16 paste box changed.

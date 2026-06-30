@@ -107,9 +107,15 @@ impl Tty {
         self.apply_settings();
     }
 
-    /// Toggle the retro CRT overlay.
-    pub fn toggle_retro(&mut self) {
-        self.settings.retro = Some(!self.settings.retro());
+    /// Set the scanline ("refresh lines") intensity (`0.0`..=`1.0`).
+    pub fn set_scanlines(&mut self, v: f32) {
+        self.settings.scanlines = Some(v.clamp(0.0, 1.0));
+        self.apply_settings();
+    }
+
+    /// Set the vignette / glass-curve intensity (`0.0`..=`1.0`).
+    pub fn set_vignette(&mut self, v: f32) {
+        self.settings.vignette = Some(v.clamp(0.0, 1.0));
         self.apply_settings();
     }
 

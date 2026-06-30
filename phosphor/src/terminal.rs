@@ -119,8 +119,11 @@ pub struct Terminal<Message> {
     on_mouse: Box<dyn Fn(Vec<u8>) -> Message>,
     /// Case-insensitive scrollback search: matching runs are highlighted.
     find: Option<String>,
-    /// Retro CRT overlay (scanlines + vignette) — the signature "phosphor" look.
-    retro: bool,
+    /// The signature "phosphor" look — two independent CRT dimensions, each `0.0`
+    /// (off) … `1.0` (exaggerated): `scanlines` are the horizontal refresh lines,
+    /// `vignette` is the darkened curve of the CRT glass toward the edges.
+    scanlines: f32,
+    vignette: f32,
 }
 
 impl<Message> Terminal<Message> {
@@ -130,9 +133,12 @@ impl<Message> Terminal<Message> {
         self
     }
 
-    /// Enable the retro CRT overlay (scanlines + edge vignette).
-    pub fn retro(mut self, on: bool) -> Self {
-        self.retro = on;
+    /// Set the retro CRT overlay intensities, each clamped to `0.0..=1.0`:
+    /// `scanlines` (the refresh lines) and `vignette` (the glass curve). `0, 0`
+    /// disables the overlay entirely.
+    pub fn retro(mut self, scanlines: f32, vignette: f32) -> Self {
+        self.scanlines = scanlines.clamp(0.0, 1.0);
+        self.vignette = vignette.clamp(0.0, 1.0);
         self
     }
 }
@@ -161,7 +167,8 @@ pub fn terminal<Message>(
         on_select: Box::new(on_select),
         on_mouse: Box::new(on_mouse),
         find: None,
-        retro: false,
+        scanlines: 0.0,
+        vignette: 0.0,
     }
 }
 
@@ -795,42 +802,49 @@ where
                 }
             }
 
-            // Retro "phosphor" overlay: dim scanlines every few pixels + a soft edge
-            // vignette. Cheap (output-driven repaint means it's not redrawn at idle).
-            if self.retro {
+            // Retro "phosphor" overlay — two independent, intensity-driven dimensions.
+            // Cheap (output-driven repaint means it's not redrawn at idle).
+            //
+            // Scanlines: the CRT's horizontal refresh lines. Higher intensity = darker
+            // *and* denser (4px → 2px pitch) for the exaggerated old-TV look.
+            if self.scanlines > 0.0 {
                 let scan = Color {
-                    a: 0.10,
+                    a: 0.05 + 0.30 * self.scanlines,
                     ..Color::BLACK
                 };
+                let pitch = (4.0 - 2.0 * self.scanlines).max(2.0);
                 let mut sy = bounds.y;
                 while sy < bounds.y + bounds.height {
                     fill_rect(renderer, bounds.x, sy, bounds.width, 1.0, scan);
-                    sy += 3.0;
+                    sy += pitch;
                 }
-                // Vignette: faint dark bands hugging each edge.
-                let edge = Color {
-                    a: 0.18,
-                    ..Color::BLACK
-                };
-                let band = (self.font_size * 0.9).max(8.0);
-                fill_rect(renderer, bounds.x, bounds.y, bounds.width, band, edge);
-                fill_rect(
-                    renderer,
-                    bounds.x,
-                    bounds.y + bounds.height - band,
-                    bounds.width,
-                    band,
-                    edge,
-                );
-                fill_rect(renderer, bounds.x, bounds.y, band, bounds.height, edge);
-                fill_rect(
-                    renderer,
-                    bounds.x + bounds.width - band,
-                    bounds.y,
-                    band,
-                    bounds.height,
-                    edge,
-                );
+            }
+            // Vignette: the darkened curve of the CRT glass. Several nested edge frames
+            // with a quadratic falloff fake a gradient — darkest at the very edge,
+            // fading inward — so it reads as curved glass, not a flat border.
+            if self.vignette > 0.0 {
+                let depth = (self.font_size * 1.6).max(14.0) * (0.5 + self.vignette);
+                let max_a = 0.10 + 0.40 * self.vignette;
+                const LAYERS: usize = 6;
+                let thick = (depth / LAYERS as f32).ceil();
+                for i in 0..LAYERS {
+                    let inset = depth * i as f32 / LAYERS as f32;
+                    // `f` = 1 at the outer edge (i = 0), 0 at the innermost band.
+                    let f = 1.0 - i as f32 / (LAYERS as f32 - 1.0);
+                    let edge = Color {
+                        a: max_a * f * f,
+                        ..Color::BLACK
+                    };
+                    let (x, y) = (bounds.x + inset, bounds.y + inset);
+                    let (w, h) = (bounds.width - 2.0 * inset, bounds.height - 2.0 * inset);
+                    if w <= 0.0 || h <= 0.0 {
+                        break;
+                    }
+                    fill_rect(renderer, x, y, w, thick, edge); // top
+                    fill_rect(renderer, x, y + h - thick, w, thick, edge); // bottom
+                    fill_rect(renderer, x, y, thick, h, edge); // left
+                    fill_rect(renderer, x + w - thick, y, thick, h, edge); // right
+                }
             }
         });
     }

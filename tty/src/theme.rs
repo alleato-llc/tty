@@ -17,7 +17,10 @@ pub struct Theme {
     pub choice: ThemeChoice,
     pub palette: Palette,
     pub terminal: TerminalStyle,
-    pub retro: bool,
+    /// Retro CRT overlay intensities (`0.0`..=`1.0`): the refresh lines and the
+    /// glass-curve vignette. Both `0.0` means the overlay is off.
+    pub scanlines: f32,
+    pub vignette: f32,
 }
 
 impl Theme {
@@ -27,19 +30,21 @@ impl Theme {
             choice,
             palette: choice.palette(),
             terminal: terminal_style(choice),
-            retro: false,
+            scanlines: 0.0,
+            vignette: 0.0,
         }
     }
 
     /// Build from persisted settings: chrome from the dark/light choice, terminal from
-    /// the custom palette if set (else the default), plus the retro flag.
+    /// the custom palette if set (else the default), plus the retro intensities.
     pub fn from_settings(s: &Settings) -> Self {
         let choice = s.theme_choice();
         Self {
             choice,
             palette: choice.palette(),
             terminal: s.custom_style().unwrap_or_else(|| terminal_style(choice)),
-            retro: s.retro(),
+            scanlines: s.scanlines(),
+            vignette: s.vignette(),
         }
     }
 
@@ -146,12 +151,14 @@ mod tests {
     #[test]
     fn from_settings_carries_retro_and_custom_palette() {
         let mut s = Settings {
-            retro: Some(true),
+            scanlines: Some(0.7),
+            vignette: Some(0.4),
             ..Settings::default()
         };
         s.set_palette(&base16::parse(&sixteen()).unwrap());
         let theme = Theme::from_settings(&s);
-        assert!(theme.retro, "retro flag flows through");
+        assert_eq!(theme.scanlines, 0.7, "scanline intensity flows through");
+        assert_eq!(theme.vignette, 0.4, "vignette intensity flows through");
         assert_eq!(theme.terminal.bg, Color::from_rgb8(0x00, 0x00, 0x00));
     }
 }

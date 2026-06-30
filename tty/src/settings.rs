@@ -30,9 +30,13 @@ pub struct Settings {
     pub font_family: Option<String>,
     #[serde(default)]
     pub font_size: Option<f32>,
-    /// The retro CRT overlay (scanlines + vignette).
+    /// The retro CRT overlay, as two independent intensities (`0.0`..=`1.0`):
+    /// `scanlines` are the horizontal refresh lines, `vignette` is the glass curve.
+    /// Absent reads as `0.0` (off).
     #[serde(default)]
-    pub retro: Option<bool>,
+    pub scanlines: Option<f32>,
+    #[serde(default)]
+    pub vignette: Option<f32>,
     /// A custom palette overriding the built-in dark/light terminal colors.
     #[serde(default)]
     pub palette: Option<Palette>,
@@ -66,8 +70,14 @@ impl Settings {
         }
     }
 
-    pub fn retro(&self) -> bool {
-        self.retro.unwrap_or(false)
+    /// Scanline intensity (`0.0` = off).
+    pub fn scanlines(&self) -> f32 {
+        self.scanlines.unwrap_or(0.0).clamp(0.0, 1.0)
+    }
+
+    /// Vignette / glass-curve intensity (`0.0` = off).
+    pub fn vignette(&self) -> f32 {
+        self.vignette.unwrap_or(0.0).clamp(0.0, 1.0)
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).
