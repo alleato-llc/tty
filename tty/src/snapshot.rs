@@ -62,6 +62,7 @@ fn populated() -> Tty {
         show_settings: false,
         settings_section: 0,
         base16_input: String::new(),
+        focused: true,
     }
 }
 

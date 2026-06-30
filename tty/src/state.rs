@@ -76,6 +76,8 @@ pub struct Tty {
     pub settings_section: usize,
     /// The base16 paste box's contents (16 hex colors to import).
     pub base16_input: String,
+    /// Whether the window currently has focus (drives the unfocused-opacity effect).
+    pub focused: bool,
 }
 
 impl Tty {
@@ -103,9 +105,26 @@ impl Tty {
             show_settings: false,
             settings_section: 0,
             base16_input: String::new(),
+            focused: true,
         };
         tty.new_tab();
         tty
+    }
+
+    /// The terminal-background opacity to render with right now: opaque while focused,
+    /// the configured unfocused opacity otherwise.
+    pub fn bg_opacity(&self) -> f32 {
+        if self.focused {
+            1.0
+        } else {
+            self.settings.unfocused_opacity()
+        }
+    }
+
+    /// Set the unfocused-window opacity (`1.0` = off). Persisted.
+    pub fn set_unfocused_opacity(&mut self, opacity: f32) {
+        self.settings.unfocused_opacity = Some(opacity.clamp(0.3, 1.0));
+        self.settings.save();
     }
 
     /// Open/close the settings panel.

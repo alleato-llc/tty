@@ -51,6 +51,7 @@ fn headless(n: usize) -> Tty {
         show_settings: false,
         settings_section: 0,
         base16_input: String::new(),
+        focused: true,
     }
 }
 
@@ -169,6 +170,25 @@ fn settings_panel_toggles_and_switches_section() {
     let esc = Key::Named(iced::keyboard::key::Named::Escape);
     let _ = update(&mut tty, Message::Key(esc, Modifiers::default()));
     assert!(!tty.show_settings);
+}
+
+#[test]
+fn unfocused_opacity_applies_only_when_unfocused() {
+    let mut tty = headless(1);
+    // Off by default — opaque regardless of focus.
+    assert_eq!(tty.bg_opacity(), 1.0);
+    let _ = update(&mut tty, Message::Focused(false));
+    assert!(!tty.focused);
+    assert_eq!(tty.bg_opacity(), 1.0, "off by default even when unfocused");
+    // Enabled: translucent only while unfocused, opaque while focused.
+    tty.settings.unfocused_opacity = Some(0.6);
+    assert_eq!(tty.bg_opacity(), 0.6, "translucent while unfocused");
+    let _ = update(&mut tty, Message::Focused(true));
+    assert_eq!(tty.bg_opacity(), 1.0, "always opaque while focused");
+    // Never fully invisible.
+    tty.settings.unfocused_opacity = Some(0.0);
+    tty.focused = false;
+    assert!(tty.bg_opacity() >= 0.3, "clamped away from invisible");
 }
 
 #[test]

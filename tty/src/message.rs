@@ -50,4 +50,8 @@ pub enum Message {
     ResetPalette,
     /// Edit one palette slot (`0..16` = ANSI, `16`=fg, `17`=bg, `18`=cursor).
     EditColor(usize, Color),
+    /// The window gained (`true`) or lost (`false`) focus.
+    Focused(bool),
+    /// Set the unfocused-window terminal opacity (`1.0` = off).
+    SetUnfocusedOpacity(f32),
 }

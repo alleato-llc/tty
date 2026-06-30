@@ -33,6 +33,10 @@ pub struct Settings {
     /// A custom palette overriding the built-in dark/light terminal colors.
     #[serde(default)]
     pub palette: Option<Palette>,
+    /// Terminal-background opacity when the window is **unfocused** (`1.0` = opaque =
+    /// the feature off; lower = more see-through). Focused is always opaque.
+    #[serde(default)]
+    pub unfocused_opacity: Option<f32>,
 }
 
 impl Settings {
@@ -53,6 +57,12 @@ impl Settings {
         if let Ok(json) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(p, json);
         }
+    }
+
+    /// The unfocused-window terminal opacity (`1.0` = opaque/off), clamped so the
+    /// window can never become fully invisible.
+    pub fn unfocused_opacity(&self) -> f32 {
+        self.unfocused_opacity.unwrap_or(1.0).clamp(0.3, 1.0)
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).

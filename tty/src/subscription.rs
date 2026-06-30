@@ -35,6 +35,8 @@ pub fn subscription(_state: &Tty) -> Subscription<Message> {
         Event::Window(iced::window::Event::Resized(size)) => {
             Some(Message::WindowResized(size.height))
         }
+        Event::Window(iced::window::Event::Focused) => Some(Message::Focused(true)),
+        Event::Window(iced::window::Event::Unfocused) => Some(Message::Focused(false)),
         _ => None,
     });
 

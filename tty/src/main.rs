@@ -29,6 +29,10 @@ fn main() -> anyhow::Result<()> {
         .title("tty")
         .theme(|state: &Tty| state::theme(state))
         .subscription(subscription::subscription)
+        // A transparent surface so the optional unfocused-opacity can show the desktop
+        // through. With opacity at 1.0 (the default) the background paints fully opaque,
+        // so this is invisible until the user dials in some transparency.
+        .transparent(true)
         .window_size(iced::Size::new(900.0, 600.0))
         .run()
         .map_err(|e| anyhow::anyhow!("UI error: {e}"))

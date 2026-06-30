@@ -43,6 +43,8 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::ApplyBase16 => state.apply_base16(),
         Message::ResetPalette => state.reset_palette(),
         Message::EditColor(idx, color) => state.edit_color(idx, color),
+        Message::Focused(f) => state.focused = f,
+        Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
     }
     iced::Task::none()
 }

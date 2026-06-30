@@ -3,7 +3,8 @@ use iced::{Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, labeled, section, select, status_bar, stepper, tabs, text_field, Tab,
+    button, color_field, labeled, section, select, slider, status_bar, stepper, tabs, text_field,
+    Tab,
 };
 
 use crate::message::Message;
@@ -19,7 +20,12 @@ pub fn view(state: &Tty) -> Element<'_, Message> {
     let _scope = theme::enter(state.theme.palette);
     let t = theme::tokens();
     let style = state.theme.terminal;
-    let bg = style.bg;
+    // The terminal background goes translucent while the window is unfocused (if the
+    // user enabled it); text and colored cells stay opaque. Focused = always opaque.
+    let bg = iced::Color {
+        a: state.bg_opacity(),
+        ..style.bg
+    };
 
     let mut root = Column::new().width(Length::Fill).height(Length::Fill);
 
@@ -167,6 +173,19 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             Message::FontSizeStep(-1.0),
             Message::FontSizeStep(1.0),
         ),
+        // Transparency that kicks in only when the window loses focus. Shown as a
+        // 0–70% transparency amount; stored as the resulting opacity (1 − amount).
+        section("Window"),
+        {
+            let transparency = 1.0 - state.settings.unfocused_opacity();
+            slider(
+                "Transparency (unfocused)",
+                0.0..=0.7,
+                transparency,
+                format!("{}%", (transparency * 100.0).round() as i32),
+                |t| Message::SetUnfocusedOpacity(1.0 - t),
+            )
+        },
     ]
     .spacing(14)
     .into()
