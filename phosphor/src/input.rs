@@ -34,16 +34,46 @@ pub fn to_bytes(key: &Key, mods: Modifiers, app_cursor: bool) -> Option<Vec<u8>>
             // Cursor keys flip between `ESC [` (normal) and `ESC O` (application) forms.
             let ss3 = if app_cursor { b'O' } else { b'[' };
             let cursor = |last: u8| Some(vec![0x1b, ss3, last]);
+            // Word / line motion by modifier (the macOS terminal conventions, which work
+            // with the default readline/zsh emacs keymap):
+            //   Option (alt) or Ctrl  → by word   — Meta-b / Meta-f
+            //   Cmd (logo)            → by line    — Ctrl-A (start) / Ctrl-E (end)
+            let by_word = mods.alt() || mods.control();
+            let by_line = mods.logo();
             match n {
                 Named::Enter => Some(b"\r".to_vec()),
-                Named::Backspace => Some(b"\x7f".to_vec()),
+                Named::Backspace => {
+                    if mods.alt() || mods.control() {
+                        Some(b"\x1b\x7f".to_vec()) // backward-kill-word
+                    } else if mods.logo() {
+                        Some(b"\x15".to_vec()) // backward-kill-line (Ctrl-U)
+                    } else {
+                        Some(b"\x7f".to_vec())
+                    }
+                }
                 Named::Tab => Some(b"\t".to_vec()),
                 Named::Escape => Some(b"\x1b".to_vec()),
                 Named::Space => Some(b" ".to_vec()),
                 Named::ArrowUp => cursor(b'A'),
                 Named::ArrowDown => cursor(b'B'),
-                Named::ArrowRight => cursor(b'C'),
-                Named::ArrowLeft => cursor(b'D'),
+                Named::ArrowRight => {
+                    if by_word {
+                        Some(b"\x1bf".to_vec()) // forward-word
+                    } else if by_line {
+                        Some(b"\x05".to_vec()) // end-of-line
+                    } else {
+                        cursor(b'C')
+                    }
+                }
+                Named::ArrowLeft => {
+                    if by_word {
+                        Some(b"\x1bb".to_vec()) // backward-word
+                    } else if by_line {
+                        Some(b"\x01".to_vec()) // beginning-of-line
+                    } else {
+                        cursor(b'D')
+                    }
+                }
                 Named::Home => cursor(b'H'),
                 Named::End => cursor(b'F'),
                 Named::PageUp => Some(b"\x1b[5~".to_vec()),
@@ -127,5 +157,50 @@ fn button_code(b: MouseButton) -> u32 {
         MouseButton::Left => 0,
         MouseButton::Middle => 1,
         MouseButton::Right => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arrow(named: Named, mods: Modifiers) -> Vec<u8> {
+        to_bytes(&Key::Named(named), mods, false).unwrap()
+    }
+
+    #[test]
+    fn plain_arrows_send_cursor_sequences() {
+        let none = Modifiers::default();
+        assert_eq!(arrow(Named::ArrowLeft, none), b"\x1b[D");
+        assert_eq!(arrow(Named::ArrowRight, none), b"\x1b[C");
+        // Application-cursor mode (DECCKM) switches `ESC [` → `ESC O`.
+        assert_eq!(
+            to_bytes(&Key::Named(Named::ArrowLeft), none, true).unwrap(),
+            b"\x1bOD"
+        );
+    }
+
+    #[test]
+    fn option_or_ctrl_arrow_moves_by_word() {
+        // Meta-b / Meta-f are the readline/zsh backward-word / forward-word bindings.
+        for mods in [Modifiers::ALT, Modifiers::CTRL] {
+            assert_eq!(arrow(Named::ArrowLeft, mods), b"\x1bb", "{mods:?} ←");
+            assert_eq!(arrow(Named::ArrowRight, mods), b"\x1bf", "{mods:?} →");
+        }
+    }
+
+    #[test]
+    fn cmd_arrow_jumps_to_line_start_and_end() {
+        // Cmd (logo) → beginning-of-line (Ctrl-A) / end-of-line (Ctrl-E).
+        assert_eq!(arrow(Named::ArrowLeft, Modifiers::LOGO), b"\x01");
+        assert_eq!(arrow(Named::ArrowRight, Modifiers::LOGO), b"\x05");
+    }
+
+    #[test]
+    fn modified_backspace_deletes_word_or_line() {
+        let del = |mods| to_bytes(&Key::Named(Named::Backspace), mods, false).unwrap();
+        assert_eq!(del(Modifiers::default()), b"\x7f", "plain ⌫");
+        assert_eq!(del(Modifiers::ALT), b"\x1b\x7f", "⌥⌫ deletes a word");
+        assert_eq!(del(Modifiers::LOGO), b"\x15", "⌘⌫ deletes to line start");
     }
 }

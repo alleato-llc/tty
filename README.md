@@ -56,6 +56,8 @@ cargo clippy --all-targets -- -D warnings
 - `⌘W` close the focused pane (the last pane → close the tab; the last tab → quit)
 - `⌘+` / `⌘−` font zoom · `⌘0` reset
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell
+- line editing: `⌥←/→` move by word · `⌘←/→` to line start/end · `⌥⌫` delete a word ·
+  `⌘⌫` delete to line start (sent to the shell's line editor)
 - `⌘F` find in scrollback · `⌘,` settings · wheel to scroll back through history
 
 ## Customize

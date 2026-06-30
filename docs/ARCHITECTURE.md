@@ -51,6 +51,9 @@ the read loop):
   `TerminalStyle::default_dark()` give a starting palette.
 - **`input`** — `to_bytes(key, mods)` translates an iced key press into the bytes a
   PTY expects (control codes, arrow escapes), so a focused terminal behaves like one.
+  Modified arrows/backspace map to the readline/zsh line-editing bindings: `⌥`/`Ctrl`
+  move or delete by word (Meta-b/f, `ESC ⌫`), `⌘` jumps to / deletes to line start/end
+  (Ctrl-A/E/U).
 
 ## tty — the app
 
