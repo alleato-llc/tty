@@ -36,8 +36,10 @@ pub enum Message {
     ToggleSettings,
     /// Switch the settings panel to section `i` (Appearance / Palette).
     SettingsSection(usize),
-    /// Pick the dark/light chrome theme (`"dark"` / `"light"`).
+    /// Pick a named built-in theme (e.g. `"Nord"`).
     SetTheme(String),
+    /// Pick the terminal font family (a `FONT_CHOICES` label).
+    SetFont(String),
     /// Nudge the font size by `±1` from the settings stepper.
     FontSizeStep(f32),
     /// The base16 paste box changed.

@@ -129,21 +129,38 @@ fn settings_body(state: &Tty) -> Element<'_, Message> {
     }
 }
 
-/// Appearance: dark/light theme and font size.
+/// Appearance: named theme, font family, font size.
 fn appearance_section(state: &Tty) -> Element<'_, Message> {
-    let themes = ["Dark".to_string(), "Light".to_string()];
-    let current = match state.theme.choice {
-        rime::theme::ThemeChoice::Light => "Light",
-        _ => "Dark",
-    }
-    .to_string();
-    let theme_pick = select(themes, Some(current), |s: String| {
-        Message::SetTheme(s.to_lowercase())
-    });
+    // Theme: the rime built-in set. A custom palette (base16/edit) reads as "Custom".
+    let mut themes = crate::theme::theme_names();
+    let current_theme = if state.settings.palette.is_some() {
+        themes.insert(0, "Custom".to_string());
+        "Custom".to_string()
+    } else {
+        state
+            .settings
+            .theme
+            .clone()
+            .unwrap_or_else(|| "Dracula".into())
+    };
+    let theme_pick = select(themes, Some(current_theme), Message::SetTheme);
+
+    // Font family: a curated list; the active one (or the default label) is selected.
+    let fonts: Vec<String> = crate::state::FONT_CHOICES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let current_font = state
+        .settings
+        .font_family
+        .clone()
+        .unwrap_or_else(|| crate::state::DEFAULT_FONT_LABEL.to_string());
+    let font_pick = select(fonts, Some(current_font), Message::SetFont);
 
     column![
         section("Appearance"),
         labeled("Theme", theme_pick),
+        labeled("Font", font_pick),
         stepper(
             "Font size",
             format!("{}px", state.font_size as u32),

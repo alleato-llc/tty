@@ -17,6 +17,25 @@ pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const MIN_FONT_SIZE: f32 = 7.0;
 pub const MAX_FONT_SIZE: f32 = 40.0;
 
+/// The "no override" label in the font picker — the iced built-in monospace.
+pub const DEFAULT_FONT_LABEL: &str = "System Monospace";
+
+/// A small curated set of common terminal fonts offered in the settings picker. iced
+/// loads a family by name from whatever the OS has installed; a missing font silently
+/// falls back, so the list is a convenience, not a guarantee it's present.
+pub const FONT_CHOICES: &[&str] = &[
+    DEFAULT_FONT_LABEL,
+    "Menlo",
+    "Monaco",
+    "SF Mono",
+    "JetBrains Mono",
+    "Fira Code",
+    "Cascadia Code",
+    "Hack",
+    "Source Code Pro",
+    "IBM Plex Mono",
+];
+
 /// One terminal tab: a shell PTY plus the screen its output is parsed into (shared
 /// with the background read thread).
 pub struct Term {
@@ -101,10 +120,28 @@ impl Tty {
         self.settings.save();
     }
 
-    /// Pick the dark/light chrome theme.
-    pub fn set_theme(&mut self, choice: &str) {
-        self.settings.theme = Some(choice.to_string());
+    /// Pick a named built-in theme. Selecting one drops any custom palette so the
+    /// theme's own colors take over. The synthetic "Custom" entry (shown while a custom
+    /// palette is active) isn't a real theme, so re-selecting it is a no-op.
+    pub fn set_theme(&mut self, name: &str) {
+        if name.eq_ignore_ascii_case("custom") {
+            return;
+        }
+        self.settings.theme = Some(name.to_string());
+        self.settings.palette = None;
         self.apply_settings();
+    }
+
+    /// Set the terminal font family (or revert to the default monospace).
+    pub fn set_font(&mut self, family: &str) {
+        if family.is_empty() || family.eq_ignore_ascii_case(DEFAULT_FONT_LABEL) {
+            self.settings.font_family = None;
+            self.font = Font::MONOSPACE;
+        } else {
+            self.settings.font_family = Some(family.to_string());
+            self.font = named_font(family);
+        }
+        self.settings.save();
     }
 
     /// Nudge the font size from the settings stepper (clamped, persisted).

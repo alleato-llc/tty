@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use iced::Color;
-use rime::theme::{color_hex, parse_color, ThemeChoice};
+use rime::theme::{color_hex, parse_color};
 
 use phosphor::TerminalStyle;
 
@@ -23,7 +23,7 @@ pub struct Palette {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
-    /// `"dark"` or `"light"`; absent reads as dark.
+    /// The built-in theme name (e.g. `"Dracula"`, `"Nord"`); absent reads as Dracula.
     #[serde(default)]
     pub theme: Option<String>,
     #[serde(default)]
@@ -52,14 +52,6 @@ impl Settings {
         }
         if let Ok(json) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(p, json);
-        }
-    }
-
-    /// The dark/light choice this file selects (default dark).
-    pub fn theme_choice(&self) -> ThemeChoice {
-        match self.theme.as_deref() {
-            Some("light") => ThemeChoice::Light,
-            _ => ThemeChoice::Dark,
         }
     }
 
