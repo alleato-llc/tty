@@ -305,3 +305,7 @@ fn arrow_direction(
         _ => return None,
     })
 }
+
+#[cfg(test)]
+#[path = "update_tests.rs"]
+mod tests;
