@@ -75,3 +75,17 @@ A daemon opens no window itself, so `boot` opens the main window, records
   stand on their own.
 - The `transparent`/window-size that were `application` builder calls move into
   `window::Settings`.
+
+## Follow-up — in-strip reorder (2026-06-30)
+
+Dragging a tab *sideways* reorders it, reusing this ADR's drag machinery rather than
+adding new state. The arm is the same `tab_drag = Some((idx, pointer))` set when a tab is
+pressed; as the pointer crosses another tab the strip's `on_hover(Some(target))` fires and
+`reorder_dragged_tab(target)` moves the dragged tab to that slot live (browser-style),
+re-anchoring the drag to the new index. The vertical `TAB_TEAR_THRESHOLD` still decides
+tear-off at release, so a sideways drag reorders and a downward drag detaches.
+
+This depends on the tab activating on **press** (mouse-down), which is a `rime::tabs`
+change: the tab body is a plain container and the wrapping `mouse_area.on_press` reports
+the press — an iced `button` only reports on release, by which point the gesture is over.
+The same press-arm powers tear-off; both silently no-op'd while activation was release-based.

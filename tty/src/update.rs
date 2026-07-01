@@ -80,7 +80,13 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 state.tab_drag = Some((idx, state.pointer));
             }
         }
-        Message::HoverTab(i) => state.hovered_tab = i,
+        Message::HoverTab(i) => {
+            state.hovered_tab = i;
+            // If a tab press is being dragged across the strip, reorder live.
+            if let Some(target) = i {
+                state.reorder_dragged_tab(target);
+            }
+        }
         Message::Tick => {
             // Surface any OSC 52 clipboard request and light background-activity dots.
             let clip = state.drain_effects();

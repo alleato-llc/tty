@@ -53,6 +53,10 @@ cargo clippy --all-targets -- -D warnings
   drag a divider to resize
 - **right-click** (or **⌃-click**) a pane for a split menu, or a **tab** for
   new-tab / rename / **detach** / split / close-tab
+- **reorder tabs**: drag a tab sideways across the strip and it moves live to the slot
+  under the pointer
+- **rename a tab**: right-click → **Rename tab…**, type a name (Enter commits, blank
+  reverts to the shell/program title, Esc cancels)
 - **detach a tab into its own window**: right-click → **Detach Tab**, or drag a tab down
   out of the strip. Dock it back with the **Reattach** button, by closing the window, or
   by dragging the window onto the tab strip. (Detached terminals are ephemeral — they

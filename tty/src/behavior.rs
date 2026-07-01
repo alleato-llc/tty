@@ -496,6 +496,25 @@ fn tab_tear_off_detaches_only_past_the_threshold() {
     );
 }
 
+/// Dragging a tab across the strip live-reorders it (browser-style): the pressed tab
+/// follows the pointer to the slot it's dragged over and stays active.
+#[test]
+fn dragging_a_tab_reorders_it() {
+    let mut tty = headless(3); // sh0, sh1, sh2
+    // Press the first tab (arming the drag), then drag it over the last slot.
+    tty.tab_drag = Some((0, iced::Point::ORIGIN));
+    tty.reorder_dragged_tab(2);
+
+    let labels: Vec<String> = tty.tabs.iter().map(|t| t.label()).collect();
+    assert_eq!(labels, vec!["sh1", "sh2", "sh0"], "the dragged tab moved to the end");
+    assert_eq!(tty.active, 2, "and stays active under the cursor");
+    assert_eq!(
+        tty.tab_drag,
+        Some((2, iced::Point::ORIGIN)),
+        "the drag re-anchored to the new slot for further crossings"
+    );
+}
+
 #[test]
 fn drag_dock_reattaches_only_when_dropped_on_the_main_band() {
     use std::time::{Duration, Instant};

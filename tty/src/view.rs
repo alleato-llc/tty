@@ -3,9 +3,9 @@ use iced::{Border, Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, context_menu, labeled, section, select, shortcut_row, slider, status_bar,
-    stepper, tabs, text_field, toggle, tooltip, window_shell, MenuItem, Tab, TabBarStyle,
-    TooltipPosition,
+    button, color_field, context_menu, labeled, rename_bar, rename_field_id, section, select,
+    shortcut_row, slider, status_bar, stepper, tabs, text_field, toggle, tooltip, window_shell,
+    MenuItem, Tab, TabBarStyle, TooltipPosition,
 };
 
 use crate::message::Message;
@@ -16,9 +16,10 @@ pub fn search_id() -> iced::advanced::widget::Id {
     iced::advanced::widget::Id::new("tty-search")
 }
 
-/// The rename field's text-input id (so "Rename tab" can focus it).
+/// The rename field's text-input id (so "Rename tab" can focus it) — the shared rime
+/// rename bar owns the field, so we delegate to its id.
 pub fn rename_id() -> iced::advanced::widget::Id {
-    iced::advanced::widget::Id::new("tty-rename")
+    rename_field_id()
 }
 
 /// The daemon's per-window view: a detached window shows just its tab; every other
@@ -88,23 +89,16 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
         ));
     }
 
-    // Rename bar (from the tab menu): a focused field, prefilled with the current name.
-    // Enter commits, Esc cancels.
+    // Rename bar (from the tab menu): the shared rime bar, a focused field prefilled
+    // with the current name. Enter commits, Esc cancels.
     if let Some((_, draft)) = &state.renaming {
-        let field = text_field("Tab name…", draft, Message::RenameChanged)
-            .id(rename_id())
-            .on_submit(Message::RenameSubmit)
-            .size(13);
-        root = root.push(
-            container(
-                row![text("Rename tab").size(12).color(t.muted), field,]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center),
-            )
-            .padding([4, 6])
-            .width(Length::Fill)
-            .style(move |_| container::background(t.surface)),
-        );
+        root = root.push(rename_bar(
+            "Rename tab",
+            "Tab name…",
+            draft,
+            Message::RenameChanged,
+            Message::RenameSubmit,
+        ));
     }
 
     // The active tab's panes. A tab is a single pane until the user splits it; the

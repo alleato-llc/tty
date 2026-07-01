@@ -703,6 +703,22 @@ impl Tty {
         }
     }
 
+    /// While a tab tear-off is armed, dragging the pointer over a *different* tab
+    /// live-reorders the dragged tab to that slot (browser-style). The drag anchor
+    /// follows so successive crossings keep moving it; no-op when not dragging.
+    pub fn reorder_dragged_tab(&mut self, target: usize) {
+        let Some((from, start)) = self.tab_drag else {
+            return;
+        };
+        if from == target || from >= self.tabs.len() || target >= self.tabs.len() {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(target, tab);
+        self.active = target;
+        self.tab_drag = Some((target, start));
+    }
+
     /// Complete an armed tab tear-off on pointer release: a drag past
     /// [`TAB_TEAR_THRESHOLD`] detaches the pressed tab; a short drag is just a click.
     pub fn finish_tab_drag(&mut self) -> Option<iced::Task<Message>> {
