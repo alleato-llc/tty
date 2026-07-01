@@ -111,3 +111,8 @@ cargo clippy --all-targets -- -D warnings
 `behavior::*` tests drive `tty::state`/`update` with pty-less tabs (no shell);
 `snapshot::*` renders the chrome to a PNG (backend-specific baseline, excluded from
 the default run). Full story in `docs/ARCHITECTURE.md`.
+
+**No inline test modules.** A module `foo.rs` keeps its unit tests in a sibling
+`foo_tests.rs`, wired up with `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` (the
+test file opens `use super::*;`). Don't write `#[cfg(test)] mod tests { … }` inline —
+same rule as fed and rime.

@@ -501,12 +501,16 @@ fn tab_tear_off_detaches_only_past_the_threshold() {
 #[test]
 fn dragging_a_tab_reorders_it() {
     let mut tty = headless(3); // sh0, sh1, sh2
-    // Press the first tab (arming the drag), then drag it over the last slot.
+                               // Press the first tab (arming the drag), then drag it over the last slot.
     tty.tab_drag = Some((0, iced::Point::ORIGIN));
     tty.reorder_dragged_tab(2);
 
     let labels: Vec<String> = tty.tabs.iter().map(|t| t.label()).collect();
-    assert_eq!(labels, vec!["sh1", "sh2", "sh0"], "the dragged tab moved to the end");
+    assert_eq!(
+        labels,
+        vec!["sh1", "sh2", "sh0"],
+        "the dragged tab moved to the end"
+    );
     assert_eq!(tty.active, 2, "and stays active under the cursor");
     assert_eq!(
         tty.tab_drag,
