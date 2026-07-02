@@ -109,6 +109,11 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   a uniform per-surface fade when the window loses focus (no runtime window-opacity API
   in iced 0.14), clamped to `settings::MIN_OPACITY` so it tops out at 95% and never
   fades to an invisible, unrecoverable window.
+- **`app_icon`** — the neon "tty." icon glue (shared shape with fed/rift): decodes the
+  embedded `assets/icon-512.png` into an `iced::window::Icon` (Linux/Windows) and sets the
+  macOS **Dock** icon at runtime via AppKit (`objc2`) from the first `root_view` render
+  (post-launch, main thread, `Once`-guarded — a bare `cargo run` binary isn't a bundle).
+  The packaged `.app` gets `AppIcon.icns` from salpa.
 
 ## Shared with fed-ide
 

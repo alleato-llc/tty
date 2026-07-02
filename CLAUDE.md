@@ -112,6 +112,20 @@ cargo clippy --all-targets -- -D warnings
 `snapshot::*` renders the chrome to a PNG (backend-specific baseline, excluded from
 the default run). Full story in `docs/ARCHITECTURE.md`.
 
+## App icon
+
+tty ships a neon **"tty."** wordmark icon on the green **Phosphor** CRT palette (a
+sibling to fed's and rift's neon marks). The SVG master + generated `AppIcon.icns` (10
+sizes) live in `tty/assets/`; the app embeds `icon-512.png`.
+
+`tty/src/app_icon.rs` (the same helper fed and rift use) sets the **macOS Dock** icon at
+runtime via AppKit (`objc2`) from the first `root_view` render — post-launch, main
+thread, `Once`-guarded, since a bare `cargo run` binary isn't an `.app` bundle and a call
+in `main` gets reset by winit — and decodes the PNG into an `iced::window::Icon` for
+Linux/Windows taskbars. The packaged `.app` gets `AppIcon.icns` from `ci/salpa-tty.yaml`'s
+`icon:` field. To restyle: edit `assets/icon.svg`, re-render to 1024 PNG, then `sips` an
+`.iconset` + `iconutil -c icns` (and refresh `icon-512.png`).
+
 **No inline test modules.** A module `foo.rs` keeps its unit tests in a sibling
 `foo_tests.rs`, wired up with `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` (the
 test file opens `use super::*;`). Don't write `#[cfg(test)] mod tests { … }` inline —
