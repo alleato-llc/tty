@@ -20,6 +20,15 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Decode the embedded app-icon PNG into an iced window icon (app_icon module).
+png = "0.17"
+
+# macOS: set the Dock icon at runtime so a bare `cargo run` binary (not an .app
+# bundle) shows the real icon too. AppKit via objc2 (already in the tree via winit).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-app-kit = "0.2"
+objc2-foundation = "0.2"
 
 [dev-dependencies]
 # Headless view snapshots (no GPU/window) — see src/snapshot.rs.

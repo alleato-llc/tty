@@ -1,0 +1,56 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a160c"/>
+      <stop offset="0.55" stop-color="#040805"/>
+      <stop offset="1" stop-color="#010301"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.6">
+      <stop offset="0" stop-color="#3df06a" stop-opacity="0.34"/>
+      <stop offset="0.5" stop-color="#3df06a" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#3df06a" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blurBig" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <filter id="blurMid" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="frame">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <!-- CRT scanlines: a 1px lit line every 8px -->
+    <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="none"/>
+      <rect width="8" height="1" y="0" fill="#5dff8a" fill-opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#crt)"/>
+
+  <g clip-path="url(#frame)">
+    <!-- phosphor screen glow + scanlines -->
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#scan)"/>
+
+    <!-- neon wordmark "tty." — phosphor green tube, amber dot -->
+    <g font-family="'Arial Black','Helvetica Neue',Arial,sans-serif" font-weight="900"
+       font-size="360" letter-spacing="-2" text-anchor="middle">
+      <text x="500" y="632" filter="url(#blurBig)">
+        <tspan fill="#3df06a">tty</tspan><tspan fill="#d6c34a">.</tspan>
+      </text>
+      <text x="500" y="632" filter="url(#blurMid)">
+        <tspan fill="#3df06a">tty</tspan><tspan fill="#d6c34a">.</tspan>
+      </text>
+      <text x="500" y="632">
+        <tspan fill="#d6ffcf">tty</tspan><tspan fill="#ffe9a8">.</tspan>
+      </text>
+    </g>
+  </g>
+
+  <!-- lit green rim -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="none"
+        stroke="#3df06a" stroke-opacity="0.45" stroke-width="4" filter="url(#blurMid)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none"
+        stroke="#5dff8a" stroke-opacity="0.5" stroke-width="2"/>
+</svg>

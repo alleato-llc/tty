@@ -2,6 +2,7 @@
 //! glue over `cathode` (the PTY + screen engine), `phosphor` (the terminal widget,
 //! also used by the IDE's terminal panel), and `rime` chrome.
 
+mod app_icon;
 mod detach_drag;
 mod message;
 mod settings;
@@ -18,6 +19,10 @@ mod snapshot;
 
 use message::Message;
 use state::Tty;
+
+/// The neon "tty." app icon (green Phosphor CRT palette), embedded once and reused for
+/// the window icon and the macOS Dock icon (set from `root_view` after launch).
+pub(crate) const APP_ICON: &[u8] = include_bytes!("../assets/icon-512.png");
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -41,6 +46,7 @@ fn main() -> anyhow::Result<()> {
             let (id, open) = iced::window::open(iced::window::Settings {
                 size,
                 transparent: true,
+                icon: app_icon::window_icon(APP_ICON),
                 ..Default::default()
             });
             tty.main_window = Some(id);

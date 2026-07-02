@@ -16,6 +16,7 @@ version: git # overridden by --version <tag> in CI
 build:
   bin: tty # the cargo binary inside Tty.app
   bundle_id: dev.tty.terminal
+  icon: tty/assets/AppIcon.icns # Tty.app's Dock/Finder icon (neon "tty." CRT wordmark)
   universal: true # one dmg for Intel + Apple Silicon (cargo both arches + lipo)
   sign: "Developer ID Application" # matches the cert imported from BUILD_CERTIFICATE_BASE64
   notarize: true

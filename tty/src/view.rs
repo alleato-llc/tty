@@ -25,6 +25,10 @@ pub fn rename_id() -> iced::advanced::widget::Id {
 /// The daemon's per-window view: a detached window shows just its tab; every other
 /// window is the full tabbed chrome.
 pub fn root_view(state: &Tty, window: iced::window::Id) -> Element<'_, Message> {
+    // Set the macOS Dock icon on the first render (post-launch, main thread — so it
+    // sticks; a call in `main` before the event loop is reset by winit). Once-guarded.
+    crate::app_icon::ensure_dock_icon(crate::APP_ICON);
+
     match state.detached.get(&window) {
         Some(tab) => detached_view(state, window, tab),
         None => main_view(state),
