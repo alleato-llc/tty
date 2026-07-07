@@ -11,8 +11,14 @@ name: Deploy site
 #
 # Auth is short-lived OIDC credentials (no stored keys). Required repository
 # config (Settings -> Secrets and variables -> Actions):
-#   vars.AWS_REGION           region of the deploy role (e.g. us-east-1)
-#   vars.AWS_SITE_ROLE_ARN    arn of the OIDC deploy role for tty
+#   vars.AWS_REGION              region of the deploy role (e.g. us-east-1)
+#   secrets.AWS_SITE_ROLE_ARN    arn of the OIDC deploy role for tty — a SECRET,
+#                                not a variable: GitHub auto-redacts secrets
+#                                everywhere in logs, which a variable + a manual
+#                                ::add-mask:: step does NOT do (the step's own
+#                                `env:` block still gets echoed in its log
+#                                preamble before the mask takes effect). Don't
+#                                revert this to a variable.
 #   secrets.SALPA_INSTALL_TOKEN  (optional) token to `go install` salpa if its
 #                                repo is private; omit for a public module.
 on:
@@ -71,17 +77,10 @@ jobs:
           go install github.com/alleato-llc/salpa@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # The Actions logs are public; mask the account id (embedded in the role
-      # arn) before any AWS command can echo it.
-      - name: Mask account id
-        env:
-          ROLE_ARN: ${{ vars.AWS_SITE_ROLE_ARN }}
-        run: echo "::add-mask::$(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
-
       - name: Configure deploy credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_SITE_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_SITE_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       # Builds web/, syncs web/dist to the bucket, invalidates CloudFront —
