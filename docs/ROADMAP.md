@@ -22,6 +22,21 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   only, no persistence.)
 - Full ANSI rendering: 16 / 256 / truecolor + bold, dim, italic, underline, inverse.
 - Scrollback + mouse select / `⌘C` copy.
+- **Configurable scrollback** — a global max-lines setting (applies live to
+  already-open tabs, not just new ones) and `⌘K` to clear it.
+- **Scrollback search (`⌘F`)** — full-transcript find (not just the visible window),
+  with a live "N of M" count and `Enter`/`⇧Enter` to step between matches, auto-
+  scrolling the current one into view.
+- **Scrollback History panel (`⌘⇧H`)** — a separate command/output browser: each
+  shell command and its captured output are recorded live (no shell-integration
+  escape codes needed) as an accordion `rime::table`, with its own text filter.
+  Output capture is capped per command (a global default, overridable per command via
+  a glob pattern, e.g. `"tail *" → 200`) so a streaming command (`tail -f`) just stops
+  growing instead of recording forever, and full-screen apps (htop, vim) are excluded
+  entirely via the alt-screen check.
+- **Clickable links (URL autodetection)** — `⌘`-hover underlines a detected URL,
+  `⌘`-click opens it directly, and a plain right-click offers **Open Link** / **Copy
+  Link**.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
 - **Output-driven repaint** — redraw on shell output, idle-silent (no polling tick).
 - **Theme catalog** — 8 named themes (Dracula, Nord, Gruvbox Dark, Solarized
@@ -54,7 +69,6 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
       running program; OSC 7 enables **new-tab-in-same-directory**. — §
 - [ ] **Unicode width** — wide (CJK/emoji) cells occupy two columns with a spacer, so
       alignment stops drifting. (Full grapheme clustering: see backlog.)
-- [ ] **Scrollback search (`⌘F`)** — find within output, highlight + jump.
 - [ ] **Bell / activity** — subtle visual bell + a per-tab activity dot.
 - [ ] **Engine robustness** (rides along): tab stops, `S`/`T` scroll, `L`/`M` ins/del
       line, `@`/`P`/`X` ins/del/erase char, `G`/`d` absolute moves, DECSC/DECRC,
@@ -87,9 +101,13 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 - **Shell integration (OSC 133 semantic prompts)** — ✦ — mark prompt / command / output
   regions: jump prompt-to-prompt, flag failed commands, "copy last command's output."
   The modern-terminal killer feature (kitty/iTerm/WezTerm/Ghostty). Pairs with OSC 7.
+  Deliberately **not** how Scrollback History's command/output separation works today
+  (see below) — reconsider only if OSC 133's other benefits (prompt-jump, failed-command
+  flagging) become the priority; recording is already solved without it.
 - **OSC 52 clipboard** — copy from inside `tmux`/`ssh`/`vim` to the system clipboard.
-- **Clickable links (OSC 8 + URL autodetection)** — ✦ — `⌘`-click to open; underline on
-  hover. (Storage lands in Tier 0; UI here.)
+- **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
+  (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
+  (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.
 - **Config file round-trip** — ✦§ — the GUI writes a human-readable `tty.toml`; power
   users can hand-edit; live-reload on change. (GUI stays the primary path.)
 

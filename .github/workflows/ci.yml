@@ -76,10 +76,9 @@ jobs:
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
             libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev xvfb
 
-      # nextest is the test runner. The default run covers the unit + headless-
-      # behavior tiers; the snapshot tests are excluded by the `default-filter`
-      # in .config/nextest.toml because their baselines are backend-specific
-      # (this Ubuntu runner has no GPU + no committed baselines).
+      # nextest is the test runner. The default run (`.config/nextest.toml`'s
+      # default-filter) covers unit + behavior; snapshots are run as their own step
+      # below, forcing a CI-portable backend. See ADR 0005.
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
@@ -96,16 +95,104 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       # Unit + behavior. xvfb gives the `iced_test` Simulator a display to init its
-      # renderer on this headless runner. Snapshots are intentionally NOT run here —
-      # add a separate macOS/wgpu job with committed baselines to gate those:
-      #   cargo nextest run --ignore-default-filter -E 'test(snapshot)'
+      # renderer on this headless runner (it tries wgpu first, which needs one here).
       - name: Test (unit + behavior)
         working-directory: tty
         run: xvfb-run -a cargo nextest run
 
+      # Snapshots render real pixels, but `iced_test`'s tiny-skia backend is a pure
+      # software rasterizer with no GPU/display dependency at all — forcing it via
+      # ICED_TEST_BACKEND sidesteps wgpu's GPU-driver-specific output (the reason
+      # snapshots were excluded from CI before). tty/snapshots/*-tiny-skia.png were
+      # generated in a container matching this runner and verified byte-for-byte
+      # reproducible across independent containers — no xvfb needed. See
+      # docs/adr/0005-headless-ci-snapshots-and-coverage.md.
+      - name: Test (snapshot, tiny-skia)
+        working-directory: tty
+        env:
+          ICED_TEST_BACKEND: tiny-skia
+        run: cargo nextest run --ignore-default-filter -E 'test(snapshot)'
+
       - name: Build
         working-directory: tty
         run: cargo build --bins
+
+  # Coverage via cargo-llvm-cov (workspace-scoped: cathode/phosphor/tty, not rime or
+  # upstream deps). Forces the tiny-skia backend for the same reason the snapshot
+  # step above does — deterministic, no GPU. Gated at 70% lines (measured ~76% as of
+  # the phosphor::input/detach_drag/update.rs/terminal.rs coverage push; the floor
+  # leaves headroom for legitimate variance without letting coverage silently erode
+  # — raise it further as genuinely-testable gaps close, don't chase 100%: some
+  # files here are inherently thin — see ARCHITECTURE.md's Testing section). An HTML
+  # report is uploaded so a human can drill into exactly which lines are missed. See
+  # docs/adr/0005-headless-ci-snapshots-and-coverage.md.
+  coverage:
+    name: Coverage (cargo-llvm-cov)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tty
+        uses: actions/checkout@v4
+        with:
+          path: tty
+
+      - name: Checkout rime (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/rime
+          path: rime
+          token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install graphics/windowing libraries (iced + wgpu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Install nextest + cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tty
+          key: coverage
+
+      # One instrumented test run (unit + behavior + snapshot); `--no-report` defers
+      # generating any output so the two report formats below reuse the same
+      # profile data instead of re-running the whole suite twice.
+      - name: Collect coverage
+        working-directory: tty
+        env:
+          ICED_TEST_BACKEND: tiny-skia
+        run: cargo llvm-cov nextest --workspace --ignore-default-filter --no-report
+
+      - name: Coverage summary + threshold gate
+        working-directory: tty
+        run: cargo llvm-cov report --lcov --output-path lcov.info --fail-under-lines 70
+
+      - name: Coverage HTML report
+        working-directory: tty
+        if: always()
+        run: cargo llvm-cov report --html
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html
+          path: tty/target/llvm-cov/html/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lcov.info
+          path: tty/lcov.info
 
   # Build the landing page so a broken site fails CI. No Rust or rime needed.
   web:

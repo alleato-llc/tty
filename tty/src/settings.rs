@@ -25,6 +25,14 @@ pub struct Palette {
     pub cursor: String,
 }
 
+/// One `output_line_overrides` entry — e.g. `{ pattern: "tail *", max_lines: 200 }` to
+/// let a `tail -f` capture more than the global default before it stops growing.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutputLineOverride {
+    pub pattern: String,
+    pub max_lines: usize,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     /// The built-in theme name (e.g. `"Dracula"`, `"Nord"`); absent reads as Dracula.
@@ -46,7 +54,29 @@ pub struct Settings {
     /// the muted inactive tabs; this just dials the loudness.
     #[serde(default)]
     pub tab_highlight: Option<bool>,
+    /// How many scrollback lines each terminal keeps before evicting the oldest.
+    #[serde(default)]
+    pub max_scrollback: Option<usize>,
+    /// How many output lines a command keeps by default (a long-running/streaming
+    /// command like `tail -f` just stops growing past this).
+    #[serde(default)]
+    pub default_output_lines: Option<usize>,
+    /// Per-command overrides: the first glob pattern (checked in order) matching the
+    /// command's text wins over `default_output_lines`.
+    #[serde(default)]
+    pub output_line_overrides: Vec<OutputLineOverride>,
 }
+
+/// [`Settings::max_scrollback`]'s default and clamp range — matches `cathode`'s
+/// historical hardcoded default, now user-adjustable between these bounds.
+pub const DEFAULT_MAX_SCROLLBACK: usize = 2000;
+pub const MIN_MAX_SCROLLBACK: usize = 200;
+pub const MAX_MAX_SCROLLBACK: usize = 20_000;
+
+/// [`Settings::default_output_lines`]'s default and clamp range.
+pub const DEFAULT_OUTPUT_LINES: usize = 50;
+pub const MIN_OUTPUT_LINES: usize = 1;
+pub const MAX_OUTPUT_LINES: usize = 10_000;
 
 impl Settings {
     /// Load `tty.settings.json`, or defaults if it's missing or malformed.
@@ -79,6 +109,39 @@ impl Settings {
     /// Whether to ink the active tab with the accent (default `true`).
     pub fn tab_highlight(&self) -> bool {
         self.tab_highlight.unwrap_or(true)
+    }
+
+    /// How many scrollback lines each terminal keeps (default 2000).
+    pub fn max_scrollback(&self) -> usize {
+        self.max_scrollback
+            .unwrap_or(DEFAULT_MAX_SCROLLBACK)
+            .clamp(MIN_MAX_SCROLLBACK, MAX_MAX_SCROLLBACK)
+    }
+
+    /// How many output lines a command keeps by default (default 50).
+    pub fn default_output_lines(&self) -> usize {
+        self.default_output_lines
+            .unwrap_or(DEFAULT_OUTPUT_LINES)
+            .clamp(MIN_OUTPUT_LINES, MAX_OUTPUT_LINES)
+    }
+
+    /// The configured overrides as `(pattern, cap)` pairs, ready for
+    /// `cathode::commands::resolve_output_cap`.
+    pub fn output_line_overrides(&self) -> Vec<(String, usize)> {
+        self.output_line_overrides
+            .iter()
+            .map(|o| (o.pattern.clone(), o.max_lines))
+            .collect()
+    }
+
+    /// The output-line cap for `command` — the first matching override, else
+    /// [`Self::default_output_lines`].
+    pub fn resolve_output_cap(&self, command: &str) -> usize {
+        cathode::commands::resolve_output_cap(
+            command,
+            &self.output_line_overrides(),
+            self.default_output_lines(),
+        )
     }
 
     /// The custom [`TerminalStyle`] this file describes, if any (the panel/base16 edits).

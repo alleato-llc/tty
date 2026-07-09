@@ -44,7 +44,12 @@ cargo build --bins
 cargo nextest run                          # unit + behavior
 cargo nextest run --ignore-default-filter  # whole suite, incl. the snapshot
 cargo clippy --all-targets -- -D warnings
+cargo llvm-cov nextest --workspace --ignore-default-filter  # coverage (cathode/phosphor/tty)
 ```
+
+CI runs all three test tiers headlessly, including snapshots (forcing `iced_test`'s
+`tiny-skia` software backend — no GPU/display needed, unlike the `wgpu` backend used
+for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 
 ## Keys
 
@@ -67,7 +72,13 @@ cargo clippy --all-targets -- -D warnings
 - `⌘C` copy the selection (drag to select); `Ctrl+C` stays a real SIGINT to the shell
 - line editing: `⌥←/→` move by word · `⌘←/→` to line start/end · `⌥⌫` delete a word ·
   `⌘⌫` delete to line start (sent to the shell's line editor)
-- `⌘F` find in scrollback · `⌘,` settings · wheel to scroll back through history
+- `⌘F` find in scrollback — `Enter`/`⇧Enter` jump to the next/previous match (shown as
+  "N of M") · `⌘K` clear the focused pane's scrollback · `⌘⇧H` open **Scrollback
+  History** (an accordion table of past commands + their captured output, its own
+  search, double-click a row to copy the command) · `⌘,` settings · wheel to scroll
+  back through history
+- `⌘`-hover underlines a URL in the output; `⌘`-click opens it directly, or right-click
+  it for an **Open Link** / **Copy Link** menu
 
 ## Customize
 

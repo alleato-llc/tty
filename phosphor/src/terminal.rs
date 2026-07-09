@@ -8,6 +8,7 @@
 //! `editor` widget is shared — refinements land in both at once.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
@@ -25,6 +26,7 @@ use iced::keyboard::Modifiers;
 use cathode::screen::{Cell, CursorShape, TermColor, TerminalScreen};
 
 use crate::input::{self, MouseButton, MouseEvent};
+use crate::link;
 
 /// The 16 ANSI colors (0–7 normal, 8–15 bright) as RGB — a conventional dark palette.
 /// A host with its own theme can override every field of [`TerminalStyle`]; this is the
@@ -90,6 +92,10 @@ const LINE_HEIGHT_RATIO: f32 = 1.3;
 /// scrollback (so it's stable as the live screen scrolls).
 type Pos = (usize, usize);
 
+/// A second left-press on the same cell within this window counts as a double-click
+/// (selects the word/URL under it instead of starting a fresh selection).
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
 /// Per-widget state: how far we've scrolled back, any in-progress selection, and the
 /// live modifier state (so ⌥ can override an app's mouse grab to force selection).
 #[derive(Default)]
@@ -102,6 +108,16 @@ struct State {
     modifiers: Modifiers,
     /// The cell the last drag report was sent for (dedupe motion within a cell).
     last_report: Option<(usize, usize)>,
+    /// The time + cell of the last left-press, for double-click detection.
+    last_click: Option<(Instant, Pos)>,
+    /// The URL span under the pointer while ⌘ is held (`(line, start_col, end_col)`,
+    /// `end_col` exclusive) — underlined in [`Terminal::draw`] as a "this is
+    /// clickable" affordance. Recomputed on every cursor move and modifier change.
+    cmd_hover: Option<(usize, usize, usize)>,
+    /// The last `scroll_to` target actually applied — so a host re-passing the same
+    /// target every render (its own state didn't change) doesn't repeatedly fight a
+    /// manual scroll the user made afterward. See [`Terminal::layout`].
+    last_scroll_to: Option<usize>,
 }
 
 pub struct Terminal<Message> {
@@ -117,8 +133,17 @@ pub struct Terminal<Message> {
     /// Fires with the bytes to send to the PTY when a running app has enabled mouse
     /// reporting (the host writes them to the shell).
     on_mouse: Box<dyn Fn(Vec<u8>) -> Message>,
+    /// Fires with the URL when a right-click lands on one (see [`link`]). The host
+    /// anchors a context menu there; an uncaptured right-press (no URL under it)
+    /// still bubbles up to the host's own pane/tab context menu unchanged.
+    on_link: Box<dyn Fn(String) -> Message>,
+    /// Fires with the URL on a ⌘-click, opening it directly (no menu).
+    on_open_link: Box<dyn Fn(String) -> Message>,
     /// Case-insensitive scrollback search: matching runs are highlighted.
     find: Option<String>,
+    /// An absolute line the host wants brought into view right now (e.g. the current
+    /// `⌘F` match) — see [`Terminal::scroll_to`].
+    scroll_to: Option<usize>,
 }
 
 impl<Message> Terminal<Message> {
@@ -127,11 +152,24 @@ impl<Message> Terminal<Message> {
         self.find = query.filter(|q| !q.is_empty());
         self
     }
+
+    /// Scroll to bring absolute line `target` into view, once — set this to the
+    /// current match's line (from [`find_matches`]) when the host navigates to the
+    /// next/previous `⌘F` match. Applied edge-triggered in [`Terminal::layout`], so
+    /// passing the same value again (nothing changed on the host side) is a no-op and
+    /// won't fight a manual scroll the user made afterward.
+    pub fn scroll_to(mut self, target: Option<usize>) -> Self {
+        self.scroll_to = target;
+        self
+    }
 }
 
 /// Build the terminal widget over `screen`. `on_resize(cols, rows)` fires when the
-/// grid that fits changes; `on_select(text)` as a selection is dragged; `on_mouse`
-/// carries PTY bytes when the app grabbed the mouse (DEC modes 1000/1002/1003/1006).
+/// grid that fits changes; `on_select(text)` as a selection is dragged (also fired by
+/// a double-click-to-select-word/URL); `on_mouse` carries PTY bytes when the app
+/// grabbed the mouse (DEC modes 1000/1002/1003/1006); `on_link(url)` fires when a
+/// right-click lands on a detected URL (opens a menu); `on_open_link(url)` fires on a
+/// ⌘-click on one (opens it directly, no menu).
 #[allow(clippy::too_many_arguments)]
 pub fn terminal<Message>(
     screen: Arc<Mutex<TerminalScreen>>,
@@ -142,6 +180,8 @@ pub fn terminal<Message>(
     on_resize: impl Fn(usize, usize) -> Message + 'static,
     on_select: impl Fn(Option<String>) -> Message + 'static,
     on_mouse: impl Fn(Vec<u8>) -> Message + 'static,
+    on_link: impl Fn(String) -> Message + 'static,
+    on_open_link: impl Fn(String) -> Message + 'static,
 ) -> Terminal<Message> {
     Terminal {
         screen,
@@ -152,7 +192,10 @@ pub fn terminal<Message>(
         on_resize: Box::new(on_resize),
         on_select: Box::new(on_select),
         on_mouse: Box::new(on_mouse),
+        on_link: Box::new(on_link),
+        on_open_link: Box::new(on_open_link),
         find: None,
+        scroll_to: None,
     }
 }
 
@@ -217,6 +260,48 @@ impl<Message> Terminal<Message> {
         let history = screen.scrollback.len();
         selected_text(&screen, history, screen.cols, order(sel))
     }
+
+    /// The URL span at pixel position `pos`, as `(line, start_col, end_col)`, if any.
+    fn link_span_at(
+        &self,
+        cell_w: f32,
+        line_h: f32,
+        bounds: Rectangle,
+        scroll: usize,
+        pos: Point,
+    ) -> Option<(usize, usize, usize)> {
+        let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
+        let (line, col) = hit(bounds, cell_w, line_h, pos, total, rows, cols, scroll);
+        let screen = self.screen.lock();
+        let history = screen.scrollback.len();
+        let row = row_chars(&screen, history, cols, line);
+        drop(screen);
+        link::link_span_at(&row, col).map(|(start, end)| (line, start, end))
+    }
+
+    /// Recompute the ⌘-hover link span from the current cursor + modifiers — lights up
+    /// immediately on ⌘-down and clears on ⌘-up, a drag, or the cursor leaving a link
+    /// (or the widget). Requests a redraw when the hover span actually changes.
+    #[allow(clippy::too_many_arguments)]
+    fn refresh_hover(
+        &self,
+        state: &mut State,
+        bounds: Rectangle,
+        cell_w: f32,
+        line_h: f32,
+        cursor: mouse::Cursor,
+        to_app: bool,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let hover = (state.modifiers.command() && !to_app && !state.dragging)
+            .then(|| cursor.position_over(bounds))
+            .flatten()
+            .and_then(|pos| self.link_span_at(cell_w, line_h, bounds, state.scroll, pos));
+        if hover != state.cmd_hover {
+            state.cmd_hover = hover;
+            shell.request_redraw();
+        }
+    }
 }
 
 /// The viewport's top absolute line: the live bottom (`scroll = 0`) shows the last
@@ -243,6 +328,48 @@ fn cell_at(screen: &TerminalScreen, history: usize, line: usize, col: usize) -> 
             Cell::default()
         }
     }
+}
+
+/// The characters of grid row `line`, one per column — the plain text a URL scan or
+/// the search highlight matches against.
+fn row_chars(screen: &TerminalScreen, history: usize, cols: usize, line: usize) -> Vec<char> {
+    (0..cols)
+        .map(|c| cell_at(screen, history, line, c).ch)
+        .collect()
+}
+
+/// Every case-insensitive occurrence of `query` across the *entire* buffer
+/// (scrollback + live grid), as `(line, start_col, end_col)` ranges (`end_col`
+/// exclusive), oldest line first. Unlike `draw()`'s per-frame highlight pass — which
+/// only ever looks at whatever's currently scrolled into view — this walks every
+/// line, so a host can show a match count and jump between matches (via
+/// [`Terminal::scroll_to`]) instead of requiring the user to hunt for them by hand.
+pub fn find_matches(
+    screen: &TerminalScreen,
+    cols: usize,
+    query: &str,
+) -> Vec<(usize, usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let history = screen.scrollback.len();
+    let total = history + screen.rows;
+    let needle: Vec<char> = query.chars().collect();
+    let mut out = Vec::new();
+    for line in 0..total {
+        let cells = row_chars(screen, history, cols, line);
+        let mut s = 0;
+        while s + needle.len() <= cells.len() {
+            let hit = (0..needle.len()).all(|k| cells[s + k].eq_ignore_ascii_case(&needle[k]));
+            if hit {
+                out.push((line, s, s + needle.len()));
+                s += needle.len();
+            } else {
+                s += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Order a selection so anchor ≤ head lexicographically by `(line, col)`.
@@ -367,11 +494,31 @@ where
 
     fn layout(
         &mut self,
-        _tree: &mut Tree,
-        _renderer: &Renderer,
+        tree: &mut Tree,
+        renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        layout::Node::new(limits.max())
+        let node = layout::Node::new(limits.max());
+
+        // Apply a pending `scroll_to` exactly once per distinct target — layout runs
+        // on every redraw regardless of events, which is what makes this the right
+        // hook: it has the renderer (for cell/line metrics) *and* mutable tree state,
+        // neither of which `update()`'s prop-diffing counterparts have both of.
+        if let Some(target) = self.scroll_to {
+            let state = tree.state.downcast_mut::<State>();
+            if state.last_scroll_to != Some(target) {
+                let bounds = node.bounds();
+                let cell_w = cell_width(renderer, self.font, self.font_size);
+                let line_h = self.line_height();
+                let (total, rows, _cols) = self.dims(cell_w, line_h, bounds);
+                // Center the target line in the viewport when there's room to.
+                let top = target.saturating_sub(rows / 2);
+                state.scroll = total.saturating_sub(rows).saturating_sub(top);
+                state.last_scroll_to = Some(target);
+            }
+        }
+
+        node
     }
 
     fn update(
@@ -408,6 +555,7 @@ where
         match event {
             Event::Keyboard(iced::keyboard::Event::ModifiersChanged(m)) => {
                 state.modifiers = *m;
+                self.refresh_hover(state, bounds, cell_w, line_h, cursor, to_app, shell);
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let Some(pos) = cursor.position_over(bounds) else {
@@ -468,14 +616,68 @@ where
                 } else if *button == mouse::Button::Left {
                     let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
                     let p = hit(bounds, cell_w, line_h, pos, total, rows, cols, state.scroll);
+                    let (line, col) = p;
+
+                    // ⌘-click a URL opens it directly — no selection, no menu.
+                    if state.modifiers.command() {
+                        let screen = self.screen.lock();
+                        let history = screen.scrollback.len();
+                        let row = row_chars(&screen, history, cols, line);
+                        drop(screen);
+                        if let Some(url) = link::link_at(&row, col) {
+                            shell.publish((self.on_open_link)(url));
+                            shell.capture_event();
+                            return;
+                        }
+                    }
+
+                    // A second press on the same cell within the double-click window
+                    // selects the word (or whole URL) under it, highlighting it just
+                    // like a drag-selection.
+                    let now = Instant::now();
+                    let is_double = state.last_click.is_some_and(|(at, cell)| {
+                        cell == p && now.duration_since(at) <= DOUBLE_CLICK_WINDOW
+                    });
+                    state.last_click = Some((now, p));
+                    if is_double {
+                        let screen = self.screen.lock();
+                        let history = screen.scrollback.len();
+                        let row = row_chars(&screen, history, cols, line);
+                        drop(screen);
+                        if let Some((start, end)) = link::select_at(&row, col) {
+                            state.selection = Some(((line, start), (line, end - 1)));
+                            let text = self.selection_text(state);
+                            shell.publish((self.on_select)((!text.is_empty()).then_some(text)));
+                            shell.request_redraw();
+                            shell.capture_event();
+                            return;
+                        }
+                    }
+
                     state.selection = Some((p, p));
                     state.dragging = true;
                     shell.publish((self.on_select)(None));
                     shell.request_redraw();
                     shell.capture_event();
+                } else if *button == mouse::Button::Right {
+                    // A right-press over a detected URL opens the host's link menu
+                    // (captured); otherwise leave it uncaptured so it bubbles up to
+                    // the host's own pane/tab context menu, unchanged.
+                    let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
+                    let (line, col) =
+                        hit(bounds, cell_w, line_h, pos, total, rows, cols, state.scroll);
+                    let screen = self.screen.lock();
+                    let history = screen.scrollback.len();
+                    let row = row_chars(&screen, history, cols, line);
+                    drop(screen);
+                    if let Some(url) = link::link_at(&row, col) {
+                        shell.publish((self.on_link)(url));
+                        shell.capture_event();
+                    }
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                self.refresh_hover(state, bounds, cell_w, line_h, cursor, to_app, shell);
                 let Some(pos) = cursor.position() else { return };
                 if to_app {
                     let clamped = Point::new(
@@ -580,6 +782,13 @@ where
         let cols = screen.cols;
         let top = view_top(total, rows, state.scroll);
         let sel = state.selection.map(order);
+        // Computed once over the whole buffer (not per visible row) so it stays the
+        // same list a host uses for match-count/navigation — see `find_matches`.
+        let matches = self
+            .find
+            .as_deref()
+            .map(|q| find_matches(&screen, cols, q))
+            .unwrap_or_default();
 
         renderer.with_layer(bounds, |renderer| {
             for vr in 0..rows {
@@ -635,33 +844,41 @@ where
                     }
                 }
 
-                // Search highlight — tint every case-insensitive match on this line.
-                // Column-based (one char per cell) so it's panic-safe with wide glyphs.
-                if let Some(q) = self.find.as_deref() {
-                    let cells: Vec<char> = (0..cols)
-                        .map(|c| cell_at(&screen, history, line, c).ch)
-                        .collect();
-                    let needle: Vec<char> = q.chars().collect();
+                // Search highlight — tint every match on this line (drawn from the
+                // full-buffer `matches` list; only the ones on a currently-visible
+                // row actually get painted).
+                if !matches.is_empty() {
                     let hl = Color {
                         a: 0.45,
                         ..self.style.ansi[11]
                     };
-                    let mut s = 0;
-                    while s + needle.len() <= cells.len() && !needle.is_empty() {
-                        let hit = (0..needle.len())
-                            .all(|k| cells[s + k].eq_ignore_ascii_case(&needle[k]));
-                        if hit {
+                    for &(_, start, end) in matches.iter().filter(|m| m.0 == line) {
+                        fill_rect(
+                            renderer,
+                            bounds.x + start as f32 * cell_w,
+                            y,
+                            (end - start) as f32 * cell_w,
+                            line_h,
+                            hl,
+                        );
+                    }
+                }
+
+                // ⌘-hover affordance: underline the URL under the pointer while ⌘ is
+                // held, so it reads as clickable before the click.
+                if let Some((hl_line, start, end)) = state.cmd_hover {
+                    if hl_line == line {
+                        let s = start.min(cols.saturating_sub(1));
+                        let e = end.min(cols).saturating_sub(1);
+                        if e >= s {
                             fill_rect(
                                 renderer,
                                 bounds.x + s as f32 * cell_w,
-                                y,
-                                needle.len() as f32 * cell_w,
-                                line_h,
-                                hl,
+                                y + line_h - 2.0,
+                                (e + 1 - s) as f32 * cell_w,
+                                1.0,
+                                self.style.fg,
                             );
-                            s += needle.len();
-                        } else {
-                            s += 1;
                         }
                     }
                 }
@@ -787,6 +1004,23 @@ where
             }
         });
     }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<State>();
+        let bounds = layout.bounds();
+        if state.cmd_hover.is_some() && cursor.position_over(bounds).is_some() {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
+    }
 }
 
 /// Measure the monospace cell width by shaping one glyph.
@@ -842,3 +1076,7 @@ where
         Element::new(t)
     }
 }
+
+#[cfg(test)]
+#[path = "terminal_tests.rs"]
+mod tests;

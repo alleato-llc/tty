@@ -30,6 +30,19 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::PointerMoved(p) => state.pointer = p,
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
         Message::TabRightClick(idx) => state.open_tab_menu(idx),
+        Message::LinkClick(url) => {
+            state.menu = Some((crate::state::MenuKind::Link(url), state.pointer))
+        }
+        Message::OpenLink(url) => {
+            if let Err(e) = phosphor::link::open(&url) {
+                tracing::warn!("Failed to open link {url:?}: {e}");
+            }
+            state.close_menu();
+        }
+        Message::CopyLink(url) => {
+            state.close_menu();
+            return iced::clipboard::write(url);
+        }
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {
@@ -58,8 +71,29 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
         }
         Message::Pasted(None) => {}
-        Message::SearchChanged(q) => state.search = Some(q),
-        Message::SearchSubmit => state.search = None,
+        Message::SearchChanged(q) => {
+            state.search = Some(q);
+            state.search_match = 0;
+        }
+        Message::SearchSubmit => {
+            if state.modifiers.shift() {
+                state.search_match -= 1;
+            } else {
+                state.search_match += 1;
+            }
+        }
+        Message::ClearScrollback => state.clear_active_scrollback(),
+        Message::ToggleScrollbackPanel => state.toggle_scrollback_panel(),
+        Message::ScrollbackQueryChanged(q) => state.set_scrollback_query(q),
+        Message::ScrollbackRowSelected(row) => state.scrollback_selected = Some(row),
+        Message::ScrollbackRowActivated(row, text) => {
+            state.scrollback_selected = Some(row);
+            return iced::clipboard::write(text);
+        }
+        Message::ScrollbackToggleExpand(i) => state.toggle_scrollback_expand(i),
+        Message::ScrollbackScrolled(offset) => state.scrollback_scroll = offset,
+        Message::MaxScrollbackStep(delta) => state.step_max_scrollback(delta),
+        Message::DefaultOutputLinesStep(delta) => state.step_default_output_lines(delta),
         Message::NewTab => {
             state.close_menu();
             state.new_tab();
@@ -273,6 +307,17 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                         iced::Task::none()
                     };
                 }
+                // ⌘K clears the active pane's scrollback (main window only, matching
+                // ⌘F/⌘,'s scope) — the de facto macOS terminal convention.
+                "k" if is_main => {
+                    state.clear_active_scrollback();
+                    return iced::Task::none();
+                }
+                // ⌘⇧H opens/closes the scrollback history panel (main window only).
+                s if is_main && mods.shift() && s.eq_ignore_ascii_case("h") => {
+                    state.toggle_scrollback_panel();
+                    return iced::Task::none();
+                }
                 d if is_main && d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
                     let n = d.parse::<usize>().unwrap_or(0);
                     if (1..=state.tabs.len()).contains(&n) {
@@ -283,6 +328,12 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                 _ => {}
             }
         }
+    }
+    // A plain Enter submits a command — mark the boundary before it's sent, so the
+    // scrollback history panel can separate this command from its output (a no-op on
+    // the alt screen — see `TerminalScreen::mark_command_boundary`).
+    if matches!(key, Key::Named(iced::keyboard::key::Named::Enter)) {
+        state.mark_command_boundary(win);
     }
     // Otherwise the keystroke is terminal input (arrow keys honor the app's DECCKM mode).
     if let Some(bytes) = phosphor::input::to_bytes(&key, mods, state.app_cursor_for(win)) {

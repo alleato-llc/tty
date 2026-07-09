@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use unicode_width::UnicodeWidthChar;
@@ -94,6 +95,44 @@ impl Cell {
     }
 }
 
+/// One command's recorded text + captured output, built live as you use the shell —
+/// not derived from `scrollback` after the fact. `mark_command_boundary` starts a new
+/// entry (the current row's text, right as Enter is sent); every completed line after
+/// that gets appended to `output` until the next boundary, capped at `max_output_lines`
+/// (resolved once, per command, by the host — see `crate::commands::resolve_output_cap`
+/// — so a long-running/streaming command like `tail -f` stops growing instead of
+/// accumulating forever).
+#[derive(Debug, Clone)]
+pub struct CommandEntry {
+    pub command: String,
+    pub output: Vec<String>,
+    pub started_at: Instant,
+    max_output_lines: usize,
+}
+
+impl CommandEntry {
+    /// Whether this command's output hit its cap (there may have been more that
+    /// wasn't recorded).
+    pub fn is_truncated(&self) -> bool {
+        self.output.len() >= self.max_output_lines
+    }
+}
+
+/// How many commands [`TerminalScreen::mark_command_boundary`] remembers before
+/// evicting the oldest — not user-configurable (unlike the per-command output cap),
+/// just a generous backstop.
+const MAX_COMMAND_LOG: usize = 500;
+
+/// A queued command boundary — see [`TerminalScreen::pending_boundaries`].
+struct PendingBoundary {
+    /// `None` = derive the command text from the completing row when this boundary
+    /// is consumed (a live-typed line, whose fully-resolved text only exists in the
+    /// terminal grid once it's echoed back). `Some` = the caller already knows the
+    /// text (a pasted line, known before it's ever sent to the shell).
+    command: Option<String>,
+    max_output_lines: usize,
+}
+
 /// Saved pen + cursor for DECSC/DECRC and the alt-screen swap.
 #[derive(Clone, Copy)]
 struct Saved {
@@ -117,6 +156,28 @@ pub struct TerminalScreen {
     pub scroll_top: usize,
     pub scroll_bot: usize,
     pub scrollback: VecDeque<Vec<Cell>>,
+    /// When each `scrollback` row was pushed, in lockstep — the data behind
+    /// [`TerminalScreen::oldest_scrollback_age`]. A parallel deque rather than
+    /// widening `Cell`/`Vec<Cell>` itself, which every scrollback reader already
+    /// assumes is a plain row of cells.
+    scrollback_times: VecDeque<Instant>,
+    /// The scrollback cap (configurable per app settings) — how many rows
+    /// [`TerminalScreen::scroll_up`] keeps before evicting the oldest.
+    max_scrollback: usize,
+    /// Commands run so far (see [`CommandEntry`]), oldest first — a separate, live-built
+    /// record, not derived from `scrollback`.
+    pub command_log: VecDeque<CommandEntry>,
+    /// Boundaries queued by [`Self::mark_command_boundary`] /
+    /// [`Self::mark_command_boundary_with`], oldest first — resolved into a
+    /// `CommandEntry` (created then, not when queued) by
+    /// [`Self::record_output_line`] once the front one's own line is seen: a
+    /// live-typed boundary (`None`) resolves on the very next row completion
+    /// (nothing else can race in between a real Enter and its echo); a known-text
+    /// boundary (`Some`, a pasted line) waits for a completing row that actually
+    /// ends with that text, since several can be queued at once — ahead of *any*
+    /// of their echoes — with the previous command's real output legitimately
+    /// completing rows in between.
+    pending_boundaries: VecDeque<PendingBoundary>,
     pub dirty_rows: BTreeSet<usize>,
     // Pen (current SGR state).
     fg: TermColor,
@@ -153,6 +214,12 @@ pub struct TerminalScreen {
 
 impl TerminalScreen {
     pub fn new(cols: usize, rows: usize) -> Self {
+        Self::with_scrollback(cols, rows, DEFAULT_SCROLLBACK)
+    }
+
+    /// Like [`TerminalScreen::new`], with a configurable scrollback cap (the host
+    /// reads this from its settings — see `set_max_scrollback` to change it live).
+    pub fn with_scrollback(cols: usize, rows: usize, max_scrollback: usize) -> Self {
         Self {
             cols,
             rows,
@@ -161,7 +228,11 @@ impl TerminalScreen {
             cursor_col: 0,
             scroll_top: 0,
             scroll_bot: rows.saturating_sub(1),
-            scrollback: VecDeque::with_capacity(DEFAULT_SCROLLBACK),
+            scrollback: VecDeque::with_capacity(max_scrollback),
+            scrollback_times: VecDeque::with_capacity(max_scrollback),
+            max_scrollback,
+            command_log: VecDeque::new(),
+            pending_boundaries: VecDeque::new(),
             dirty_rows: BTreeSet::new(),
             fg: TermColor::Default,
             bg: TermColor::Default,
@@ -200,6 +271,157 @@ impl TerminalScreen {
     /// Read-and-clear a pending OSC 52 clipboard write request.
     pub fn take_clipboard(&mut self) -> Option<String> {
         self.clipboard.take()
+    }
+
+    /// Change the scrollback cap, truncating from the front if the buffer is now over
+    /// it — so lowering the setting applies immediately to an already-open terminal,
+    /// not just ones spawned afterward.
+    pub fn set_max_scrollback(&mut self, cap: usize) {
+        self.max_scrollback = cap;
+        while self.scrollback.len() > cap {
+            self.scrollback.pop_front();
+            self.scrollback_times.pop_front();
+        }
+    }
+
+    /// Drop every buffered (off-screen) scrollback line. The live on-screen grid and
+    /// cursor are untouched — this is "clear history," not the shell's own `clear`
+    /// (which resets the visible screen instead).
+    pub fn clear_scrollback(&mut self) {
+        self.scrollback.clear();
+        self.scrollback_times.clear();
+        self.command_log.clear();
+        self.pending_boundaries.clear();
+    }
+
+    /// The current cursor row's text, trimmed of trailing whitespace — what
+    /// [`Self::mark_command_boundary`] would record as the command right now.
+    pub fn current_row_text(&self) -> String {
+        let row = self.cursor_row;
+        let s: String = (0..self.cols).map(|c| self.cell(row, c).ch).collect();
+        s.trim_end().to_string()
+    }
+
+    /// Queue a new command boundary — call this right before writing Enter/Return
+    /// bytes to the shell. The *next* row to complete is this command's own line
+    /// finalizing (its echoed Enter) — [`Self::record_output_line`] captures the
+    /// *completing* row's text then (whatever's been typed, edited, tab-completed, or
+    /// history-recalled so far — the terminal grid is the only place that
+    /// fully-resolved text exists) as the command, and starts accumulating its output
+    /// from the next completed line onward, up to `max_output_lines` (the host
+    /// resolves this — see `crate::commands`). A no-op on the alt screen: a
+    /// full-screen app isn't "a command with output" the way a shell invocation is,
+    /// the same reasoning that already keeps it out of `scrollback`.
+    pub fn mark_command_boundary(&mut self, max_output_lines: usize) {
+        self.queue_boundary(None, max_output_lines);
+    }
+
+    /// Like [`Self::mark_command_boundary`], but for when the caller already knows
+    /// the command text — a pasted line, known before it's ever sent to the shell (so
+    /// there's nothing to read off the terminal grid; the paste hasn't been echoed
+    /// yet). Queuing rather than creating the entry immediately is what lets a
+    /// multi-line paste queue one boundary per complete line and have each resolve as
+    /// that line's own echo arrives, in order, over however many `advance_row` calls
+    /// it takes — not all at once.
+    pub fn mark_command_boundary_with(&mut self, command: String, max_output_lines: usize) {
+        self.queue_boundary(Some(command), max_output_lines);
+    }
+
+    fn queue_boundary(&mut self, command: Option<String>, max_output_lines: usize) {
+        if self.alt {
+            return;
+        }
+        self.pending_boundaries.push_back(PendingBoundary {
+            command,
+            max_output_lines,
+        });
+    }
+
+    /// Append the row the cursor is *leaving* to the most recent command's output
+    /// (if any, and it hasn't hit its cap), or resolve the front of
+    /// [`Self::pending_boundaries`] if this completing row is that boundary's own
+    /// line — called as a row is about to advance (see [`Self::advance_row`]), so
+    /// it's the same for a wrapped line or an explicit newline. A no-op on the alt
+    /// screen, same as `scrollback`.
+    fn record_output_line(&mut self) {
+        if self.alt {
+            return;
+        }
+        let row = self.cursor_row;
+        let cols = self.cols;
+        let text: String = (0..cols).map(|c| self.cells[row * cols + c].ch).collect();
+        let trimmed = text.trim_end();
+
+        if let Some(front) = self.pending_boundaries.front() {
+            // A live-typed boundary (`None`) has nothing to compare against — by
+            // construction nothing else can complete a row between marking it and
+            // the shell echoing that same Enter, so the very next completion always
+            // is it. A known-text boundary (a pasted line, queued before any of a
+            // multi-line paste is echoed) instead waits for a completing row whose
+            // text actually ends with it — since several boundaries can be queued
+            // at once, ahead of *any* of their echoes, and other rows (the previous
+            // command's real output) may legitimately complete in between.
+            let resolves_now = match &front.command {
+                None => true,
+                Some(known) => trimmed.ends_with(known.as_str()),
+            };
+            if resolves_now {
+                let pending = self
+                    .pending_boundaries
+                    .pop_front()
+                    .expect("front() just returned Some");
+                self.command_log.push_back(CommandEntry {
+                    command: pending.command.unwrap_or_else(|| trimmed.to_string()),
+                    output: Vec::new(),
+                    started_at: Instant::now(),
+                    max_output_lines: pending.max_output_lines,
+                });
+                if self.command_log.len() > MAX_COMMAND_LOG {
+                    self.command_log.pop_front();
+                }
+                return;
+            }
+        }
+
+        let has_room = self
+            .command_log
+            .back()
+            .is_some_and(|e| e.output.len() < e.max_output_lines);
+        if !has_room {
+            return;
+        }
+        if let Some(entry) = self.command_log.back_mut() {
+            entry.output.push(trimmed.to_string());
+        }
+    }
+
+    /// The full buffered + on-screen transcript, oldest first, each row trimmed of
+    /// trailing whitespace — the data source for a scrollback history view.
+    pub fn transcript_lines(&self) -> Vec<String> {
+        let row_text = |cells: &[Cell]| -> String {
+            let s: String = cells.iter().map(|c| c.ch).collect();
+            s.trim_end().to_string()
+        };
+        // The live grid is only appended off the *main* screen. On the alt screen (a
+        // full-screen app like htop/vim/less) `self.cells` is that app's live UI, not
+        // history — exactly why `scroll_up` never lets it into `scrollback` either.
+        let live: Vec<String> = if self.alt {
+            Vec::new()
+        } else {
+            (0..self.rows)
+                .map(|r| row_text(&self.cells[r * self.cols..(r + 1) * self.cols]))
+                .collect()
+        };
+        self.scrollback
+            .iter()
+            .map(|row| row_text(row))
+            .chain(live)
+            .collect()
+    }
+
+    /// How long the oldest buffered scrollback line has been sitting there, if any.
+    pub fn oldest_scrollback_age(&self) -> Option<Duration> {
+        self.scrollback_times.front().map(Instant::elapsed)
     }
 
     /// Resize the grid, preserving the overlapping top-left content (so a window
@@ -268,6 +490,10 @@ impl TerminalScreen {
     }
 
     fn advance_row(&mut self) {
+        // The row being left is now finalized — record it as output before it's gone
+        // (whether it's advancing because of a wrap or an explicit newline; both call
+        // this, so both are captured uniformly).
+        self.record_output_line();
         if self.cursor_row >= self.scroll_bot {
             self.scroll_up(1);
         } else {
@@ -283,10 +509,12 @@ impl TerminalScreen {
                 let top: Vec<Cell> = (0..self.cols)
                     .map(|c| self.cell(self.scroll_top, c).clone())
                     .collect();
-                if self.scrollback.len() >= DEFAULT_SCROLLBACK {
+                if self.scrollback.len() >= self.max_scrollback {
                     self.scrollback.pop_front();
+                    self.scrollback_times.pop_front();
                 }
                 self.scrollback.push_back(top);
+                self.scrollback_times.push_back(Instant::now());
             }
             for r in self.scroll_top..self.scroll_bot {
                 for c in 0..self.cols {
@@ -568,12 +796,8 @@ impl vte::Perform for TerminalScreen {
         match byte {
             b'\r' => self.cursor_col = 0,
             b'\n' | 0x0B | 0x0C => {
-                if self.cursor_row == self.scroll_bot {
-                    self.scroll_up(1);
-                } else {
-                    self.cursor_row = (self.cursor_row + 1).min(self.rows.saturating_sub(1));
-                    self.dirty_rows.insert(self.cursor_row);
-                }
+                self.advance_row();
+                self.dirty_rows.insert(self.cursor_row);
             }
             0x09 => self.tab(),
             0x08 => {
@@ -743,8 +967,9 @@ impl vte::Perform for TerminalScreen {
                 }
             }
             b'c' => {
-                // RIS — full reset.
-                *self = TerminalScreen::new(self.cols, self.rows);
+                // RIS — full reset. Preserve the configured scrollback cap (a
+                // plain `new()` would silently drop back to the default).
+                *self = TerminalScreen::with_scrollback(self.cols, self.rows, self.max_scrollback);
             }
             _ => {}
         }

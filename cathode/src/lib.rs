@@ -6,6 +6,7 @@
 //! is the coating it lights up (the iced widget that renders this screen). cathode is
 //! iced-free — it's pure terminal emulation, embeddable by any front-end.
 
+pub mod commands;
 pub mod parser;
 pub mod pty;
 pub mod screen;

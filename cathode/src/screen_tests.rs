@@ -339,3 +339,278 @@ fn resize_clamps_cursor() {
     assert!(s.cursor_row < 2);
     assert!(s.cursor_col < 4);
 }
+
+#[test]
+fn scrollback_evicts_at_the_configured_cap() {
+    let mut screen = TerminalScreen::with_scrollback(5, 1, 3);
+    let mut parser = TermParser::new();
+    // Five newlines past the single row push five lines into scrollback; only the
+    // last 3 should survive.
+    for n in 0..5 {
+        parser.process(format!("{n}\r\n").as_bytes(), &mut screen);
+    }
+    assert_eq!(screen.scrollback.len(), 3);
+    let lines: Vec<String> = screen
+        .scrollback
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| c.ch)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(lines, vec!["2", "3", "4"]);
+}
+
+#[test]
+fn set_max_scrollback_truncates_a_fuller_buffer() {
+    let mut screen = TerminalScreen::with_scrollback(5, 1, 10);
+    let mut parser = TermParser::new();
+    for n in 0..6 {
+        parser.process(format!("{n}\r\n").as_bytes(), &mut screen);
+    }
+    assert_eq!(screen.scrollback.len(), 6);
+    screen.set_max_scrollback(2);
+    assert_eq!(screen.scrollback.len(), 2);
+    let lines: Vec<String> = screen
+        .scrollback
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| c.ch)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+    // The oldest lines were dropped from the front — the newest 2 remain.
+    assert_eq!(lines, vec!["4", "5"]);
+}
+
+#[test]
+fn clear_scrollback_empties_it_without_touching_the_live_grid() {
+    let mut screen = TerminalScreen::with_scrollback(5, 2, 10);
+    let mut parser = TermParser::new();
+    parser.process(b"a\r\nb\r\nc", &mut screen);
+    assert!(!screen.scrollback.is_empty());
+    let before = row_text(&screen, 1);
+    screen.clear_scrollback();
+    assert!(screen.scrollback.is_empty());
+    assert_eq!(screen.oldest_scrollback_age(), None);
+    assert_eq!(row_text(&screen, 1), before, "live grid is untouched");
+}
+
+#[test]
+fn transcript_lines_orders_scrollback_before_the_live_grid() {
+    let mut screen = TerminalScreen::with_scrollback(5, 1, 10);
+    let mut parser = TermParser::new();
+    parser.process(b"a\r\nb\r\nc", &mut screen);
+    // "a" and "b" scrolled off into scrollback; "c" is the live row.
+    assert_eq!(screen.transcript_lines(), vec!["a", "b", "c"]);
+}
+
+#[test]
+fn transcript_lines_excludes_the_live_grid_while_on_the_alt_screen() {
+    // Regression: a full-screen app (htop, vim, less) runs on the alt screen, whose
+    // live content must not leak into "history" any more than it leaks into
+    // scrollback — even though `transcript_lines` always used to append it.
+    let mut screen = TerminalScreen::with_scrollback(10, 3, 10);
+    let mut parser = TermParser::new();
+    parser.process(b"$ htop", &mut screen);
+    assert_eq!(screen.transcript_lines(), vec!["$ htop", "", ""]);
+    parser.process(b"\x1b[?1049h", &mut screen);
+    parser.process(b"1 [||    ] 12%", &mut screen);
+    assert!(screen.alt_screen());
+    assert_eq!(
+        screen.transcript_lines(),
+        Vec::<String>::new(),
+        "htop's live dashboard must not appear as history"
+    );
+    // Leaving the alt screen restores the pre-htop transcript.
+    parser.process(b"\x1b[?1049l", &mut screen);
+    assert_eq!(screen.transcript_lines(), vec!["$ htop", "", ""]);
+}
+
+#[test]
+fn oldest_scrollback_age_is_some_once_something_has_scrolled() {
+    let mut screen = TerminalScreen::with_scrollback(5, 1, 10);
+    assert_eq!(screen.oldest_scrollback_age(), None, "nothing buffered yet");
+    let mut parser = TermParser::new();
+    parser.process(b"a\r\nb", &mut screen);
+    assert!(screen.oldest_scrollback_age().is_some());
+}
+
+#[test]
+fn ris_reset_preserves_the_configured_scrollback_cap() {
+    let mut screen = TerminalScreen::with_scrollback(5, 1, 3);
+    let mut parser = TermParser::new();
+    for n in 0..5 {
+        parser.process(format!("{n}\r\n").as_bytes(), &mut screen);
+    }
+    assert_eq!(screen.scrollback.len(), 3);
+    parser.process(b"\x1bc", &mut screen); // RIS
+    assert!(
+        screen.scrollback.is_empty(),
+        "RIS clears the buffer as before"
+    );
+    for n in 0..5 {
+        parser.process(format!("{n}\r\n").as_bytes(), &mut screen);
+    }
+    assert_eq!(screen.scrollback.len(), 3, "the cap survived the reset");
+}
+
+#[test]
+fn mark_command_boundary_captures_the_current_row_as_the_command() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls -la", &mut screen);
+    screen.mark_command_boundary(50);
+    // Queued, not yet resolved — the entry is created once the boundary's own line
+    // is seen completing (the shell echoing Enter), not at the moment it's marked.
+    assert!(screen.command_log.is_empty());
+    parser.process(b"\r\n", &mut screen);
+    assert_eq!(screen.command_log.len(), 1);
+    assert_eq!(screen.command_log[0].command, "$ ls -la");
+    assert!(screen.command_log[0].output.is_empty());
+}
+
+#[test]
+fn output_after_a_boundary_accumulates_into_that_commands_entry_not_the_command_itself() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    // The shell echoes Enter as \r\n (finalizing the command's own row — must NOT
+    // become an "output" line), then the real output, then the next (unfinished)
+    // prompt — which also must not be captured as output yet.
+    parser.process(b"\r\na.txt\r\nb.txt\r\n$ ", &mut screen);
+    assert_eq!(screen.command_log.len(), 1);
+    assert_eq!(screen.command_log[0].command, "$ ls");
+    assert_eq!(screen.command_log[0].output, vec!["a.txt", "b.txt"]);
+}
+
+#[test]
+fn a_second_boundary_starts_a_new_entry() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\na.txt\r\n$ pwd", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\n/home/user\r\n$ ", &mut screen);
+    assert_eq!(screen.command_log.len(), 2);
+    assert_eq!(screen.command_log[0].command, "$ ls");
+    assert_eq!(screen.command_log[0].output, vec!["a.txt"]);
+    assert_eq!(screen.command_log[1].command, "$ pwd");
+    assert_eq!(screen.command_log[1].output, vec!["/home/user"]);
+}
+
+#[test]
+fn output_stops_growing_past_its_per_command_cap() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ tail -f x.log", &mut screen);
+    screen.mark_command_boundary(2); // a tight cap, as if resolved from an override
+    parser.process(b"\r\nline1\r\nline2\r\nline3\r\nline4\r\n", &mut screen);
+    assert_eq!(screen.command_log[0].output, vec!["line1", "line2"]);
+    assert!(screen.command_log[0].is_truncated());
+}
+
+#[test]
+fn mark_command_boundary_is_a_no_op_on_the_alt_screen() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"\x1b[?1049h", &mut screen); // enter alt (htop, vim, ...)
+    assert!(screen.alt_screen());
+    screen.mark_command_boundary(50);
+    assert!(
+        screen.command_log.is_empty(),
+        "a full-screen app isn't a recordable command"
+    );
+}
+
+#[test]
+fn clear_scrollback_also_clears_the_command_log() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\n", &mut screen);
+    assert_eq!(screen.command_log.len(), 1);
+    screen.clear_scrollback();
+    assert!(screen.command_log.is_empty());
+}
+
+#[test]
+fn clear_scrollback_discards_a_boundary_queued_but_not_yet_resolved() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50); // queued, not yet resolved
+    screen.clear_scrollback();
+    // If the queued boundary survived the clear, this echo would resurrect an entry.
+    parser.process(b"\r\na.txt\r\n", &mut screen);
+    assert!(
+        screen.command_log.is_empty(),
+        "a boundary queued before a clear shouldn't resurrect an entry after it"
+    );
+}
+
+#[test]
+fn mark_command_boundary_with_uses_the_given_text_not_the_screen() {
+    let mut screen = TerminalScreen::new(20, 5);
+    // Nothing has been drawn to the row yet — the caller already knows the text
+    // (a pasted line, known before it's ever sent to the shell).
+    screen.mark_command_boundary_with("echo one".to_string(), 50);
+    assert!(screen.command_log.is_empty(), "queued, not yet resolved");
+    let mut parser = TermParser::new();
+    parser.process(b"echo one\r\n", &mut screen); // the shell echoing it back
+    assert_eq!(screen.command_log.len(), 1);
+    assert_eq!(screen.command_log[0].command, "echo one");
+}
+
+#[test]
+fn queued_boundaries_from_a_multiline_paste_resolve_in_order_around_real_output() {
+    // Mirrors an unbracketed multi-line paste: the app queues one boundary per
+    // complete pasted line, all before any of it is echoed — so a naive "the next
+    // completing row always resolves the front boundary" would wrongly consume the
+    // second boundary on "one" (cmd1's own output), not "echo two"'s echo. Matching
+    // on the known text is what keeps them straight.
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.mark_command_boundary_with("echo one".to_string(), 50);
+    screen.mark_command_boundary_with("echo two".to_string(), 50);
+    assert!(screen.command_log.is_empty());
+    let mut parser = TermParser::new();
+    parser.process(b"echo one\r\none\r\necho two\r\ntwo\r\n$ ", &mut screen);
+    assert_eq!(screen.command_log.len(), 2);
+    assert_eq!(screen.command_log[0].command, "echo one");
+    assert_eq!(screen.command_log[0].output, vec!["one"]);
+    assert_eq!(screen.command_log[1].command, "echo two");
+    assert_eq!(screen.command_log[1].output, vec!["two"]);
+}
+
+#[test]
+fn a_paste_boundary_matches_the_full_prompt_row_not_just_the_pasted_text() {
+    // The known text is just the pasted line ("pwd"), but the row it's echoed onto
+    // also carries the prompt ("$ ") — the match has to look for the pasted text at
+    // the *end* of the row, not equal the whole row.
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ", &mut screen); // the prompt, already on screen
+    screen.mark_command_boundary_with("pwd".to_string(), 50);
+    parser.process(b"pwd\r\n/home/user\r\n", &mut screen);
+    assert_eq!(screen.command_log.len(), 1);
+    assert_eq!(screen.command_log[0].command, "pwd");
+    assert_eq!(screen.command_log[0].output, vec!["/home/user"]);
+}
+
+#[test]
+fn current_row_text_reflects_in_progress_edits() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    // Backspace-edit before submitting: "gti" -> backspace x3 -> "git status".
+    parser.process(b"$ gti\x08\x08\x08git status", &mut screen);
+    assert_eq!(screen.current_row_text(), "$ git status");
+}

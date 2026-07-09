@@ -13,6 +13,7 @@
 //! sensible starting palette.
 
 pub mod input;
+pub mod link;
 pub mod terminal;
 
-pub use terminal::{terminal, Terminal, TerminalStyle, ANSI_DEFAULT};
+pub use terminal::{find_matches, terminal, Terminal, TerminalStyle, ANSI_DEFAULT};

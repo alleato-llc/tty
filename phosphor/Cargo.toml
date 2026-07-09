@@ -8,3 +8,5 @@ license.workspace = true
 cathode = { path = "../cathode" }
 iced = { workspace = true }
 parking_lot = { workspace = true }
+# Open a URL (Open Link) in the OS default handler.
+open = "5"

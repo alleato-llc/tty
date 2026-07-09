@@ -125,3 +125,7 @@ pub fn poll_settle(state: &mut Tty) -> Settle {
         Settle::Repositioned
     }
 }
+
+#[cfg(test)]
+#[path = "detach_drag_tests.rs"]
+mod tests;

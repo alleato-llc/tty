@@ -128,6 +128,23 @@ pub struct Tty {
     pub selection: Option<String>,
     /// The scrollback search query when the `⌘F` find bar is open (`None` = closed).
     pub search: Option<String>,
+    /// How many times Enter/⇧Enter advanced through the `⌘F` matches — an
+    /// ever-moving counter, not a bounds-checked index; the view reduces it modulo
+    /// the live match count (which can shrink as the query changes or output
+    /// arrives) via `rem_euclid`, so it never needs resetting except on a new query.
+    pub search_match: i64,
+    /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
+    pub show_scrollback: bool,
+    /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).
+    pub scrollback_query: String,
+    /// The scrollback panel table's selected row (a table-row index — a command
+    /// header row or one of its expanded output rows).
+    pub scrollback_selected: Option<usize>,
+    /// The scrollback panel table's vertical scroll offset (pixels).
+    pub scrollback_scroll: f32,
+    /// Which commands (indices into the *filtered* command list) have their output
+    /// expanded — reset whenever the filter changes, since indices shift with it.
+    pub scrollback_expanded: std::collections::HashSet<usize>,
     /// Persisted preferences (theme, font, custom palette).
     pub settings: Settings,
     /// Whether the `⌘,` settings panel is open.
@@ -164,12 +181,14 @@ pub struct Tty {
     pub last_detached_move: Option<(iced::window::Id, Instant)>,
 }
 
-/// Which right-click menu is open — a tab's (split + tab actions) or a pane's (split +
-/// close pane). Both target the active tab's focused pane for splits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which right-click menu is open — a tab's (split + tab actions), a pane's (split +
+/// close pane), or a link's (open/copy a detected URL). The first two target the
+/// active tab's focused pane for splits.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuKind {
     Tab,
     Pane,
+    Link(String),
 }
 
 impl Tty {
@@ -193,6 +212,12 @@ impl Tty {
             hovered_tab: None,
             selection: None,
             search: None,
+            search_match: 0,
+            show_scrollback: false,
+            scrollback_query: String::new(),
+            scrollback_selected: None,
+            scrollback_scroll: 0.0,
+            scrollback_expanded: std::collections::HashSet::new(),
             settings,
             show_settings: false,
             settings_section: 0,
@@ -368,8 +393,98 @@ impl Tty {
             false
         } else {
             self.search = Some(String::new());
+            self.search_match = 0;
             true
         }
+    }
+
+    /// Toggle the scrollback history panel; closing clears its filter so reopening
+    /// starts fresh.
+    pub fn toggle_scrollback_panel(&mut self) {
+        self.show_scrollback = !self.show_scrollback;
+        if !self.show_scrollback {
+            self.scrollback_query.clear();
+            self.scrollback_selected = None;
+            self.scrollback_scroll = 0.0;
+            self.scrollback_expanded.clear();
+        }
+    }
+
+    /// Update the scrollback panel's filter — a new query invalidates the row
+    /// selection and any expanded commands (both index into the filtered list,
+    /// which just changed).
+    pub fn set_scrollback_query(&mut self, query: String) {
+        self.scrollback_query = query;
+        self.scrollback_selected = None;
+        self.scrollback_expanded.clear();
+    }
+
+    /// Toggle whether a command (its index into the *filtered* command list) shows
+    /// its output.
+    pub fn toggle_scrollback_expand(&mut self, index: usize) {
+        if !self.scrollback_expanded.remove(&index) {
+            self.scrollback_expanded.insert(index);
+        }
+    }
+
+    /// Drop the active pane's buffered scrollback (the live on-screen grid is
+    /// untouched — this is "clear history," not the shell's own `clear`).
+    pub fn clear_active_scrollback(&mut self) {
+        if let Some(term) = self.active_term() {
+            term.screen.lock().clear_scrollback();
+        }
+    }
+
+    /// Change the max-scrollback setting (clamped), persist it, and apply live to
+    /// every open pane — main strip and detached windows alike — so a lowered cap
+    /// truncates an already-open terminal immediately, not just new ones.
+    pub fn set_max_scrollback(&mut self, n: usize) {
+        let n = n.clamp(
+            crate::settings::MIN_MAX_SCROLLBACK,
+            crate::settings::MAX_MAX_SCROLLBACK,
+        );
+        self.settings.max_scrollback = Some(n);
+        self.settings.save();
+        for tab in self.tabs.iter().chain(self.detached.values()) {
+            for (_, term) in tab.panes.iter() {
+                term.screen.lock().set_max_scrollback(n);
+            }
+        }
+    }
+
+    /// Nudge the max-scrollback setting from the settings stepper.
+    pub fn step_max_scrollback(&mut self, delta: i64) {
+        let current = self.settings.max_scrollback() as i64;
+        self.set_max_scrollback((current + delta).max(0) as usize);
+    }
+
+    /// Set the default output-line cap for new commands (clamped, persisted). Applies
+    /// going forward — a command already in progress keeps the cap it started with.
+    pub fn set_default_output_lines(&mut self, n: usize) {
+        self.settings.default_output_lines = Some(n.clamp(
+            crate::settings::MIN_OUTPUT_LINES,
+            crate::settings::MAX_OUTPUT_LINES,
+        ));
+        self.settings.save();
+    }
+
+    /// Nudge the default-output-lines setting from the settings stepper.
+    pub fn step_default_output_lines(&mut self, delta: i64) {
+        let current = self.settings.default_output_lines() as i64;
+        self.set_default_output_lines((current + delta).max(0) as usize);
+    }
+
+    /// Mark a command boundary in `window`'s focused pane — call right before an
+    /// Enter keystroke is forwarded to the shell. Resolves the per-command output cap
+    /// from settings before recording (see `Settings::resolve_output_cap`).
+    pub fn mark_command_boundary(&self, window: iced::window::Id) {
+        let Some(term) = self.tab_for(window).and_then(Tab::focused) else {
+            return;
+        };
+        let mut screen = term.screen.lock();
+        let command = screen.current_row_text();
+        let cap = self.settings.resolve_output_cap(&command);
+        screen.mark_command_boundary(cap);
     }
 
     /// The active tab's focused pane terminal.
@@ -425,7 +540,7 @@ impl Tty {
     /// active pane's reported working directory (OSC 7) when known.
     pub fn new_tab(&mut self) {
         let cwd = self.active_term().and_then(|t| t.screen.lock().cwd.clone());
-        if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
+        if let Some(term) = spawn_term(80, 24, cwd.as_deref(), self.settings.max_scrollback()) {
             self.tabs.push(Tab::new(term));
             self.active = self.tabs.len() - 1;
         }
@@ -439,7 +554,7 @@ impl Tty {
             .tab_for(window)
             .and_then(Tab::focused)
             .and_then(|t| t.screen.lock().cwd.clone());
-        if let Some(term) = spawn_term(80, 24, cwd.as_deref()) {
+        if let Some(term) = spawn_term(80, 24, cwd.as_deref(), self.settings.max_scrollback()) {
             self.split_with(window, dir, term);
         }
     }
@@ -504,13 +619,41 @@ impl Tty {
     }
 
     /// Paste `text` into `window`'s focused shell, wrapping it in bracketed-paste markers
-    /// when the app enabled mode 2004 (so multi-line paste can't auto-execute).
+    /// when the app enabled mode 2004 (so a compliant shell holds embedded newlines as
+    /// literal text in one edit buffer instead of auto-executing each line).
+    ///
+    /// Without that (`bracketed` false), the destination can't tell paste apart from
+    /// typing — every embedded newline runs immediately as its own command, exactly
+    /// like a real Enter, just not through one. So each complete pasted line queues its
+    /// own Scrollback History boundary *before* any of it is sent, using the
+    /// already-known line text (there's nothing to read off the terminal grid yet — see
+    /// `TerminalScreen::mark_command_boundary_with`). A final line with no trailing
+    /// newline is left alone: it hasn't been "entered," the same as normal typing.
     pub fn paste(&mut self, window: iced::window::Id, text: &str) {
         let bracketed = self
             .tab_for(window)
             .and_then(Tab::focused)
             .map(|t| t.screen.lock().bracketed_paste)
             .unwrap_or(false);
+
+        if !bracketed {
+            if let Some(term) = self.tab_for(window).and_then(Tab::focused) {
+                let mut screen = term.screen.lock();
+                let mut lines: Vec<&str> = text.split('\n').collect();
+                if !text.ends_with('\n') {
+                    lines.pop(); // an unterminated final fragment — nothing to mark yet
+                }
+                for line in lines {
+                    let line = line.strip_suffix('\r').unwrap_or(line);
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let cap = self.settings.resolve_output_cap(line);
+                    screen.mark_command_boundary_with(line.to_string(), cap);
+                }
+            }
+        }
+
         let mut bytes = Vec::new();
         if bracketed {
             bytes.extend_from_slice(b"\x1b[200~");
@@ -797,8 +940,9 @@ fn reap_tab_panes(tab: &mut Tab) {
 
 /// Spawn a shell PTY + screen, run the read→parse→screen loop on a background thread,
 /// and return the tab. `None` if the shell couldn't start. `cwd` starts the shell in a
-/// directory (new-tab-in-cwd); `None` uses the default.
-fn spawn_term(cols: u16, rows: u16, cwd: Option<&str>) -> Option<Term> {
+/// directory (new-tab-in-cwd); `None` uses the default. `max_scrollback` is the
+/// configured cap (from settings) for this terminal's scrollback buffer.
+fn spawn_term(cols: u16, rows: u16, cwd: Option<&str>, max_scrollback: usize) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
     let (session, mut rx) = match PtySession::spawn_in(&shell, cols, rows, dir) {
@@ -808,9 +952,10 @@ fn spawn_term(cols: u16, rows: u16, cwd: Option<&str>) -> Option<Term> {
             return None;
         }
     };
-    let screen = Arc::new(Mutex::new(TerminalScreen::new(
+    let screen = Arc::new(Mutex::new(TerminalScreen::with_scrollback(
         cols as usize,
         rows as usize,
+        max_scrollback,
     )));
     let alive = Arc::new(AtomicBool::new(true));
     let dirty = Arc::new(AtomicBool::new(false));

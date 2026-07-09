@@ -58,6 +58,12 @@ fn populated() -> Tty {
         hovered_tab: None,
         selection: None,
         search: None,
+        search_match: 0,
+        show_scrollback: false,
+        scrollback_query: String::new(),
+        scrollback_selected: None,
+        scrollback_scroll: 0.0,
+        scrollback_expanded: std::collections::HashSet::new(),
         settings: Default::default(),
         show_settings: false,
         settings_section: 0,
@@ -171,6 +177,81 @@ fn detached_window_view() {
     assert!(
         matches,
         "snapshot `tty-detached` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn scrollback_panel_view() {
+    // A 6-row screen fed a shell session with a `mark_command_boundary` right before
+    // each command's Enter (mirroring what `update::handle_key` does live), so
+    // `command_log` ends up with 5 real command/output entries — exercising the
+    // accordion table's header rows, an expanded command's output rows, zebra
+    // striping, and a selected/highlighted output row.
+    let mut screen = TerminalScreen::new(56, 6);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml  src  target\r\n", &mut screen);
+
+    parser.process(b"$ cargo build", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(
+        b"\r\n\x1b[32m   Compiling\x1b[0m tty v0.1.0\r\n\x1b[32m    Finished\x1b[0m dev profile\r\n",
+        &mut screen,
+    );
+
+    parser.process(b"$ cargo test", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(
+        b"\r\nrunning 10 tests\r\ntest result: \x1b[32mok\x1b[0m. 10 passed\r\n",
+        &mut screen,
+    );
+
+    parser.process(b"$ git status", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(
+        b"\r\nOn branch main\r\nnothing to commit, working tree clean\r\n",
+        &mut screen,
+    );
+
+    parser.process(b"$ git log --oneline -3", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(
+        b"\r\na1b2c3d fix: scrollback history table\r\ne4f5a6b feat: max scrollback setting\r\n\
+          9c8d7e6 docs: update keybindings\r\n",
+        &mut screen,
+    );
+
+    parser.process(b"$ ", &mut screen);
+
+    let tab = Term {
+        screen: Arc::new(Mutex::new(screen)),
+        pty: None,
+        title: "zsh".into(),
+        alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
+    };
+    let mut tty = Tty {
+        tabs: vec![Tab::new(tab)],
+        ..populated()
+    };
+    tty.show_scrollback = true;
+    // Rows: 0=Header(ls), 1=Header(cargo build, expanded) -> 2,3=its output,
+    // 4=Header(cargo test), 5=Header(git status), 6=Header(git log).
+    tty.scrollback_expanded.insert(1);
+    tty.scrollback_selected = Some(3);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-scrollback-history.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-scrollback-history` changed — delete its PNG to re-baseline"
     );
 }
 

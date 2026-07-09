@@ -29,6 +29,12 @@ pub enum Message {
     PaneRightClick(pane_grid::Pane),
     /// Right-click on a tab — open the split context menu for that tab.
     TabRightClick(usize),
+    /// A right-click landed on a detected URL in a pane — open the link menu over it.
+    LinkClick(String),
+    /// The "Open Link" menu item was chosen — open the URL in the default browser.
+    OpenLink(String),
+    /// The "Copy Link" menu item was chosen — write the URL to the clipboard.
+    CopyLink(String),
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.
@@ -45,8 +51,29 @@ pub enum Message {
     Pasted(Option<String>),
     /// The `⌘F` find query changed.
     SearchChanged(String),
-    /// The find bar was submitted (Enter) — close it, keep the cursor in the terminal.
+    /// The find bar was submitted (Enter) — jump to the next match, or the previous
+    /// one if ⇧ is held (checked against the live `modifiers`, since a text field's
+    /// `on_submit` doesn't carry them). The bar stays open; Esc closes it.
     SearchSubmit,
+    /// ⌘K — clear the active pane's buffered scrollback.
+    ClearScrollback,
+    /// ⌘⇧H — open/close the scrollback history panel.
+    ToggleScrollbackPanel,
+    /// The scrollback panel's own filter query changed.
+    ScrollbackQueryChanged(String),
+    /// An output row in the scrollback panel table was clicked — selects/highlights it.
+    ScrollbackRowSelected(usize),
+    /// A row in the scrollback panel table was double-clicked — selects it and
+    /// copies its text to the clipboard.
+    ScrollbackRowActivated(usize, String),
+    /// A command's header row was clicked — toggles whether its output is shown.
+    ScrollbackToggleExpand(usize),
+    /// The scrollback panel table was scrolled.
+    ScrollbackScrolled(f32),
+    /// The settings stepper nudged the max-scrollback-lines setting.
+    MaxScrollbackStep(i64),
+    /// The settings stepper nudged the default-output-lines-per-command setting.
+    DefaultOutputLinesStep(i64),
     /// Open a new terminal tab.
     NewTab,
     /// Close tab `i` (the window closes when the last tab goes).

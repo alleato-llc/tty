@@ -3,13 +3,35 @@ use iced::{Border, Element, Length};
 
 use rime::theme;
 use rime::widgets::{
-    button, color_field, context_menu, labeled, rename_bar, rename_field_id, section, select,
-    shortcut_row, slider, status_bar, stepper, tabs, text_field, toggle, tooltip, window_shell,
-    MenuItem, Tab, TabBarStyle, TooltipPosition,
+    button, caption, color_field, context_menu, labeled, modal_sized, rename_bar, rename_field_id,
+    section, select, shortcut_row, slider, stat, status_bar, stepper, table, tabs, text_field,
+    toggle, tooltip, window_shell, MenuItem, Tab, TabBarStyle, TableColumn, TableMetrics,
+    TooltipPosition,
 };
 
 use crate::message::Message;
-use crate::state::Tty;
+use crate::state::{Term, Tty};
+
+/// The `⌘F` matches in `term`'s buffer for `query` (empty when there's no active
+/// query) — shared by the find bar's "N of M" label and the per-pane `scroll_to`.
+fn current_matches(term: &Term, query: &str) -> Vec<(usize, usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let screen = term.screen.lock();
+    phosphor::find_matches(&screen, screen.cols, query)
+}
+
+/// The absolute line of the currently-selected match (`search_match`, wrapped modulo
+/// the live match count), for `.scroll_to`.
+fn current_match_line(term: &Term, query: &str, search_match: i64) -> Option<usize> {
+    let matches = current_matches(term, query);
+    if matches.is_empty() {
+        return None;
+    }
+    let idx = search_match.rem_euclid(matches.len() as i64) as usize;
+    Some(matches[idx].0)
+}
 
 /// The find bar's text-input id (so `⌘F` can focus it).
 pub fn search_id() -> iced::advanced::widget::Id {
@@ -120,11 +142,15 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             let font = state.font;
             let size = state.font_size;
             let search = state.search.clone();
+            let search_match = state.search_match;
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
             pane_grid(&tab.panes, move |pane, term, _maximized| {
                 let is_focused = pane == focus && window_focused;
+                let scroll_to = search
+                    .as_deref()
+                    .and_then(|q| current_match_line(term, q, search_match));
                 let term_widget = phosphor::terminal(
                     term.screen.clone(),
                     style,
@@ -134,8 +160,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     move |c, r| Message::Resize(win, pane, c, r),
                     move |sel| Message::Select(win, pane, sel),
                     move |b| Message::PtyBytes(win, pane, b),
+                    Message::LinkClick,
+                    Message::OpenLink,
                 )
-                .find(search.clone());
+                .find(search.clone())
+                .scroll_to(scroll_to);
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes; the others get a hairline.
                 let border_color = if is_focused { accent } else { hairline };
@@ -172,17 +201,33 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     };
     root = root.push(body);
 
-    // Find bar (⌘F): a focused field whose text highlights matches in the terminal.
+    // Find bar (⌘F): a focused field whose text highlights every match in the whole
+    // buffer; Enter/⇧Enter step through them (an "N of M" count reads out which).
     if let Some(query) = &state.search {
         let field = text_field("Find in scrollback…", query, Message::SearchChanged)
             .id(search_id())
             .on_submit(Message::SearchSubmit)
             .size(13);
+        let count = state
+            .tabs
+            .get(state.active)
+            .and_then(|t| t.focused())
+            .map(|term| current_matches(term, query).len())
+            .filter(|&n| n > 0)
+            .map(|total| {
+                let current = (state.search_match.rem_euclid(total as i64)) as usize + 1;
+                format!("{current} of {total}")
+            })
+            .unwrap_or_else(|| "No matches".to_string());
         root = root.push(
-            container(field)
-                .padding([4, 6])
-                .width(Length::Fill)
-                .style(move |_| container::background(t.surface)),
+            container(
+                row![field, text(count).size(12).color(t.muted)]
+                    .spacing(10)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([4, 6])
+            .width(Length::Fill)
+            .style(move |_| container::background(t.surface)),
         );
     }
 
@@ -196,7 +241,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
         .style(move |_| container::background(bg));
 
     // The settings panel floats over the terminal when ⌘, is open.
-    let base: Element<'_, Message> = if state.show_settings {
+    let mut base: Element<'_, Message> = if state.show_settings {
         rime::widgets::settings(
             chrome,
             &["Appearance", "Palette", "Keys"],
@@ -211,58 +256,67 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     };
 
     // The right-click context menu floats above everything, anchored at the click. A
-    // tab's menu adds tab actions (new / close tab); a pane's adds "close pane". Both
-    // split the active tab's focused pane.
-    if let Some((kind, at)) = state.menu {
+    // tab's menu adds tab actions (new / close tab); a pane's adds "close pane"; a
+    // link's is just open/copy — none of the split/close items apply to a URL.
+    if let Some((kind, at)) = &state.menu {
         use crate::state::MenuKind;
         use iced::widget::pane_grid::Direction;
-        let mut items: Vec<MenuItem<Message>> = Vec::new();
-        // A tab menu leads with tab actions; both kinds carry the four split directions.
-        if kind == MenuKind::Tab {
-            items.push(MenuItem::shortcut("New tab", "⌘T", Message::NewTab));
-            items.push(MenuItem::action(
-                "Rename tab…",
-                Message::StartRename(state.active),
-            ));
-            items.push(MenuItem::action(
-                "Detach Tab",
-                Message::DetachTab(state.active),
-            ));
-            items.push(MenuItem::separator());
-        }
-        items.push(MenuItem::shortcut(
-            "Split left",
-            "⌥⌘←",
-            Message::Split(Direction::Left),
-        ));
-        items.push(MenuItem::shortcut(
-            "Split right",
-            "⌥⌘→",
-            Message::Split(Direction::Right),
-        ));
-        items.push(MenuItem::shortcut(
-            "Split up",
-            "⌥⌘↑",
-            Message::Split(Direction::Up),
-        ));
-        items.push(MenuItem::shortcut(
-            "Split down",
-            "⌥⌘↓",
-            Message::Split(Direction::Down),
-        ));
-        items.push(MenuItem::separator());
-        // …and close the right thing: the whole tab, or just the pane.
-        match kind {
-            MenuKind::Tab => items.push(MenuItem::shortcut(
-                "Close tab",
-                "⌘W",
-                Message::CloseTab(state.active),
-            )),
-            MenuKind::Pane => {
-                items.push(MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane))
+        let at = *at;
+        // Both Tab and Pane carry the four split directions; only their leading/
+        // trailing items differ (tab actions + "close tab" vs. just "close pane").
+        let split_items = || {
+            vec![
+                MenuItem::shortcut("Split left", "⌥⌘←", Message::Split(Direction::Left)),
+                MenuItem::shortcut("Split right", "⌥⌘→", Message::Split(Direction::Right)),
+                MenuItem::shortcut("Split up", "⌥⌘↑", Message::Split(Direction::Up)),
+                MenuItem::shortcut("Split down", "⌥⌘↓", Message::Split(Direction::Down)),
+            ]
+        };
+        let items: Vec<MenuItem<Message>> = match kind {
+            MenuKind::Link(url) => vec![
+                MenuItem::action("Open Link", Message::OpenLink(url.clone())),
+                MenuItem::action("Copy Link", Message::CopyLink(url.clone())),
+            ],
+            MenuKind::Tab => {
+                let mut items = vec![
+                    MenuItem::shortcut("New tab", "⌘T", Message::NewTab),
+                    MenuItem::action("Rename tab…", Message::StartRename(state.active)),
+                    MenuItem::action("Detach Tab", Message::DetachTab(state.active)),
+                    MenuItem::separator(),
+                ];
+                items.extend(split_items());
+                items.push(MenuItem::separator());
+                items.push(MenuItem::shortcut(
+                    "Close tab",
+                    "⌘W",
+                    Message::CloseTab(state.active),
+                ));
+                items
             }
-        }
-        context_menu(base, &items, at, Message::CloseMenu)
+            MenuKind::Pane => {
+                let mut items = split_items();
+                items.push(MenuItem::separator());
+                items.push(MenuItem::shortcut(
+                    "Clear Scrollback",
+                    "⌘K",
+                    Message::ClearScrollback,
+                ));
+                items.push(MenuItem::shortcut(
+                    "View Scrollback History",
+                    "⌘⇧H",
+                    Message::ToggleScrollbackPanel,
+                ));
+                items.push(MenuItem::separator());
+                items.push(MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane));
+                items
+            }
+        };
+        base = context_menu(base, &items, at, Message::CloseMenu);
+    }
+
+    // The scrollback history panel floats over everything when open.
+    if state.show_scrollback {
+        scrollback_panel_view(state, base)
     } else {
         base
     }
@@ -302,6 +356,8 @@ fn detached_view<'a>(
             move |c, r| Message::Resize(window, pane, c, r),
             move |sel| Message::Select(window, pane, sel),
             move |b| Message::PtyBytes(window, pane, b),
+            Message::LinkClick,
+            Message::OpenLink,
         )
         .find(None);
         let border_color = if is_focused { accent } else { hairline };
@@ -351,6 +407,154 @@ fn detached_view<'a>(
         &label,
         &status,
     )
+}
+
+/// The scrollback history panel (⌘⇧H): the active pane's full buffered + on-screen
+/// transcript as a scrollable read-only log, with its own filter (independent of
+/// ⌘F) and a couple of buffered/age stats.
+/// One row of the scrollback panel's flattened accordion table: a command's header
+/// (always shown) or one of its output lines (shown only while expanded).
+#[derive(Clone, Copy)]
+enum ScrollbackRow {
+    Header(usize),
+    Output(usize, usize),
+}
+
+/// One filtered command entry, with just what the panel needs to render it (cloned
+/// out from behind the screen's lock rather than held across the whole render).
+struct ScrollbackCommand {
+    command: String,
+    output: Vec<String>,
+    truncated: bool,
+    age: std::time::Duration,
+}
+
+fn scrollback_panel_view<'a>(state: &'a Tty, base: Element<'a, Message>) -> Element<'a, Message> {
+    let Some(term) = state.active_term() else {
+        return base;
+    };
+    let commands: Vec<ScrollbackCommand> = {
+        let screen = term.screen.lock();
+        screen
+            .command_log
+            .iter()
+            .map(|e| ScrollbackCommand {
+                command: e.command.clone(),
+                output: e.output.clone(),
+                truncated: e.is_truncated(),
+                age: e.started_at.elapsed(),
+            })
+            .collect()
+    };
+
+    let query = state.scrollback_query.to_lowercase();
+    let filtered: Vec<ScrollbackCommand> = commands
+        .into_iter()
+        .filter(|c| {
+            query.is_empty()
+                || c.command.to_lowercase().contains(&query)
+                || c.output.iter().any(|l| l.to_lowercase().contains(&query))
+        })
+        .collect();
+    let shown = filtered.len();
+
+    // Flatten commands + (if expanded) their output into one row list the table
+    // renders directly — the accordion effect is just which rows exist this render,
+    // no variable-height-row support needed from the table widget itself.
+    let mut rows = Vec::new();
+    for (i, c) in filtered.iter().enumerate() {
+        rows.push(ScrollbackRow::Header(i));
+        if state.scrollback_expanded.contains(&i) {
+            rows.extend((0..c.output.len()).map(|j| ScrollbackRow::Output(i, j)));
+        }
+    }
+    let filtered = std::rc::Rc::new(filtered);
+    let rows = std::rc::Rc::new(rows);
+    let expanded = state.scrollback_expanded.clone();
+    let row_count = rows.len();
+
+    let cell_rows = rows.clone();
+    let cell_filtered = filtered.clone();
+    let select_rows = rows.clone();
+    let activate_rows = rows.clone();
+    let activate_filtered = filtered.clone();
+
+    // A single "Line" column, monospace so terminal output stays aligned. A header
+    // row toggles its own expand state on click; an output row selects/highlights on
+    // click and copies to the clipboard on double-click (a header's own text can also
+    // be double-click-copied).
+    let log_table = table(
+        row_count,
+        vec![TableColumn::fill("Line")],
+        move |row, _col| match cell_rows[row] {
+            ScrollbackRow::Header(i) => {
+                let c = &cell_filtered[i];
+                let arrow = if expanded.contains(&i) { "▼" } else { "▶" };
+                let count = if c.truncated {
+                    format!("{}+ lines", c.output.len())
+                } else {
+                    format!("{} lines", c.output.len())
+                };
+                format!("{arrow} {}  · {count} · {}", c.command, format_age(c.age))
+            }
+            ScrollbackRow::Output(i, j) => format!("    {}", cell_filtered[i].output[j]),
+        },
+    )
+    .metrics(TableMetrics {
+        row_height: 18.0,
+        header_height: 0.0,
+    })
+    .offset(state.scrollback_scroll)
+    .selected(state.scrollback_selected)
+    .font(iced::Font::MONOSPACE)
+    .on_scroll(Message::ScrollbackScrolled)
+    .on_select(move |row| match select_rows[row] {
+        ScrollbackRow::Header(i) => Message::ScrollbackToggleExpand(i),
+        ScrollbackRow::Output(..) => Message::ScrollbackRowSelected(row),
+    })
+    .on_activate(move |row| {
+        let text = match activate_rows[row] {
+            ScrollbackRow::Header(i) => activate_filtered[i].command.clone(),
+            ScrollbackRow::Output(i, j) => activate_filtered[i].output[j].clone(),
+        };
+        Message::ScrollbackRowActivated(row, text)
+    })
+    .width(Length::Fixed(640.0))
+    .height(Length::Fixed(380.0));
+
+    let content = column![
+        row![
+            section("Scrollback History"),
+            iced::widget::Space::new().width(Length::Fill),
+            button::danger("Clear", Message::ClearScrollback),
+            button::ghost("Close", Message::ToggleScrollbackPanel),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+        stat("Commands", shown.to_string()),
+        text_field(
+            "Filter…",
+            &state.scrollback_query,
+            Message::ScrollbackQueryChanged
+        )
+        .size(13),
+        log_table,
+    ]
+    .spacing(14);
+
+    modal_sized(base, content, Message::ToggleScrollbackPanel, 700.0)
+}
+
+/// A short "how long ago" label for [`scrollback_panel_view`]'s "Oldest line" stat.
+fn format_age(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else {
+        format!("{}h ago", secs / 3600)
+    }
 }
 
 /// The body of the active settings section.
@@ -423,6 +627,7 @@ fn keys_section<'a>() -> Element<'a, Message> {
 
 /// Appearance: named theme, font family, font size.
 fn appearance_section(state: &Tty) -> Element<'_, Message> {
+    let t = theme::tokens();
     // Theme: the rime built-in set. A custom palette (base16/edit) reads as "Custom".
     let mut themes = crate::theme::theme_names();
     let current_theme = if state.settings.palette.is_some() {
@@ -449,6 +654,22 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
         .unwrap_or_else(|| crate::state::DEFAULT_FONT_LABEL.to_string());
     let font_pick = select(fonts, Some(current_font), Message::SetFont);
 
+    // Per-command output-cap overrides — read-only here (mirrors the Local History
+    // exclude-list convention in fed-ide's settings): edited by hand in the JSON file.
+    let overrides_text = if state.settings.output_line_overrides.is_empty() {
+        "None — add entries (e.g. {\"pattern\": \"tail *\", \"max_lines\": 200}) in \
+         tty.settings.json."
+            .to_string()
+    } else {
+        state
+            .settings
+            .output_line_overrides
+            .iter()
+            .map(|o| format!("{} → {} lines", o.pattern, o.max_lines))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
     column![
         section("Appearance"),
         labeled("Theme", theme_pick),
@@ -467,6 +688,21 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             state.settings.tab_highlight(),
             Message::SetTabHighlight(!state.settings.tab_highlight()),
         ),
+        section("Terminal"),
+        stepper(
+            "Max scrollback lines",
+            state.settings.max_scrollback().to_string(),
+            Message::MaxScrollbackStep(-500),
+            Message::MaxScrollbackStep(500),
+        ),
+        stepper(
+            "Default output lines per command",
+            state.settings.default_output_lines().to_string(),
+            Message::DefaultOutputLinesStep(-10),
+            Message::DefaultOutputLinesStep(10),
+        ),
+        caption("PER-COMMAND OVERRIDES"),
+        text(overrides_text).size(12).color(t.muted),
         // Transparency that kicks in only when the window loses focus. Shown as a
         // 0–95% transparency amount; stored as the resulting opacity (1 − amount).
         section("Window"),
