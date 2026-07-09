@@ -896,8 +896,14 @@ where
                     }
                     let (fg, _) = self.cell_colors(&cell);
                     let key = (fg, cell.bold, cell.italic, cell.underline);
-                    let mut run = String::new();
-                    run.push(cell.ch);
+                    // (column, char) pairs sharing this style run — rendered one glyph
+                    // per `fill_text` call, each explicitly anchored to its own cell
+                    // (`bounds.x + col * cell_w`), rather than shaping the whole run as
+                    // one string and letting the text shaper's own per-glyph advance
+                    // (even under Shaping::Basic) drift from the monospace grid over a
+                    // long run — the drift is invisible for a couple of characters but
+                    // grows to several cells' worth by column 20+.
+                    let mut run: Vec<(usize, char)> = vec![(c, cell.ch)];
                     let mut end = c + 1;
                     while end < cols {
                         let nc = cell_at(&screen, history, line, end);
@@ -909,18 +915,22 @@ where
                         }
                         let (nfg, _) = self.cell_colors(&nc);
                         if (nfg, nc.bold, nc.italic, nc.underline) == key {
-                            run.push(nc.ch);
+                            run.push((end, nc.ch));
                             end += 1;
                         } else {
                             break;
                         }
                     }
                     let x = bounds.x + c as f32 * cell_w;
-                    if !run.trim_end().is_empty() {
+                    for &(col, ch) in &run {
+                        if ch == ' ' {
+                            continue;
+                        }
+                        let gx = bounds.x + col as f32 * cell_w;
                         renderer.fill_text(
                             text::Text {
-                                content: run,
-                                bounds: Size::new((bounds.x + bounds.width - x).max(1.0), line_h),
+                                content: ch.to_string(),
+                                bounds: Size::new(cell_w * 2.0, line_h),
                                 size: self.font_size.into(),
                                 line_height: text::LineHeight::Absolute(line_h.into()),
                                 font: self.variant(key.1, key.2),
@@ -929,7 +939,7 @@ where
                                 shaping: text::Shaping::Advanced,
                                 wrapping: text::Wrapping::None,
                             },
-                            Point::new(x, y),
+                            Point::new(gx, y),
                             fg,
                             bounds,
                         );
