@@ -441,6 +441,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     "⌘⇧H",
                     Message::ToggleScrollbackPanel,
                 ));
+                items.push(MenuItem::shortcut(
+                    "Copy Last Command Output",
+                    "⌘⇧O",
+                    Message::CopyLastCommandOutput,
+                ));
                 items.push(MenuItem::separator());
                 items.push(MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane));
                 items

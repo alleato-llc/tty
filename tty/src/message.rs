@@ -112,6 +112,9 @@ pub enum Message {
     CopyShellSnippet,
     /// The "Copy Link" menu item was chosen — write the URL to the clipboard.
     CopyLink(String),
+    /// Copy the most recent command's captured output to the clipboard (⌘⇧O / pane
+    /// menu). Needs OSC 133 shell integration; a no-op without a recorded command.
+    CopyLastCommandOutput,
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.

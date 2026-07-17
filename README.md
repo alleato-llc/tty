@@ -79,8 +79,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 - line editing: `⌥←/→` move by word · `⌘←/→` to line start/end · `⌥⌫` delete a word ·
   `⌘⌫` delete to line start (sent to the shell's line editor)
 - `⌘F` find in scrollback — `Enter`/`⇧Enter` jump to the next/previous match (shown as
-  "N of M") · `⌘↑`/`⌘↓` jump to the previous/next command prompt (needs OSC 133 shell
-  integration) · `⌘K` clear the focused pane's scrollback · `⌘⇧H` open **Scrollback
+  "N of M") · `⌘↑`/`⌘↓` jump to the previous/next command prompt and `⌘⇧O` copy the last
+  command's output (both need OSC 133 shell integration) · `⌘K` clear the focused pane's
+  scrollback · `⌘⇧H` open **Scrollback
   History** (an accordion table of past commands + their captured output, its own
   search, double-click a row to copy the command; with **encrypted history** enabled
   it also pages back into previous days' commands, gated behind Touch ID / your

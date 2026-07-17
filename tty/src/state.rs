@@ -533,6 +533,26 @@ impl Tty {
         self.scroll_target = None;
     }
 
+    /// The captured output of the most recent OSC 133 command in `window`'s focused
+    /// pane, as text, or `None` when there's no finished command with output (no shell
+    /// integration, or nothing has run). The `C`→`D` line span is recorded per region;
+    /// the text comes from the buffer at those lines.
+    pub fn last_command_output(&self, window: iced::window::Id) -> Option<String> {
+        let term = self.tab_for(window).and_then(Tab::focused)?;
+        let screen = term.screen.lock();
+        let (start, end) = screen
+            .command_regions()
+            .into_iter()
+            .rev()
+            .find_map(|r| r.output)?;
+        let lines = screen.transcript_lines();
+        // `end` is exclusive (the `D` row, one past the last output line).
+        let end = end.min(lines.len());
+        let text = lines.get(start..end)?.join("\n");
+        let text = text.trim_end().to_string();
+        (!text.is_empty()).then_some(text)
+    }
+
     /// Toggle the `⌘F` find bar. Opening returns the search-field id to focus.
     pub fn toggle_search(&mut self) -> bool {
         if self.search.is_some() {

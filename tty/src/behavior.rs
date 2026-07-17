@@ -212,6 +212,42 @@ fn prompt_jump_walks_command_prompts_both_ways() {
 }
 
 #[test]
+fn copy_last_command_output_returns_the_newest_commands_output() {
+    use cathode::parser::TermParser;
+    let tty = headless(1);
+    let win = tty.main_window.unwrap();
+    {
+        let term = tty.tabs[0].focused().unwrap();
+        let mut s = term.screen.lock();
+        let mut p = TermParser::new();
+        p.process(
+            b"\x1b]133;A\x07$ echo one\r\n\x1b]133;C\x07one\r\n\x1b]133;D;0\x07",
+            &mut s,
+        );
+        p.process(
+            b"\x1b]133;A\x07$ ls\r\n\x1b]133;C\x07a.txt\r\nb.txt\r\n\x1b]133;D;0\x07",
+            &mut s,
+        );
+    }
+    // The *newest* command's output, not the first, and without the prompt/command
+    // lines or a trailing blank.
+    assert_eq!(
+        tty.last_command_output(win).as_deref(),
+        Some("a.txt\nb.txt")
+    );
+}
+
+#[test]
+fn copy_last_command_output_is_none_without_marks() {
+    let tty = headless(1);
+    let win = tty.main_window.unwrap();
+    assert!(
+        tty.last_command_output(win).is_none(),
+        "no shell integration"
+    );
+}
+
+#[test]
 fn prompt_jump_is_a_no_op_without_recorded_prompts() {
     let mut tty = headless(1);
     let win = tty.main_window.unwrap();

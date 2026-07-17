@@ -87,6 +87,14 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.close_menu();
             return iced::clipboard::write(url);
         }
+        Message::CopyLastCommandOutput => {
+            state.close_menu();
+            if let Some(win) = state.keyboard_window() {
+                if let Some(text) = state.last_command_output(win) {
+                    return iced::clipboard::write(text);
+                }
+            }
+        }
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {
@@ -751,6 +759,10 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                 // through the same re-auth gate as the menu path.
                 s if is_main && mods.shift() && s.eq_ignore_ascii_case("h") => {
                     return toggle_scrollback_gated(state);
+                }
+                // ⌘⇧O copies the most recent command's output (OSC 133) to the clipboard.
+                s if mods.shift() && s.eq_ignore_ascii_case("o") => {
+                    return update(state, Message::CopyLastCommandOutput);
                 }
                 d if is_main && d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
                     let n = d.parse::<usize>().unwrap_or(0);

@@ -149,7 +149,9 @@ Thin glue, mirroring `fed`'s module shape:
   step to the next/previous match, driving `phosphor`'s `.scroll_to`), `⌘↑`/`⌘↓`
   **prompt-jump** to the previous/next OSC 133 command prompt (`jump_to_prompt` sets a
   `scroll_target` the focused pane feeds to the same `.scroll_to`, reset to the live
-  bottom when the user types), `⌘K` clears the
+  bottom when the user types), `⌘⇧O` **copies the last command's output**
+  (`last_command_output` reads the newest region's `C`→`D` line span from the buffer;
+  also on the pane menu), `⌘K` clears the
   focused pane's scrollback (`command_log` included), and `⌘⇧H` toggles the
   **Scrollback History** panel — all three main-window-only, mirroring `⌘,`'s scope.
   Everything else becomes PTY input via `phosphor::input`.
