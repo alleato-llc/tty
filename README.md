@@ -118,7 +118,7 @@ into the 1/5/15-minute triple, and a **Battery** cell shows charge on a gauge
 **Processes** cell shows the busiest process (`↑ Chrome 92%`) and drills into a
 scrollable, click-to-sort table of every process (by CPU, absolute memory, or
 name), busy processes grading their CPU% amber (≥60%) then red (≥85%) so hogs
-stand out. Right-click a row for a menu: **View file descriptors** (drills into
+stand out. Right-click a row for a menu: **View Process** (drills into
 that one process — a live CPU chart whose history is kept only while you're
 looking, its memory and thread count, and the scrollable list of its open file
 descriptors, each right-click-to-**Copy path**), plus **Copy path** / **Copy

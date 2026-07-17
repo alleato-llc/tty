@@ -1320,7 +1320,7 @@ fn metric_detail_proc_one_view() {
 
 #[test]
 fn proc_row_context_menu_view() {
-    // Right-clicking a process row opens its context menu (View file descriptors
+    // Right-clicking a process row opens its context menu (View Process
     // + copy actions) at the pointer, over the process list.
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];

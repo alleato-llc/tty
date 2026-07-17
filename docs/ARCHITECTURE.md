@@ -190,7 +190,7 @@ Thin glue, mirroring `fed`'s module shape:
   column and the CPU% cell graded a color via the table's `cell_color` hook (the
   shared `grade`/`grade_color` at the CPU cell's 60/85 cutoffs). Right-clicking a
   row opens a `MenuKind::ProcRow` context menu (the app's one global `context_menu`
-  overlay, anchored at the pointer): **View file descriptors** →
+  overlay, anchored at the pointer): **View Process** →
   `OpenProcDetail`, plus copy actions. **Copy path** resolves lazily via
   `metrics::process_path` (prexp-core's light `process_path(pid)`) so the list
   never pays for paths; PID/name reuse `CopyText`. `proc_detail_body` (opened only

@@ -306,7 +306,7 @@ source serves fdtop; tty consumes it in `metrics.rs`.
   read via `prexp-core`'s light `process_summaries()` (no fd enumeration), sampled
   only while the cell is shown. Long names truncate to the column, and the CPU%
   cell grades a color (amber ≥60%, red ≥85%) so hogs stand out. Right-clicking a
-  row opens a context menu: **View file descriptors** (drills into that one
+  row opens a context menu: **View Process** (drills into that one
   process — `snapshot_pid`, which *does* enumerate fds — for a live CPU chart kept
   only while it's open, its memory / thread count, and the scrollable list of its
   open file descriptors, each right-click-to-copy), plus **Copy path** (resolved

@@ -419,7 +419,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 ),
             ],
             MenuKind::ProcRow { pid, name } => vec![
-                MenuItem::action("View file descriptors", Message::OpenProcDetail(*pid)),
+                MenuItem::action("View Process", Message::OpenProcDetail(*pid)),
                 MenuItem::separator(),
                 MenuItem::action("Copy path", Message::CopyProcPath(*pid)),
                 MenuItem::action("Copy PID", Message::CopyText(pid.to_string())),
