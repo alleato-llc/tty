@@ -242,6 +242,15 @@ pub enum Message {
     FdRowRightClick(String),
     /// Copy a process's executable path (resolved lazily from its pid).
     CopyProcPath(i32),
+    /// Signal a process from its row menu — a "Quit" (SIGTERM) sends directly;
+    /// carries `(pid, signal)`.
+    KillProcess(i32, i32),
+    /// "Force Quit…" a process (SIGKILL): open the confirm dialog for `(pid, name)`.
+    RequestForceKill(i32, String),
+    /// Confirm the force-quit from the dialog.
+    ConfirmForceKill,
+    /// Dismiss the force-quit confirm (Cancel / Esc / backdrop).
+    CancelForceKill,
     /// Open the "move to pane" direction menu for a metric popover at the pointer.
     PromotePopoverMenu(crate::settings::MetricKind),
     /// Graduate a metric drill-in into a real pane, split off the focused pane in

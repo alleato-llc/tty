@@ -474,7 +474,6 @@ fn clock_body(state: &Tty) -> Element<'_, Message> {
     .into()
 }
 
-
 /// The aggregate CPU line chart: overall CPU% over its retained history on a
 /// fixed 0..100 gauge, with the hover readout. Shared by the `Cpu` drill-in
 /// (via the generic branch) and the `CpuAll` combined body.

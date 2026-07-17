@@ -485,6 +485,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 MenuItem::action("Copy path", Message::CopyProcPath(*pid)),
                 MenuItem::action("Copy PID", Message::CopyText(pid.to_string())),
                 MenuItem::action("Copy name", Message::CopyText(name.clone())),
+                MenuItem::separator(),
+                // "Quit" is a polite SIGTERM (the process can clean up); "Force
+                // Quit" is an uncatchable SIGKILL, so it confirms first.
+                MenuItem::action("Quit", Message::KillProcess(*pid, crate::metrics::SIG_TERM)),
+                MenuItem::action("Force Quit…", Message::RequestForceKill(*pid, name.clone())),
             ],
             MenuKind::FdRow { path } => {
                 vec![MenuItem::action(
@@ -597,6 +602,23 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 button::danger("End & replace", Message::ConfirmPaneReplace).into(),
             ],
             Message::CancelPaneReplace,
+        );
+    }
+
+    // Confirm a force-quit (SIGKILL) of a process from the Processes drill-in.
+    if let Some((pid, name)) = &state.kill_confirm {
+        base = dialog(
+            base,
+            "Force quit this process?",
+            &format!(
+                "Force quit {name} (pid {pid})? SIGKILL is immediate and uncatchable \
+                 — the process can't save or clean up, and unsaved work is lost."
+            ),
+            vec![
+                button::ghost("Cancel", Message::CancelForceKill).into(),
+                button::danger("Force Quit", Message::ConfirmForceKill).into(),
+            ],
+            Message::CancelForceKill,
         );
     }
 

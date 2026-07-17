@@ -331,6 +331,24 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 return iced::clipboard::write(path);
             }
         }
+        Message::KillProcess(pid, sig) => {
+            state.close_menu();
+            if !crate::metrics::kill_process(pid, sig) {
+                tracing::warn!("failed to signal pid {pid} with {sig}");
+            }
+        }
+        Message::RequestForceKill(pid, name) => {
+            state.close_menu();
+            state.kill_confirm = Some((pid, name));
+        }
+        Message::ConfirmForceKill => {
+            if let Some((pid, _)) = state.kill_confirm.take() {
+                if !crate::metrics::kill_process(pid, crate::metrics::SIG_KILL) {
+                    tracing::warn!("failed to force-kill pid {pid}");
+                }
+            }
+        }
+        Message::CancelForceKill => state.kill_confirm = None,
         Message::PromotePopoverMenu(kind) => {
             state.menu = Some((
                 crate::state::MenuKind::PromotePopover { kind },
@@ -549,6 +567,10 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     // Escape closes the rename field / settings panel / find bar (when open) instead of
     // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.kill_confirm.is_some() {
+            state.kill_confirm = None;
+            return iced::Task::none();
+        }
         if state.pane_replace_pending.is_some() || state.pane_replace_confirm.is_some() {
             // Leave "replace a pane" pick mode / dismiss its confirm.
             state.cancel_pane_replace();

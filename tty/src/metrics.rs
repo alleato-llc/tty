@@ -412,6 +412,17 @@ pub(crate) fn process_path(pid: i32) -> Option<String> {
     NativeSource::new().process_path(pid).ok()
 }
 
+/// SIGTERM — ask a process to quit (it can clean up / ignore).
+pub(crate) const SIG_TERM: i32 = 15;
+/// SIGKILL — force a process to quit (uncatchable).
+pub(crate) const SIG_KILL: i32 = 9;
+
+/// Signal a process by pid (see [`SIG_TERM`] / [`SIG_KILL`]); returns whether it
+/// succeeded (a process that's already gone, or isn't ours, fails).
+pub(crate) fn kill_process(pid: i32, sig: i32) -> bool {
+    NativeSource::new().kill_process(pid, sig).is_ok()
+}
+
 #[cfg(test)]
 impl ProcDetail {
     /// Build a detail with fixed contents, for snapshot/behavior fixtures (the

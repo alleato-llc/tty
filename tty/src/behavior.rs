@@ -107,6 +107,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         metric_detail_move_drag: None,
         pane_replace_pending: None,
         pane_replace_confirm: None,
+        kill_confirm: None,
     }
 }
 
@@ -448,6 +449,36 @@ fn proc_and_fd_right_click_open_context_menus() {
         &tty.menu,
         Some((MenuKind::FdRow { path }, _)) if path == "/dev/null"
     ));
+}
+
+#[test]
+fn process_kill_menu_routing() {
+    let mut tty = headless(1);
+    let me = std::process::id() as i32;
+    tty.menu = Some((
+        crate::state::MenuKind::ProcRow {
+            pid: me,
+            name: "self".to_string(),
+        },
+        tty.pointer,
+    ));
+
+    // "Quit" signals directly and closes the menu (signal 0 = harmless existence
+    // probe so the test never actually terminates anything); no confirm.
+    let _ = update(&mut tty, Message::KillProcess(me, 0));
+    assert!(tty.menu.is_none(), "Quit closes the menu");
+    assert!(tty.kill_confirm.is_none(), "Quit needs no confirm");
+
+    // "Force Quit…" stages a confirm carrying the pid + name.
+    let _ = update(
+        &mut tty,
+        Message::RequestForceKill(4321, "victim".to_string()),
+    );
+    assert_eq!(tty.kill_confirm, Some((4321, "victim".to_string())));
+
+    // Cancel dismisses without signalling.
+    let _ = update(&mut tty, Message::CancelForceKill);
+    assert!(tty.kill_confirm.is_none());
 }
 
 #[test]

@@ -102,6 +102,7 @@ impl Tty {
             metric_detail_move_drag: None,
             pane_replace_pending: None,
             pane_replace_confirm: None,
+            kill_confirm: None,
             hovered_tab: None,
             selection: None,
             search: None,

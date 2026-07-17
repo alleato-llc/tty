@@ -360,6 +360,10 @@ pub struct Tty {
         pane_grid::Pane,
         crate::settings::MetricKind,
     )>,
+    /// A pending "force quit" confirm from the Processes drill-in: the pid + name
+    /// to `SIGKILL`. `Some` shows the confirm dialog; taken on confirm, cleared on
+    /// cancel. (A plain "Quit"/`SIGTERM` needs no confirm.)
+    pub kill_confirm: Option<(i32, String)>,
 }
 
 /// One open metric drill-in popover: its metric plus per-popover layout, so

@@ -123,6 +123,7 @@ fn populated() -> Tty {
         metric_detail_move_drag: None,
         pane_replace_pending: None,
         pane_replace_confirm: None,
+        kill_confirm: None,
     }
 }
 
@@ -247,6 +248,31 @@ fn pane_replace_confirm_view() {
     assert!(
         matches,
         "snapshot `tty-pane-replace-confirm` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn force_kill_confirm_view() {
+    // "Force Quit…" from the Processes drill-in confirms before the SIGKILL.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Procs,
+    )];
+    tty.kill_confirm = Some((412, "Google Chrome".to_string()));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-force-kill-confirm.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-force-kill-confirm` changed — delete its PNG to re-baseline"
     );
 }
 
