@@ -828,6 +828,14 @@ where
             .as_deref()
             .map(|q| find_matches(&screen, cols, q))
             .unwrap_or_default();
+        // Absolute rows whose command exited non-zero (OSC 133) — their prompt line
+        // gets a faint red wash so a failure reads at a glance while scrolling back.
+        let failed_rows: Vec<usize> = screen
+            .command_regions()
+            .iter()
+            .filter(|r| r.failed())
+            .map(|r| r.prompt_row)
+            .collect();
 
         renderer.with_layer(bounds, |renderer| {
             for vr in 0..rows {
@@ -860,6 +868,22 @@ where
                         bg,
                     );
                     c = end;
+                }
+
+                // Failed-command marker: a faint red wash across the prompt line of a
+                // command that exited non-zero (OSC 133), plus a solid bar at the left
+                // edge so it's visible even on a dark or busy row.
+                if failed_rows.contains(&line) {
+                    let red = self.style.ansi[1];
+                    fill_rect(
+                        renderer,
+                        bounds.x,
+                        y,
+                        cols as f32 * cell_w,
+                        line_h,
+                        Color { a: 0.16, ..red },
+                    );
+                    fill_rect(renderer, bounds.x, y, 2.0, line_h, red);
                 }
 
                 // Selection tint.
