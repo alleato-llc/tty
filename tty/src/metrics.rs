@@ -22,6 +22,9 @@ pub struct MachineStats {
     pub mem_used: u64,
     /// Total physical memory, bytes.
     pub mem_total: u64,
+    /// Swap in use / total, bytes (`0` when there is no swap).
+    pub swap_used: u64,
+    pub swap_total: u64,
     /// Network receive / transmit throughput over the last interval, bytes/sec.
     pub net_rx_bps: f32,
     pub net_tx_bps: f32,
@@ -203,6 +206,8 @@ impl Metrics {
             cpu_percent,
             mem_used: mem.used,
             mem_total: mem.total,
+            swap_used: mem.swap_used,
+            swap_total: mem.swap_total,
             net_rx_bps,
             net_tx_bps,
             disk_r_bps,
@@ -328,6 +333,20 @@ pub fn mem_label(stats: &MachineStats) -> String {
         format_bytes(stats.mem_used),
         format_bytes(stats.mem_total),
     )
+}
+
+/// The swap line for the memory drill-in, e.g. `Swap 1.2G/8.0G` — or `No swap`
+/// when the machine has none.
+pub fn swap_label(stats: &MachineStats) -> String {
+    if stats.swap_total == 0 {
+        "No swap".to_string()
+    } else {
+        format!(
+            "Swap {}/{}",
+            format_bytes(stats.swap_used),
+            format_bytes(stats.swap_total),
+        )
+    }
 }
 
 /// The network cells' labels, e.g. `Net ↓ 1.2M/s` / `Net ↑ 40K/s`.

@@ -797,6 +797,8 @@ fn seed_metric_sample(tty: &mut Tty) {
         cpu_percent: 72.0,
         mem_used: 41_000_000_000,
         mem_total: 128 * 1024 * 1024 * 1024,
+        swap_used: 1_288_490_188, // ~1.2G
+        swap_total: 8 * 1024 * 1024 * 1024,
         net_rx_bps: 3.2 * M,
         net_tx_bps: 512.0 * 1024.0,
         disk_r_bps: 8.0 * M,

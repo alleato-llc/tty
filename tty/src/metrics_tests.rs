@@ -136,6 +136,8 @@ fn labels_read_cleanly() {
         cpu_percent: 33.6,
         mem_used: 12_400_000_000,
         mem_total: 16 * 1024 * 1024 * 1024,
+        swap_used: 1_288_490_188,
+        swap_total: 8 * 1024 * 1024 * 1024,
         net_rx_bps: 1.5 * 1024.0 * 1024.0,
         net_tx_bps: 40.0 * 1024.0,
         disk_r_bps: 0.0,
@@ -144,6 +146,17 @@ fn labels_read_cleanly() {
     assert_eq!(cpu_label(&stats), "CPU 34%");
     let mem = mem_label(&stats);
     assert!(mem.starts_with("MEM "), "got: {mem}");
+    // Swap reads as a size pair; zero total reads as "No swap".
+    assert!(
+        swap_label(&stats).starts_with("Swap "),
+        "got: {}",
+        swap_label(&stats)
+    );
+    let no_swap = MachineStats {
+        swap_total: 0,
+        ..stats
+    };
+    assert_eq!(swap_label(&no_swap), "No swap");
     assert!(mem.ends_with("/16.0G"), "got: {mem}");
     assert_eq!(net_rx_label(&stats), "Net ↓ 1.5M/s");
     assert_eq!(net_tx_label(&stats), "Net ↑ 40K/s");

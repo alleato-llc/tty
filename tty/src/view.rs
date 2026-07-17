@@ -2167,6 +2167,17 @@ fn metric_popover_card<'a>(
                     );
                 }
             }
+            // Memory drills in with a swap line beneath the RAM readout (the bar
+            // cell stays RAM-only).
+            K::Mem => {
+                if let Some(stats) = state.metrics.latest.as_ref() {
+                    card = card.push(
+                        text(crate::metrics::swap_label(stats))
+                            .size(12)
+                            .color(t.muted),
+                    );
+                }
+            }
             _ => {}
         }
         card.into()

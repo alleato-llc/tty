@@ -296,8 +296,10 @@ source serves fdtop; tty consumes it in `metrics.rs`.
 
 **Later**
 
-- [ ] **Swap** — folded into the memory drill-in (see decision below), not a
-  separate always-on cell by default.
+- [x] **Swap** — folded into the memory drill-in (see decision below), not a
+  separate always-on cell by default. A `Swap used/total` line under the RAM
+  readout in the Memory popover; read via `prexp-core`'s `MemoryInfo.swap_*`
+  (`sysctl(vm.swapusage)` on macOS, `/proc/meminfo` on Linux). *Shipped.*
 - [ ] **Memory detail** — used/free/wired/compressed breakdown in the memory
   popover, beside the swap line.
 - [ ] **Per-cell thresholds + alerting** — recolor / flash a cell when a metric
