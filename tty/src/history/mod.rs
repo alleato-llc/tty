@@ -81,8 +81,8 @@ pub(crate) fn tmp_path(path: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// `~/.config/tty/history/` (or the platform equivalent) — a dedicated
-/// subdirectory for day segments and the manifest, distinct from
-/// `tty.settings.json`'s directory itself.
+/// subdirectory for day segments and the manifest, distinct from the config
+/// file (`tty.toml`) in the directory itself.
 pub fn history_dir() -> std::path::PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))

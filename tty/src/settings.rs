@@ -1,4 +1,6 @@
-//! tty's persisted preferences — a small `tty.settings.json` in the user config dir.
+//! tty's persisted preferences — a small, hand-editable `tty.toml` in the user config
+//! dir (migrated once from the legacy `tty.settings.json`). Saves are a round-trip
+//! merge, so comments and layout a user adds survive a GUI write (see [`merge_into_doc`]).
 //! The terminal counterpart of fed's `patina::Settings`, scoped to what a terminal
 //! actually needs: dark/light, font, and an optional custom palette (the 16 ANSI
 //! colors + fg/bg/cursor) edited in the settings panel or imported from a base16
@@ -738,14 +740,44 @@ pub const MIN_HISTORY_REAUTH_INTERVAL_MINUTES: u32 = 0;
 pub const MAX_HISTORY_REAUTH_INTERVAL_MINUTES: u32 = 480;
 
 impl Settings {
-    /// Load `tty.settings.json`, or defaults if it's missing or malformed.
+    /// Load `tty.toml` (migrating a legacy `tty.settings.json` if that's all there is),
+    /// or defaults if nothing is present. A malformed `tty.toml` is backed up, not lost.
     pub fn load() -> Self {
-        let mut settings: Self = match std::fs::read_to_string(path()) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-            Err(_) => Self::default(),
-        };
+        let mut settings = Self::load_inner();
         settings.migrate_status_bar_metrics();
         settings
+    }
+
+    /// Read `tty.toml`, else migrate from the legacy `tty.settings.json`, else
+    /// defaults. A `tty.toml` that fails to parse is preserved (backed up to
+    /// `tty.toml.bak`) rather than silently overwritten with defaults on the next
+    /// save — a hand-edit typo shouldn't wipe every setting.
+    fn load_inner() -> Self {
+        if let Ok(s) = std::fs::read_to_string(toml_path()) {
+            return match Self::from_toml_str(&s) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    tracing::warn!(
+                        "config parse error in {}: {e} — backing up to tty.toml.bak and \
+                         loading defaults (your file is not overwritten until you change a setting)",
+                        toml_path().display(),
+                    );
+                    let _ = std::fs::copy(toml_path(), toml_path().with_extension("toml.bak"));
+                    Self::default()
+                }
+            };
+        }
+        // No TOML yet: migrate a legacy JSON file if present (written as TOML on the
+        // next save; the JSON is left untouched as a fallback).
+        match std::fs::read_to_string(legacy_json_path()) {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Parse the TOML config text into settings (serde via `toml_edit`).
+    fn from_toml_str(s: &str) -> Result<Self, toml_edit::de::Error> {
+        toml_edit::de::from_str(s)
     }
 
     /// Migrate the deprecated `status_bar_metrics_enabled` bool: if the old
@@ -772,20 +804,33 @@ impl Settings {
         self.status_bar_metrics_enabled = None;
     }
 
-    /// Persist to `tty.settings.json` (best-effort; a write failure isn't fatal).
+    /// Persist to `tty.toml` (best-effort; a write failure isn't fatal). The write is
+    /// a **round-trip merge**: the current file is re-read and only the values change,
+    /// so a user's comments, key order, and formatting survive a GUI save (see
+    /// [`merge_into_doc`]).
     pub fn save(&self) {
-        // `path()` is the real config file — behavior tests drive `update()`
+        // `toml_path()` is the real config file — behavior tests drive `update()`
         // paths that save, and a test run must never rewrite the settings of
         // whoever ran `cargo test`.
         if cfg!(test) {
             return;
         }
-        let p = path();
+        let p = toml_path();
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(p, json);
+        // Merge into whatever is on disk now (an external hand-edit included), so a
+        // save preserves comments/layout instead of reformatting from scratch.
+        let mut doc = std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| s.parse::<toml_edit::DocumentMut>().ok())
+            .unwrap_or_default();
+        match toml_edit::ser::to_document(self) {
+            Ok(fresh) => {
+                merge_into_doc(&mut doc, &fresh);
+                let _ = std::fs::write(&p, doc.to_string());
+            }
+            Err(e) => tracing::warn!("failed to serialize settings to TOML: {e}"),
         }
     }
 
@@ -1117,12 +1162,61 @@ impl Settings {
     }
 }
 
-/// `~/.config/tty/tty.settings.json` (or the platform equivalent).
-fn path() -> PathBuf {
+/// Sync the freshly-serialized settings (`fresh`) into the on-disk document (`doc`)
+/// while preserving formatting and comments. `doc`'s key set is made to match
+/// `fresh`'s (so a setting cleared to its default disappears), but for a key that
+/// persists we only replace its *value* — leaving the comment on the line above (the
+/// key's prefix decor) and the inline trailing comment (the value's decor) intact.
+///
+/// Scope: only top-level scalar keys keep their inline comments; a table or
+/// array-of-tables (`[palette]`, `[[status_bar_metrics]]`) is replaced wholesale, so
+/// comments *inside* those are not preserved (rarely hand-annotated). Unknown top-level
+/// keys are dropped — the GUI owns the schema.
+fn merge_into_doc(doc: &mut toml_edit::DocumentMut, fresh: &toml_edit::DocumentMut) {
+    use toml_edit::Item;
+    // Drop keys the schema no longer emits (e.g. a setting cleared back to default).
+    let keep: std::collections::HashSet<&str> = fresh.iter().map(|(k, _)| k).collect();
+    let stale: Vec<String> = doc
+        .iter()
+        .map(|(k, _)| k.to_string())
+        .filter(|k| !keep.contains(k.as_str()))
+        .collect();
+    for k in stale {
+        doc.remove(&k);
+    }
+    for (key, new_item) in fresh.iter() {
+        match (doc.get_mut(key), new_item) {
+            // Existing scalar → replace only the value, carrying its inline comment.
+            (Some(old), Item::Value(new_val)) if old.is_value() => {
+                let decor = old.as_value().expect("is_value").decor().clone();
+                let mut v = new_val.clone();
+                *v.decor_mut() = decor;
+                *old = Item::Value(v);
+            }
+            // New key, or a table / array-of-tables → take the fresh item as-is.
+            _ => {
+                doc.insert(key, new_item.clone());
+            }
+        }
+    }
+}
+
+/// The config directory, `~/.config/tty/` (or the platform equivalent).
+fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("tty")
-        .join("tty.settings.json")
+}
+
+/// `~/.config/tty/tty.toml` — the current, hand-editable config file.
+fn toml_path() -> PathBuf {
+    config_dir().join("tty.toml")
+}
+
+/// `~/.config/tty/tty.settings.json` — the legacy file, read once to migrate to
+/// [`toml_path`] and then left in place (never written again).
+fn legacy_json_path() -> PathBuf {
+    config_dir().join("tty.settings.json")
 }
 
 #[cfg(test)]

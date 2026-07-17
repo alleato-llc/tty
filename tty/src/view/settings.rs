@@ -373,10 +373,10 @@ fn clock_format_editor(state: &Tty) -> Element<'_, Message> {
 fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
     let t = theme::tokens();
     // Per-command output-cap overrides — read-only here (mirrors the Local History
-    // exclude-list convention in fed-ide's settings): edited by hand in the JSON file.
+    // exclude-list convention in fed-ide's settings): edited by hand in the config file.
     let overrides_text = if state.settings.output_line_overrides.is_empty() {
-        "None — add entries (e.g. {\"pattern\": \"tail *\", \"max_lines\": 200}) in \
-         tty.settings.json."
+        "None — add entries (e.g. { pattern = \"tail *\", max_lines = 200 }) under \
+         [[output_line_overrides]] in tty.toml."
             .to_string()
     } else {
         state

@@ -173,3 +173,154 @@ fn open_file_command_default_hands_file_to_os_opener() {
         resolve_open_file_command(None, "y.rs", None, None),
     );
 }
+
+#[test]
+fn toml_roundtrips_the_fields_it_writes() {
+    let s = Settings {
+        theme: Some("nord".into()),
+        font_size: Some(15.0),
+        notify_on_command_finish: Some(false),
+        open_file_command: Some("code -g {file}:{line}:{col}".into()),
+        status_bar_metrics: vec![MetricConfig {
+            metric: "cpu".into(),
+            style: "sparkline".into(),
+            warn: Some(70.0),
+            alarm: None,
+        }],
+        ..Default::default()
+    };
+    let doc = toml_edit::ser::to_document(&s).expect("serialize");
+    let back = Settings::from_toml_str(&doc.to_string()).expect("parse");
+    assert_eq!(back.theme.as_deref(), Some("nord"));
+    assert_eq!(back.font_size, Some(15.0));
+    assert_eq!(back.notify_on_command_finish, Some(false));
+    assert_eq!(
+        back.open_file_command.as_deref(),
+        Some("code -g {file}:{line}:{col}")
+    );
+    assert_eq!(back.status_bar_metrics.len(), 1);
+    assert_eq!(back.status_bar_metrics[0].warn, Some(70.0));
+}
+
+#[test]
+fn unset_options_are_omitted_not_written_as_null() {
+    // TOML has no null; an unset Option must simply be absent (no "theme = ..." line,
+    // no "null" anywhere).
+    let s = Settings::default();
+    let out = toml_edit::ser::to_document(&s)
+        .expect("serialize")
+        .to_string();
+    assert!(!out.contains("null"), "no nulls:\n{out}");
+    assert!(!out.contains("theme"), "unset theme is absent:\n{out}");
+}
+
+#[test]
+fn save_merge_preserves_comments_and_updates_values() {
+    // A hand-edited file with a full-line comment and an inline comment.
+    let existing = "\
+# my terminal config
+font_size = 12  # a touch bigger
+theme = \"gruvbox\"
+";
+    let mut doc = existing.parse::<toml_edit::DocumentMut>().unwrap();
+    // The GUI changed font_size and theme.
+    let s = Settings {
+        font_size: Some(18.0),
+        theme: Some("nord".into()),
+        ..Default::default()
+    };
+    let fresh = toml_edit::ser::to_document(&s).unwrap();
+    merge_into_doc(&mut doc, &fresh);
+    let out = doc.to_string();
+    assert!(
+        out.contains("# my terminal config"),
+        "full-line comment kept:\n{out}"
+    );
+    assert!(
+        out.contains("# a touch bigger"),
+        "inline comment kept:\n{out}"
+    );
+    assert!(out.contains("18"), "font_size updated:\n{out}");
+    assert!(out.contains("nord"), "theme updated:\n{out}");
+    assert!(!out.contains("gruvbox"), "old value replaced:\n{out}");
+}
+
+#[test]
+fn save_merge_drops_a_cleared_setting() {
+    // theme is set on disk but the schema no longer emits it (cleared to None).
+    let mut doc = "theme = \"nord\"\nfont_size = 14\n"
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    let s = Settings {
+        font_size: Some(14.0), // theme stays None
+        ..Default::default()
+    };
+    let fresh = toml_edit::ser::to_document(&s).unwrap();
+    merge_into_doc(&mut doc, &fresh);
+    let out = doc.to_string();
+    assert!(!out.contains("theme"), "cleared setting removed:\n{out}");
+    assert!(out.contains("font_size"), "kept setting stays:\n{out}");
+}
+
+#[test]
+fn toml_serializes_full_settings_with_palette_and_overrides() {
+    // The `values before tables` TOML rule is a trap: `palette` (a table) and the
+    // arrays-of-tables sit amid scalar fields in the struct. Serializing a
+    // fully-populated Settings must still succeed and round-trip.
+    let s = Settings {
+        theme: Some("nord".into()),
+        font_size: Some(14.0),
+        window_always_on_top: Some(true),
+        notify_command_min_seconds: Some(30),
+        palette: Some(Palette {
+            ansi: (0..16).map(|i| format!("#0000{i:02x}")).collect(),
+            fg: "#ffffff".into(),
+            bg: "#000000".into(),
+            cursor: "#ff8800".into(),
+        }),
+        output_line_overrides: vec![OutputLineOverride {
+            pattern: "tail *".into(),
+            max_lines: 200,
+        }],
+        status_bar_metrics: vec![MetricConfig {
+            metric: "cpu".into(),
+            style: "sparkline".into(),
+            warn: None,
+            alarm: None,
+        }],
+        ..Default::default()
+    };
+    let out = toml_edit::ser::to_document(&s)
+        .expect("serialize full settings")
+        .to_string();
+    let back = Settings::from_toml_str(&out).expect("parse full settings");
+    assert_eq!(back.palette.as_ref().map(|p| p.ansi.len()), Some(16));
+    assert_eq!(back.output_line_overrides.len(), 1);
+    assert_eq!(back.window_always_on_top, Some(true));
+    assert_eq!(back.notify_command_min_seconds, Some(30));
+}
+
+#[test]
+fn legacy_json_migrates_cleanly_to_toml() {
+    // A representative old `tty.settings.json` (what serde_json::to_string_pretty
+    // wrote): the migration reads it via serde_json, then the next save serializes to
+    // TOML — the fields must survive both hops.
+    let json = r#"{
+        "theme": "gruvbox",
+        "font_size": 13.0,
+        "palette": null,
+        "status_bar_metrics": [{ "metric": "cpu", "style": "sparkline" }],
+        "encrypted_history_enabled": true,
+        "history_key_source": "passphrase"
+    }"#;
+    let migrated: Settings = serde_json::from_str(json).expect("legacy json parses");
+    let toml = toml_edit::ser::to_document(&migrated)
+        .expect("serialize to toml")
+        .to_string();
+    let back = Settings::from_toml_str(&toml).expect("reparse toml");
+    assert_eq!(back.theme.as_deref(), Some("gruvbox"));
+    assert_eq!(back.font_size, Some(13.0));
+    assert_eq!(back.status_bar_metrics.len(), 1);
+    assert_eq!(back.encrypted_history_enabled, Some(true));
+    assert_eq!(back.history_key_source.as_deref(), Some("passphrase"));
+}

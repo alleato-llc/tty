@@ -323,7 +323,8 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   toggles), the pin-popovers toggle, the reorder-hold stepper, and the
   **graduate-into-a-pane** toggle (`graduate_metrics`, which gates the popover ⊞
   control). A read-only **Keys** section documents the shortcuts.
-  `tty.settings.json` persists the theme name, font family/size, any custom palette,
+  A hand-editable `tty.toml` (via `toml_edit` + serde) persists the theme name, font
+  family/size, any custom palette,
   the active-tab highlight flag, `highlight_focused_pane`, the status-bar flags
   (`status_bar_autohide`, `status_bar_disabled`, `status_bar_metrics_pinned`,
   `graduate_metrics`, `status_bar_edit_hold_secs`),
@@ -333,7 +334,15 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   the encrypted-history fields
   (`encrypted_history_enabled`, `history_key_source`, `history_kdf`,
   `history_fanout`, `history_cipher`, `history_reauth_interval_minutes`,
-  `history_session_start`). `window_opacity()` drives a uniform per-surface fade —
+  `history_session_start`), plus the notification + open-file fields
+  (`notify_on_command_finish`, `notify_command_min_seconds`,
+  `shell_integration_autoinstall`, `open_file_command`). `save()` is a **round-trip
+  merge**: it re-reads the on-disk `DocumentMut` and replaces only the values, so a
+  user's comments (full-line and inline) and key order survive a GUI write; unset
+  `Option`s are simply omitted (TOML has no null). `load()` migrates a legacy
+  `tty.settings.json` on first run and, on a parse error, backs the file up to
+  `tty.toml.bak` instead of silently resetting every setting. `window_opacity()`
+  drives a uniform per-surface fade —
   the `focused_opacity` while focused (floored at `MIN_FOCUSED_OPACITY`, so active
   transparency tops out at 50% and stays readable) and the `unfocused_opacity`
   otherwise (floored at `MIN_OPACITY`, 95%) — since iced 0.14 has no runtime

@@ -100,7 +100,7 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 
 ## Customize
 
-`⌘,` opens a visual settings panel (no config file to hand-edit). Its **Appearance**
+`⌘,` opens a visual settings panel (the primary path — no config file needed). Its **Appearance**
 section is split into sub-tabs — Theme, Tabs, Status bar, Terminal, Window — so each
 shows a focused pane instead of one long scroll. Pick one of 8 named
 themes (the same catalog fed-ide ships, shared via rime) or import any
@@ -114,7 +114,11 @@ nears the bottom edge so the grid gets the full height; turn it off to pin it, o
 **on top** of other windows and fades it with two transparency amounts —
 **When Active** (up to 50%, so an in-use window stays readable) and **On Blur**
 (up to 95%, when it loses focus). A **Keys** section lists every keyboard shortcut
-for reference. Settings persist to `tty.settings.json`.
+for reference. Settings persist to a hand-editable `tty.toml` in the config dir
+(`~/.config/tty/` or the platform equivalent). You can edit it directly — the GUI
+does a round-trip save, so your comments and layout survive. A malformed file is
+backed up rather than overwritten, and an existing `tty.settings.json` from an older
+build is migrated automatically on first launch.
 
 A dedicated **Metrics** section (above History) configures **machine stats in the
 status bar** (off until you add one): CPU, memory, and network / disk throughput
