@@ -231,6 +231,42 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             .padding(6)
             .into(),
     };
+    // "Replace a pane" pick mode dims the grid and shows an instruction; the scrim
+    // has no handlers, so clicks fall through it to the panes (which route to the
+    // replace via `FocusPane`).
+    let body = if let Some(kind) = state.pane_replace_pending {
+        let hint = container(
+            text(format!(
+                "Click a pane to replace it with {kind}    ·    Esc to cancel"
+            ))
+            .size(13)
+            .color(t.ink),
+        )
+        .padding([8, 14])
+        .style(move |_| container::Style {
+            border: Border {
+                color: t.accent,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..container::background(t.surface)
+        });
+        let scrim = container(hint)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Top)
+            .padding(24)
+            .style(|_| {
+                container::background(iced::Color {
+                    a: 0.45,
+                    ..iced::Color::BLACK
+                })
+            });
+        iced::widget::stack![body, scrim].into()
+    } else {
+        body
+    };
     root = root.push(body);
 
     // Find bar (⌘F): a focused field whose text highlights every match in the whole
@@ -466,6 +502,8 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                         "Move to pane · Down",
                         Message::PromoteMetricToPane(kind, Direction::Down),
                     ),
+                    MenuItem::separator(),
+                    MenuItem::action("Replace a pane…", Message::StartPaneReplace(kind)),
                 ]
             }
         };
@@ -532,6 +570,23 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 button::danger("Delete", Message::ConfirmResetEncryptedHistory).into(),
             ],
             Message::CancelResetEncryptedHistory,
+        );
+    }
+
+    // Confirm before replacing a live shell pane with a metric view.
+    if let Some((_, _, kind)) = state.pane_replace_confirm {
+        base = dialog(
+            base,
+            "Replace this pane?",
+            &format!(
+                "This closes the terminal in this pane (ending its shell if still \
+                 running) and replaces it with the {kind} view. Its scrollback is lost."
+            ),
+            vec![
+                button::ghost("Cancel", Message::CancelPaneReplace).into(),
+                button::danger("End & replace", Message::ConfirmPaneReplace).into(),
+            ],
+            Message::CancelPaneReplace,
         );
     }
 

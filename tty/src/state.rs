@@ -376,6 +376,18 @@ pub struct Tty {
     /// it began, and its offset then; `None` when not moving. Ended by
     /// `PointerReleased`.
     pub metric_detail_move_drag: Option<(usize, iced::Point, (f32, f32))>,
+    /// "Replace a pane" pick mode: the metric awaiting a target pane. When `Some`,
+    /// the pane grid dims and the next pane click replaces that pane with this
+    /// metric (see [`Self::request_pane_replace`]). `Esc` cancels.
+    pub pane_replace_pending: Option<crate::settings::MetricKind>,
+    /// A pending confirm before replacing a *live* pane: the window + pane to
+    /// replace and the metric to put there. `Some` shows the "end the shell?"
+    /// dialog; taken on confirm, cleared on cancel.
+    pub pane_replace_confirm: Option<(
+        iced::window::Id,
+        pane_grid::Pane,
+        crate::settings::MetricKind,
+    )>,
 }
 
 /// One open metric drill-in popover: its metric plus per-popover layout, so
@@ -675,6 +687,8 @@ impl Tty {
             metric_details: Vec::new(),
             metric_detail_resize: None,
             metric_detail_move_drag: None,
+            pane_replace_pending: None,
+            pane_replace_confirm: None,
             hovered_tab: None,
             selection: None,
             search: None,
@@ -1125,14 +1139,81 @@ impl Tty {
         let Some(kind) = crate::settings::MetricKind::from_setting_str(metric) else {
             return;
         };
+        // Don't open a drill-in for a metric that's already on screen — as another
+        // popover, or graduated into a pane. A click on a *different* metric's cell
+        // still opens (in one-at-a-time mode it replaces the current popover).
+        if self.metric_is_shown(kind) {
+            return;
+        }
         let pop = MetricPopover::new(kind);
         if self.settings.status_bar_metrics_pinned() {
-            if !self.metric_details.iter().any(|p| p.kind == kind) {
-                self.metric_details.push(pop);
-            }
+            self.metric_details.push(pop);
         } else {
             self.metric_details = vec![pop];
         }
+    }
+
+    /// Whether `kind` is already visible — an open popover, or a metric pane in the
+    /// active tab or any detached window.
+    fn metric_is_shown(&self, kind: crate::settings::MetricKind) -> bool {
+        if self.metric_details.iter().any(|p| p.kind == kind) {
+            return true;
+        }
+        let in_tab = |tab: &Tab| {
+            tab.panes
+                .iter()
+                .any(|(_, p)| matches!(p, Pane::Metric(k) if *k == kind))
+        };
+        self.tabs.get(self.active).is_some_and(in_tab) || self.detached.values().any(in_tab)
+    }
+
+    /// Enter "replace a pane" pick mode for `kind`: the next pane click replaces
+    /// that pane with this metric (see [`crate::view`] for the dimmed overlay).
+    /// Closes any open popover so the panes are unobstructed.
+    pub fn start_pane_replace(&mut self, kind: crate::settings::MetricKind) {
+        self.metric_details.clear();
+        self.pane_replace_pending = Some(kind);
+    }
+
+    /// A pane was clicked while in replace-pick mode: if it holds a live shell,
+    /// stage a confirm dialog (replacing ends the shell); otherwise replace it now.
+    pub fn request_pane_replace(&mut self, window: iced::window::Id, pane: pane_grid::Pane) {
+        let Some(kind) = self.pane_replace_pending.take() else {
+            return;
+        };
+        // A terminal pane has a shell + scrollback to lose, so confirm first; a
+        // metric pane has nothing to terminate, so replace it outright.
+        let is_terminal = self
+            .tab_for(window)
+            .and_then(|t| t.panes.get(pane))
+            .is_some_and(|p| matches!(p, Pane::Term(_)));
+        if is_terminal {
+            self.pane_replace_confirm = Some((window, pane, kind));
+        } else {
+            self.replace_pane(window, pane, kind);
+        }
+    }
+
+    /// Swap a pane's content for a metric view in place. The old content is
+    /// dropped — a terminal's `PtySession` goes with it, ending that shell.
+    pub fn replace_pane(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        kind: crate::settings::MetricKind,
+    ) {
+        if let Some(tab) = self.tab_for_mut(window) {
+            if let Some(slot) = tab.panes.get_mut(pane) {
+                *slot = Pane::Metric(kind);
+                tab.focus = pane;
+            }
+        }
+    }
+
+    /// Leave replace-pick mode / dismiss the confirm without replacing.
+    pub fn cancel_pane_replace(&mut self) {
+        self.pane_replace_pending = None;
+        self.pane_replace_confirm = None;
     }
 
     /// Whether the floating (auto-hide) status bar should show right now: the

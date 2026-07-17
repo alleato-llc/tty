@@ -108,7 +108,11 @@ Thin glue, mirroring `fed`'s module shape:
   a `pane_grid::State<Pane>` split tree plus its focused `Pane`. `Pane` is the
   per-pane content enum (the extension point): `Pane::Term(Term)` for a shell, or
   `Pane::Metric(MetricKind)` for a metric drill-in "graduated" from a floating
-  popover into a real pane (via `promote_metric_to_pane`) — no PTY, reads the shared
+  popover into a real pane (via `promote_metric_to_pane` to split off a new pane, or
+  `replace_pane` to take over an existing one — the "Replace a pane…" pick mode
+  (`pane_replace_pending`) dims the grid and routes the next `FocusPane` there,
+  confirming first (`pane_replace_confirm`) when the target is a live terminal) —
+  no PTY, reads the shared
   `Metrics`, never reaps. A `Term` is a `screen` + an `Option<PtySession>` (`None`
   only in tests) + an `alive` flag the read loop clears on shell exit. Terminal
   operations filter to `Pane::as_term` (and `Tab::terms()/terms_mut()`), so a metric

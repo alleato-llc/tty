@@ -105,6 +105,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
+        pane_replace_pending: None,
+        pane_replace_confirm: None,
     }
 }
 
@@ -446,6 +448,85 @@ fn proc_and_fd_right_click_open_context_menus() {
         &tty.menu,
         Some((MenuKind::FdRow { path }, _)) if path == "/dev/null"
     ));
+}
+
+#[test]
+fn pane_replace_pick_confirm_and_replace() {
+    use crate::settings::MetricKind;
+    use crate::state::Pane;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let ti = tty.active;
+    let pane = tty.tabs[ti].focus;
+
+    // ⊞ "Replace a pane…" arms pick mode.
+    let _ = update(&mut tty, Message::StartPaneReplace(MetricKind::Cpu));
+    assert_eq!(tty.pane_replace_pending, Some(MetricKind::Cpu));
+
+    // Clicking a terminal pane stages a confirm (it has a shell/scrollback to lose)
+    // rather than replacing outright.
+    let _ = update(&mut tty, Message::FocusPane(win, pane));
+    assert!(
+        tty.pane_replace_pending.is_none(),
+        "pick consumed the click"
+    );
+    assert!(
+        tty.pane_replace_confirm.is_some(),
+        "a terminal needs confirming"
+    );
+    // Cancel leaves the terminal intact.
+    let _ = update(&mut tty, Message::CancelPaneReplace);
+    assert!(tty.pane_replace_confirm.is_none());
+    assert!(matches!(tty.tabs[ti].panes.get(pane), Some(Pane::Term(_))));
+
+    // Re-arm, click, confirm → the pane is now the metric view.
+    let _ = update(&mut tty, Message::StartPaneReplace(MetricKind::Cpu));
+    let _ = update(&mut tty, Message::FocusPane(win, pane));
+    let _ = update(&mut tty, Message::ConfirmPaneReplace);
+    assert!(matches!(
+        tty.tabs[ti].panes.get(pane),
+        Some(Pane::Metric(MetricKind::Cpu))
+    ));
+
+    // Replacing that (metric) pane again skips the confirm — nothing to terminate.
+    let _ = update(&mut tty, Message::StartPaneReplace(MetricKind::Mem));
+    let _ = update(&mut tty, Message::FocusPane(win, pane));
+    assert!(
+        tty.pane_replace_confirm.is_none(),
+        "metric pane replaces outright"
+    );
+    assert!(matches!(
+        tty.tabs[ti].panes.get(pane),
+        Some(Pane::Metric(MetricKind::Mem))
+    ));
+}
+
+#[test]
+fn metric_cell_click_wont_open_a_duplicate() {
+    use crate::settings::MetricKind;
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    tty.settings.status_bar_metrics = vec![metric_cfg("cpu"), metric_cfg("mem")];
+
+    // Opening CPU works; clicking CPU again while it's shown does nothing.
+    tty.open_metric_detail("cpu");
+    assert_eq!(tty.metric_details.len(), 1);
+    tty.open_metric_detail("cpu");
+    assert_eq!(tty.metric_details.len(), 1, "no duplicate CPU popover");
+
+    // A different metric still opens (one-at-a-time replaces).
+    tty.open_metric_detail("mem");
+    assert_eq!(tty.metric_details[0].kind, MetricKind::Mem);
+
+    // A metric shown as a *pane* also blocks its popover.
+    let win = main_win(&tty);
+    tty.metric_details.clear();
+    tty.promote_metric_to_pane(win, Direction::Right, MetricKind::Cpu);
+    tty.open_metric_detail("cpu");
+    assert!(
+        tty.metric_details.is_empty(),
+        "CPU is already a pane — no popover"
+    );
 }
 
 #[test]

@@ -121,6 +121,8 @@ fn populated() -> Tty {
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
+        pane_replace_pending: None,
+        pane_replace_confirm: None,
     }
 }
 
@@ -204,6 +206,47 @@ fn metric_pane_view() {
     assert!(
         matches,
         "snapshot `tty-metric-pane` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn pane_replace_pick_view() {
+    // "Replace a pane" pick mode: the grid dims under a scrim with an instruction
+    // pill; a pane click (falling through the scrim) replaces it.
+    let mut tty = populated();
+    tty.pane_replace_pending = Some(crate::settings::MetricKind::Cpu);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-pane-replace-pick.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-pane-replace-pick` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn pane_replace_confirm_view() {
+    // Confirming before replacing a live terminal pane with a metric view.
+    let mut tty = populated();
+    let win = tty.main_window.unwrap();
+    let pane = tty.tabs[tty.active].focus;
+    tty.pane_replace_confirm = Some((win, pane, crate::settings::MetricKind::Cpu));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-pane-replace-confirm.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-pane-replace-confirm` changed — delete its PNG to re-baseline"
     );
 }
 

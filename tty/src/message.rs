@@ -247,6 +247,13 @@ pub enum Message {
     /// Graduate a metric drill-in into a real pane, split off the focused pane in
     /// the given direction (from the popover's "Move to pane" menu).
     PromoteMetricToPane(crate::settings::MetricKind, pane_grid::Direction),
+    /// Enter "replace a pane" pick mode for this metric (from the ⊞ menu): the
+    /// next pane click replaces that pane with the metric.
+    StartPaneReplace(crate::settings::MetricKind),
+    /// Confirm replacing a live pane (end its shell) from the prompt.
+    ConfirmPaneReplace,
+    /// Cancel replace-pick mode or its confirm (a Cancel click, Esc, backdrop).
+    CancelPaneReplace,
     /// Toggle whether the focused pane fills the whole grid (a metric pane's
     /// maximize/restore control).
     ToggleMaximizePane(iced::window::Id),

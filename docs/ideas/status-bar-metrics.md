@@ -273,7 +273,13 @@ that metric's full-size chart, rather than a whole system panel.
      `Pane` content enum, `Term` or `Metric`). The pane renders the same
      `metric_body` a popover does, under a header with maximize (`pane_grid`
      `maximize`/`restore`) and close; `⌘W` closes it like any pane. The metric pane
-     has no PTY and never reaps.
+     has no PTY and never reaps. The menu also offers **Replace a pane…**
+     (`start_pane_replace`): the grid dims under a click-through scrim and the next
+     pane click swaps that pane in place (`replace_pane`), first confirming
+     (`pane_replace_confirm`) when it's a live terminal (replacing ends the shell).
+     A metric can be shown at most once from a bar click: `open_metric_detail` is
+     gated by `metric_is_shown`, so clicking a cell whose metric is already a
+     popover or a pane is a no-op (a different metric still opens).
    - **Direct manipulation in the bar.** When the cells overflow, the bar still
      sheds from the right, but a **wheel scroll** over it slides a window through
      the full list (`Tty::status_bar_scroll`, clamped by `view::status_bar_scroll_max`;

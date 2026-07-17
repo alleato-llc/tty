@@ -145,10 +145,15 @@ offered as three separate cells — **CPU** (the aggregate chart), **CPU Cores**
 (a per-core sparkline grid grouped into Performance and Efficiency cores), and
 **CPU (all)** (both) — so you pick the view you want. Turn on **Keep metric
 popovers open** to pin several side by side at once (each with its own **×**;
-`Esc` closes all). To keep one permanently in view, **graduate it into a pane**:
+`Esc` closes all). Clicking a metric's cell while that metric is already shown (as
+a popover or a pane) does nothing — no duplicate opens; a different metric's cell
+still works. To keep one permanently in view, **graduate it into a pane**:
 the popover's **⊞** control moves the drill-in out of the floating overlay and
 into a real split pane (Left / Right / Up / Down) beside the terminal, resizable
-by dragging the divider like any pane. A metric pane has its own maximize (fill
+by dragging the divider like any pane. **Replace a pane…** in the same menu
+instead swaps an *existing* pane for the metric — the grid dims, you click the
+pane to take over, and replacing a live terminal asks first (its shell ends and
+its scrollback is lost). A metric pane has its own maximize (fill
 the terminal area) and close controls, and `⌘W` closes it too. (The ⊞ control can
 be turned off in the Metrics section for those who prefer popovers only.) The
 samplers reuse the sibling `fdtop` project's `prexp-core`

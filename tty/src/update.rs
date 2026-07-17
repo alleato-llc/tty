@@ -20,7 +20,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         // arrives as Left+Control, not a right button), so treat it as "open the menu" —
         // but only in the main window (detached windows carry no context menu in v1).
         Message::FocusPane(win, pane) => {
-            if state.modifiers.control() && state.main_window == Some(win) {
+            if state.pane_replace_pending.is_some() {
+                // Replace-pick mode: this click chooses the pane to replace.
+                state.request_pane_replace(win, pane);
+            } else if state.modifiers.control() && state.main_window == Some(win) {
                 state.open_pane_menu(pane);
             } else {
                 state.focus_pane(win, pane);
@@ -342,6 +345,16 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 state.promote_metric_to_pane(main, dir, kind);
             }
         }
+        Message::StartPaneReplace(kind) => {
+            state.close_menu();
+            state.start_pane_replace(kind);
+        }
+        Message::ConfirmPaneReplace => {
+            if let Some((win, pane, kind)) = state.pane_replace_confirm.take() {
+                state.replace_pane(win, pane, kind);
+            }
+        }
+        Message::CancelPaneReplace => state.cancel_pane_replace(),
         Message::ToggleMaximizePane(win) => state.toggle_maximize_pane(win),
         Message::CloseMetricPane(win, pane) => {
             state.close_pane(win, pane);
@@ -536,6 +549,11 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     // Escape closes the rename field / settings panel / find bar (when open) instead of
     // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.pane_replace_pending.is_some() || state.pane_replace_confirm.is_some() {
+            // Leave "replace a pane" pick mode / dismiss its confirm.
+            state.cancel_pane_replace();
+            return iced::Task::none();
+        }
         if state.status_bar_edit {
             state.exit_status_bar_edit();
             return iced::Task::none();
