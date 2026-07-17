@@ -1603,6 +1603,16 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
                 Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
             ))
             .push(status_bar_metrics_editor(state));
+        // Threshold controls, only when a graded (CPU/mem/battery) cell is set.
+        if state
+            .settings
+            .status_bar_metrics
+            .iter()
+            .filter_map(|c| crate::settings::MetricKind::from_setting_str(&c.metric))
+            .any(|k| k.is_graded())
+        {
+            col = col.push(thresholds_editor(state));
+        }
         // Clock format options, only when a clock cell is configured.
         if state
             .settings
@@ -1612,6 +1622,43 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
         {
             col = col.push(clock_format_editor(state));
         }
+    }
+    col.into()
+}
+
+/// Per-cell caution/alarm threshold steppers for the graded metrics (CPU, memory,
+/// battery) currently configured. Shown under the metrics editor when any graded
+/// cell is present; keyed by the raw-list index so the messages line up.
+fn thresholds_editor(state: &Tty) -> Element<'_, Message> {
+    use crate::settings::MetricKind;
+    let t = theme::tokens();
+    let mut col = column![caption("ALERT THRESHOLDS")].spacing(10);
+    for (i, cfg) in state.settings.status_bar_metrics.iter().enumerate() {
+        let Some(kind) = MetricKind::from_setting_str(&cfg.metric) else {
+            continue;
+        };
+        let Some((dw, da, inverted)) = kind.default_thresholds() else {
+            continue;
+        };
+        let warn = cfg.warn.unwrap_or(dw);
+        let alarm = cfg.alarm.unwrap_or(da);
+        // Battery alarms when charge falls *below* the cutoffs; note that so the
+        // ordering (alarm < warn) doesn't read as a mistake.
+        let note = if inverted { " (low)" } else { "" };
+        col = col
+            .push(text(format!("{kind}{note}")).size(11).color(t.muted))
+            .push(stepper(
+                "Caution at",
+                format!("{}%", warn as i32),
+                Message::StatusBarMetricThreshold(i, true, -5.0),
+                Message::StatusBarMetricThreshold(i, true, 5.0),
+            ))
+            .push(stepper(
+                "Alarm at",
+                format!("{}%", alarm as i32),
+                Message::StatusBarMetricThreshold(i, false, -5.0),
+                Message::StatusBarMetricThreshold(i, false, 5.0),
+            ));
     }
     col.into()
 }
@@ -1858,6 +1905,9 @@ struct MetricRender {
     label: String,
     series: Vec<(std::collections::VecDeque<f32>, iced::Color)>,
     max: f32,
+    /// Set to a caution/alarm color when a graded cell is past its threshold, so
+    /// `metric_cell` recolors the label (not just the sparkline). `None` = calm.
+    alert: Option<iced::Color>,
 }
 
 /// Resolve one configured metric against the latest sample, or `None` when
@@ -1876,6 +1926,7 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             label: clock_label(state),
             series: vec![],
             max: 1.0,
+            alert: None,
         });
     }
 
@@ -1890,23 +1941,30 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             label,
             series: vec![(hist.clone(), color)],
             max,
+            alert: None,
         };
 
-    let render = match cfg.kind {
+    // For a graded kind (CPU/mem/battery), grade the current value against this
+    // cell's configured thresholds → the series color + an over-threshold alert.
+    let graded: Option<(iced::Color, Option<iced::Color>)> =
+        cfg.kind.default_thresholds().map(|(_, _, inverted)| {
+            let value = match cfg.kind {
+                K::Battery => m.battery.map_or(0.0, |b| b.percent as f32),
+                K::Mem => stats.mem_percent(),
+                _ => stats.cpu_percent,
+            };
+            let g = grade(value, cfg.warn as f32, cfg.alarm as f32, inverted);
+            (grade_color(g), (g != Grade::Calm).then(|| grade_color(g)))
+        });
+    let graded_color = graded.map_or(accent, |(c, _)| c);
+
+    let mut render = match cfg.kind {
         // All three CPU drill-ins share the aggregate cell; only their popover
         // body differs.
-        K::Cpu | K::CpuCores | K::CpuAll => single(
-            mx::cpu_label(stats),
-            &m.cpu_history,
-            100.0,
-            load_color(stats.cpu_percent),
-        ),
-        K::Mem => single(
-            mx::mem_label(stats),
-            &m.mem_history,
-            100.0,
-            load_color(stats.mem_percent()),
-        ),
+        K::Cpu | K::CpuCores | K::CpuAll => {
+            single(mx::cpu_label(stats), &m.cpu_history, 100.0, graded_color)
+        }
+        K::Mem => single(mx::mem_label(stats), &m.mem_history, 100.0, graded_color),
         K::NetRx => single(
             mx::net_rx_label(stats),
             &m.net_rx_history,
@@ -1940,6 +1998,7 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
                 (m.net_tx_history.clone(), t.warn),
             ],
             max: hist_max(&m.net_rx_history).max(hist_max(&m.net_tx_history)),
+            alert: None,
         },
         // Read + write overlaid on one sparkline, on a shared scale so their
         // relative magnitude reads true. Read is the accent; write is `warn`
@@ -1951,6 +2010,7 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
                 (m.disk_w_history.clone(), t.warn),
             ],
             max: hist_max(&m.disk_r_history).max(hist_max(&m.disk_w_history)),
+            alert: None,
         },
         // Uptimes are text, not sparklines: no series (so `metric_cell` renders
         // the label alone). Skip the cell until a reading exists.
@@ -1958,11 +2018,13 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             label: mx::uptime_abbrev(m.system_uptime_secs?),
             series: vec![],
             max: 1.0,
+            alert: None,
         },
         K::Session => MetricRender {
             label: mx::uptime_abbrev(m.session_uptime_secs?),
             series: vec![],
             max: 1.0,
+            alert: None,
         },
         // Load: a sparkline of the 1-minute load, auto-scaled to its recent peak
         // like the rate cells. Skip until a reading exists.
@@ -1972,20 +2034,25 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
                 label: mx::load_label(load[0]),
                 series: vec![(m.load1_history.clone(), accent)],
                 max: hist_max(&m.load1_history),
+                alert: None,
             }
         }
-        // Battery: a fixed 0..100% gauge, colored by charge (low = alarm). Skip
-        // on a machine with no battery.
+        // Battery: a fixed 0..100% gauge, colored by charge against its threshold
+        // (low = alarm). Skip on a machine with no battery.
         K::Battery => {
             let b = m.battery?;
             MetricRender {
                 label: mx::battery_label(&b),
-                series: vec![(m.battery_history.clone(), battery_color(b.percent as f32))],
+                series: vec![(m.battery_history.clone(), graded_color)],
                 max: 100.0,
+                alert: None,
             }
         }
         K::Clock => unreachable!("clock is handled before the stats read"),
     };
+    // A graded cell past its warn/alarm threshold carries the alert color so the
+    // label recolors, not just the sparkline.
+    render.alert = graded.and_then(|(_, alert)| alert);
     Some(render)
 }
 
@@ -2008,9 +2075,11 @@ fn hist_max(history: &std::collections::VecDeque<f32>) -> f32 {
 /// One metric's status-bar cell in its configured `style`: a sparkline of its
 /// series plus the label, or (for `Number`) the label alone.
 fn metric_cell<'a>(style: crate::settings::MetricStyle, r: MetricRender) -> Element<'a, Message> {
+    // A graded cell past its threshold recolors its label to the alert color so
+    // it reads at a glance; otherwise the muted default.
     let label = text(r.label)
         .size(STATUS_BAR_TEXT_SIZE)
-        .color(theme::tokens().muted);
+        .color(r.alert.unwrap_or(theme::tokens().muted));
     // Text-only when there is no plottable data (a text metric like uptime, or a
     // rate metric whose history hasn't landed yet), regardless of style.
     let has_data = r.series.iter().any(|(v, _)| !v.is_empty());
@@ -2062,13 +2131,25 @@ fn metric_popover_card<'a>(
     let expanded = pop.expanded;
     let pinned = state.settings.status_bar_metrics_pinned();
     let t = theme::tokens();
-    let render = metric_render(
-        ResolvedMetric {
-            kind,
-            style: MetricStyle::Sparkline,
-        },
-        state,
-    );
+    // Render off the configured cell (so a graded popover picks up the user's
+    // thresholds); fall back to defaults if somehow not in the list.
+    let resolved = state
+        .settings
+        .status_bar_metrics()
+        .into_iter()
+        .find(|m| m.kind == kind)
+        .unwrap_or_else(|| {
+            let (warn, alarm) = kind
+                .default_thresholds()
+                .map_or((0.0, 0.0), |(w, a, _)| (w, a));
+            ResolvedMetric {
+                kind,
+                style: MetricStyle::Sparkline,
+                warn,
+                alarm,
+            }
+        });
+    let render = metric_render(resolved, state);
 
     // The current size: the user's dragged override, else the compact or
     // expanded default (see `MetricPopover::effective_size`).
@@ -2750,16 +2831,42 @@ fn load_color(percent: f32) -> iced::Color {
     }
 }
 
-/// Grade a battery charge into calm / caution / alarm — inverted from load, since
-/// *low* charge is the concern.
-fn battery_color(percent: f32) -> iced::Color {
-    let t = theme::tokens();
-    if percent <= 20.0 {
-        t.danger
-    } else if percent <= 40.0 {
-        t.warn
+/// A graded cell's alert level against its warn/alarm thresholds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Grade {
+    Calm,
+    Warn,
+    Alarm,
+}
+
+/// Grade `value` against `warn`/`alarm` cutoffs. Normal metrics alarm when the
+/// value climbs *past* the cutoffs (CPU, memory); `inverted` metrics alarm when
+/// it *falls below* them (battery — low charge is the concern).
+fn grade(value: f32, warn: f32, alarm: f32, inverted: bool) -> Grade {
+    if inverted {
+        if value <= alarm {
+            Grade::Alarm
+        } else if value <= warn {
+            Grade::Warn
+        } else {
+            Grade::Calm
+        }
+    } else if value >= alarm {
+        Grade::Alarm
+    } else if value >= warn {
+        Grade::Warn
     } else {
-        t.success
+        Grade::Calm
+    }
+}
+
+/// The theme color for a [`Grade`]: calm / caution / alarm.
+fn grade_color(g: Grade) -> iced::Color {
+    let t = theme::tokens();
+    match g {
+        Grade::Alarm => t.danger,
+        Grade::Warn => t.warn,
+        Grade::Calm => t.success,
     }
 }
 
@@ -2816,13 +2923,28 @@ mod tests {
             ResolvedMetric {
                 kind: MetricKind::Cpu,
                 style,
+                warn: 60.0,
+                alarm: 85.0,
             },
             MetricRender {
                 label: "CPU".to_string(),
                 series: vec![(Default::default(), iced::Color::WHITE)],
                 max: 100.0,
+                alert: None,
             },
         )
+    }
+
+    #[test]
+    fn grade_thresholds_normal_and_inverted() {
+        // Normal (higher = worse), CPU-style warn 60 / alarm 85.
+        assert_eq!(grade(50.0, 60.0, 85.0, false), Grade::Calm);
+        assert_eq!(grade(70.0, 60.0, 85.0, false), Grade::Warn);
+        assert_eq!(grade(90.0, 60.0, 85.0, false), Grade::Alarm);
+        // Inverted (lower = worse), battery-style warn 40 / alarm 20.
+        assert_eq!(grade(80.0, 40.0, 20.0, true), Grade::Calm);
+        assert_eq!(grade(30.0, 40.0, 20.0, true), Grade::Warn);
+        assert_eq!(grade(15.0, 40.0, 20.0, true), Grade::Alarm);
     }
 
     #[test]

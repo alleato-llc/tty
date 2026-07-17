@@ -302,8 +302,11 @@ source serves fdtop; tty consumes it in `metrics.rs`.
   (`sysctl(vm.swapusage)` on macOS, `/proc/meminfo` on Linux). *Shipped.*
 - [ ] **Memory detail** — used/free/wired/compressed breakdown in the memory
   popover, beside the swap line.
-- [ ] **Per-cell thresholds + alerting** — recolor / flash a cell when a metric
-  crosses a configured limit (reuses the load-grade colors).
+- [x] **Per-cell thresholds + alerting** — configurable caution/alarm cutoffs per
+  graded cell (CPU / memory / battery) via `MetricConfig.warn`/`.alarm`, edited
+  with steppers in the Status bar settings pane; over-threshold now recolors the
+  **label** too (not just the sparkline), so it reads at a glance. Rate/load cells
+  are auto-scaled with no fixed grade, so they have no threshold. *Shipped.*
 - [ ] **Ambient peek line** — a 1px load bar along the bottom edge for the
   auto-hidden bar (overlaps the auto-hide feature; see open questions).
 - [ ] **Git branch / dirty state** for the active pane's cwd.

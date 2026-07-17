@@ -223,6 +223,9 @@ pub enum Message {
     /// Move the status-bar metric at this index by a delta (-1 = left, +1 =
     /// right), clamped to the ends.
     StatusBarMetricMove(usize, i32),
+    /// Nudge a graded status-bar metric's caution (`warn=true`) or alarm
+    /// threshold at this index by a percentage-point delta.
+    StatusBarMetricThreshold(usize, bool, f64),
     /// Set the render style (`"sparkline"`, `"number"`) of the status-bar
     /// metric at this index.
     StatusBarMetricStyle(usize, String),

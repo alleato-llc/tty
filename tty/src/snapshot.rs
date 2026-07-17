@@ -748,16 +748,7 @@ fn status_bar_machine_stats_view() {
     // `CPU nn% · MEM used/total` before the grid/tab/font cluster. (populated()
     // pins auto-hide off, so the bar is visible.)
     let mut tty = populated();
-    tty.settings.status_bar_metrics = vec![
-        crate::settings::MetricConfig {
-            metric: "cpu".to_string(),
-            style: "sparkline".to_string(),
-        },
-        crate::settings::MetricConfig {
-            metric: "mem".to_string(),
-            style: "sparkline".to_string(),
-        },
-    ];
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
     tty.metrics.latest = Some(crate::metrics::MachineStats {
         cpu_percent: 72.0,
         mem_used: 41_000_000_000,
@@ -833,6 +824,8 @@ fn metric(kind: &str, style: &str) -> crate::settings::MetricConfig {
     crate::settings::MetricConfig {
         metric: kind.to_string(),
         style: style.to_string(),
+        warn: None,
+        alarm: None,
     }
 }
 
@@ -1114,6 +1107,33 @@ fn seed_load(tty: &mut Tty) {
     tty.metrics.load1_history = [0.6, 0.8, 0.7, 1.0, 1.1, 0.9, 1.3, 1.23]
         .into_iter()
         .collect();
+}
+
+#[test]
+fn status_bar_alert_view() {
+    // A graded cell past its alarm threshold: CPU at 92% recolors both the
+    // sparkline and the label (the louder alert), while memory stays calm.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
+    seed_metric_sample(&mut tty);
+    if let Some(s) = tty.metrics.latest.as_mut() {
+        s.cpu_percent = 92.0;
+    }
+    tty.metrics.cpu_history = [70.0, 78.0, 85.0, 88.0, 90.0, 91.0, 92.0, 92.0]
+        .into_iter()
+        .collect();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-alert.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-alert` changed — delete its PNG to re-baseline"
+    );
 }
 
 #[test]

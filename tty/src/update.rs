@@ -298,6 +298,9 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::StatusBarMetricRemove(idx) => state.remove_status_bar_metric(idx),
         Message::StatusBarMetricMove(idx, delta) => state.move_status_bar_metric(idx, delta),
         Message::StatusBarMetricStyle(idx, style) => state.set_status_bar_metric_style(idx, &style),
+        Message::StatusBarMetricThreshold(idx, warn, delta) => {
+            state.step_status_bar_metric_threshold(idx, warn, delta)
+        }
         Message::SampleMetrics => state.metrics.sample(),
         Message::OpenMetricDetail(metric) => {
             if let Some(kind) = crate::settings::MetricKind::from_setting_str(&metric) {

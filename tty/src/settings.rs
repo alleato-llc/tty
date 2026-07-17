@@ -106,6 +106,27 @@ impl MetricKind {
         matches!(self, MetricKind::Uptime | MetricKind::Session)
     }
 
+    /// The default `(warn, alarm, inverted)` thresholds for a graded cell — a
+    /// bounded 0..100 metric whose cell color grades calm/caution/alarm. `warn`
+    /// and `alarm` are percentages; `inverted` is true when *lower* is the
+    /// concern (battery). `None` for kinds with no fixed 0..100 grade (rates,
+    /// load, text) — they have no threshold.
+    pub fn default_thresholds(self) -> Option<(f64, f64, bool)> {
+        match self {
+            MetricKind::Cpu | MetricKind::CpuCores | MetricKind::CpuAll | MetricKind::Mem => {
+                Some((60.0, 85.0, false))
+            }
+            MetricKind::Battery => Some((40.0, 20.0, true)),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind has a configurable warn/alarm threshold (a bounded 0..100
+    /// grade). See [`Self::default_thresholds`].
+    pub fn is_graded(self) -> bool {
+        self.default_thresholds().is_some()
+    }
+
     /// Whether this kind is one of the CPU drill-ins (they share the aggregate
     /// status-bar cell and sampler; only their popover body differs).
     pub fn is_cpu(self) -> bool {
@@ -229,20 +250,32 @@ impl std::fmt::Display for MetricStyle {
 /// Stored as strings (like `history_cipher` and friends) so an unrecognized
 /// `metric` from a hand-edit or a newer tty parses leniently — dropped by
 /// [`Settings::status_bar_metrics`] rather than failing the whole settings load.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MetricConfig {
     pub metric: String,
     #[serde(default)]
     pub style: String,
+    /// Override the caution threshold (a 0..100 percentage) for a graded cell
+    /// (CPU / memory / battery); absent uses the kind's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warn: Option<f64>,
+    /// Override the alarm threshold; absent uses the kind's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alarm: Option<f64>,
 }
 
-/// A [`MetricConfig`] resolved to its typed metric and style — the form the
-/// status bar and its editor render. Unknown entries are dropped in the resolve
-/// (see [`Settings::status_bar_metrics`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A [`MetricConfig`] resolved to its typed metric, style, and (for graded kinds)
+/// warn/alarm thresholds — the form the status bar and its editor render. Unknown
+/// entries are dropped in the resolve (see [`Settings::status_bar_metrics`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedMetric {
     pub kind: MetricKind,
     pub style: MetricStyle,
+    /// Caution / alarm thresholds (0..100), resolved from the config override or
+    /// the kind's default. Meaningful only for graded kinds
+    /// ([`MetricKind::default_thresholds`]); `0.0` for the rest.
+    pub warn: f64,
+    pub alarm: f64,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -626,10 +659,14 @@ impl Settings {
                 MetricConfig {
                     metric: MetricKind::Cpu.as_setting_str().to_string(),
                     style: MetricStyle::Sparkline.as_setting_str().to_string(),
+                    warn: None,
+                    alarm: None,
                 },
                 MetricConfig {
                     metric: MetricKind::Mem.as_setting_str().to_string(),
                     style: MetricStyle::Sparkline.as_setting_str().to_string(),
+                    warn: None,
+                    alarm: None,
                 },
             ];
         }
@@ -713,9 +750,18 @@ impl Settings {
         self.status_bar_metrics
             .iter()
             .filter_map(|c| {
-                MetricKind::from_setting_str(&c.metric).map(|kind| ResolvedMetric {
-                    kind,
-                    style: MetricStyle::from_setting_str(&c.style),
+                MetricKind::from_setting_str(&c.metric).map(|kind| {
+                    // Resolve thresholds from the override or the kind's default
+                    // (0 for ungraded kinds, which ignore them).
+                    let (dw, da) = kind
+                        .default_thresholds()
+                        .map_or((0.0, 0.0), |(w, a, _)| (w, a));
+                    ResolvedMetric {
+                        kind,
+                        style: MetricStyle::from_setting_str(&c.style),
+                        warn: c.warn.unwrap_or(dw),
+                        alarm: c.alarm.unwrap_or(da),
+                    }
                 })
             })
             .collect()
@@ -745,6 +791,8 @@ impl Settings {
         self.status_bar_metrics.push(MetricConfig {
             metric: kind.as_setting_str().to_string(),
             style: MetricStyle::default().as_setting_str().to_string(),
+            warn: None,
+            alarm: None,
         });
         true
     }
@@ -778,6 +826,25 @@ impl Settings {
             c.style = MetricStyle::from_setting_str(style)
                 .as_setting_str()
                 .to_string();
+        }
+    }
+
+    /// Nudge the caution (`warn`) or alarm threshold of the graded metric at
+    /// `idx` by `delta` percentage points, clamped to 0..=100. No-op for an
+    /// ungraded kind or a bad index.
+    pub fn step_status_bar_metric_threshold(&mut self, idx: usize, warn: bool, delta: f64) {
+        let Some(c) = self.status_bar_metrics.get_mut(idx) else {
+            return;
+        };
+        let Some((dw, da, _)) =
+            MetricKind::from_setting_str(&c.metric).and_then(MetricKind::default_thresholds)
+        else {
+            return;
+        };
+        if warn {
+            c.warn = Some((c.warn.unwrap_or(dw) + delta).clamp(0.0, 100.0));
+        } else {
+            c.alarm = Some((c.alarm.unwrap_or(da) + delta).clamp(0.0, 100.0));
         }
     }
 
