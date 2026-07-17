@@ -114,7 +114,9 @@ second scan.
   panel is a history view, not a live composer.
 - The design deliberately does not persist `command_log` to disk (matching the
   existing no-scrollback-persistence stance) — it's in-memory only, cleared with
-  the rest of scrollback.
+  the rest of scrollback. *Superseded (2026-07-12): persistence now exists as an
+  explicit, off-by-default opt-in — encrypted at rest, command text only, never
+  output. See [ADR 0006](0006-encrypted-history.md).*
 
 ## Follow-up — multi-line paste (2026-07-09)
 

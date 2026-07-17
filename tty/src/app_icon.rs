@@ -9,7 +9,7 @@
 /// off the main thread.
 #[cfg(target_os = "macos")]
 pub fn set_dock_icon(png: &[u8]) {
-    use objc2::ClassType;
+    use objc2::AnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::{MainThreadMarker, NSData};
 

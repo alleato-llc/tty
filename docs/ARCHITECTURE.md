@@ -51,6 +51,14 @@ a clock.
   glob override (e.g. `"tail *" → 200`), falling back to the configured default. See
   [ADR 0004](adr/0004-scrollback-history.md) for why command/output separation is
   built this way instead of shell-integration (OSC 133) or a position-tagging scheme.
+- **`history`** — the pure data side of **encrypted history** (ADR 0006):
+  `PersistedCommandEntry` (id + command text + wall-clock timestamp + pane tag —
+  never output) and `HistoryEvent::{Upsert, Tombstone}`. `TerminalScreen` queues an
+  event whenever `command_log` mutates by explicit user action (new command, Clear,
+  Delete) into `pending_history_events`, drained by the host; window eviction and a
+  RIS reset queue **nothing** (eviction is not deletion). `seed_command_log` loads
+  persisted entries back into the live window at startup. cathode knows nothing of
+  crypto or files — that all lives in the app.
 - **`wake`** — a process-global signal channel. The read loop calls
   `wake::signal()` after each parse (and on shell exit); the UI's subscription awaits
   it. This is what makes repaint **output-driven**: no idle polling, zero cost when
@@ -126,12 +134,79 @@ Thin glue, mirroring `fed`'s module shape:
   flattened per-render row list, not variable-row-height support in `table` itself) to an
   accordion of its captured output lines; a text filter narrows the list, double-clicking
   a row copies its command, and a single `stat("Commands", …)` reports the shown/filtered
-  count.
+  count. **Machine stats** live on the status bar: each `settings.status_bar_metrics`
+  entry (`{ metric, style }`, resolved leniently so an unknown metric is skipped, not
+  fatal) renders as a `rime` `sparkline` (CPU/memory color-graded by load; network/disk
+  rates auto-scaled to their recent peak; the combined Net/Disk I/O metrics overlay two
+  series on one scale) or a plain number, in configured order. `visible_metric_count`
+  sheds cells from the right when the tracked window width can't hold them all, so the
+  bar never wraps. Clicking a cell emits `OpenMetricDetail`; `metric_detail_popover`
+  then floats a card (bottom-centered over the bar, layered in `main_view` with an
+  `opaque` click-away backdrop that fires `CloseMetricDetail`) with the metric's
+  full-size `rime` `line_chart` over its retained history — or a "collecting" note when
+  the history isn't chartable yet. The chart carries an "Expand" / "Collapse" affordance
+  (`metric_detail_expanded`): compact is bottom-anchored, expanded is a large centered
+  card sized off the window; hovering a point reads its value off the chart
+  (`LineChart::hover_format`). `Esc` closes it (checked before the other overlays).
+- **`metrics`** — the status-bar sampler: `Metrics::sample()` reads CPU ticks + memory
+  (required) and network / disk byte counters (optional) from `fdtop`'s `prexp-core`,
+  folds the aggregate CPU% from tick deltas and the throughput rates from byte-counter
+  deltas over the `Instant`-measured interval, and keeps a bounded per-metric history
+  for the sparklines. It also keeps **per-core** CPU% history (`core_history`) for the
+  CPU drill-in's per-core grid, plus each core's cached P/E `perf_levels` (static, read
+  once from `prexp-core`'s `cpu_perf_levels()`). Network / disk have macOS samplers only for now (via
+  `prexp-ffi` — `sysctl NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other
+  platforms those reads error and are dropped, so the metric simply shows no rate. A
+  failed CPU/memory read is warned and skipped — a stats hiccup never disturbs the
+  terminal.
 - **`subscription`** — key events + per-window geometry (`Focused`/`Resized`/`Moved` via
   `listen_with`'s window id) + `window::close_events` + **one always-on output stream** fed
   by `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
   While a detached window is settling after a drag, a short-lived timer polls the drag-dock
   debounce.
+- **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the
+  full key-derivation pipeline and its open refinement options are surveyed in
+  `docs/history-keys.md`), opt-in
+  and off by default: `crypto` (AEAD wrap/unwrap, a self-describing `cipher_id` byte
+  selecting ChaCha20-Poly1305 or dorado's Threefish-256 construction — the latter a
+  sibling path dependency, `../dorado/rust/crates/dorado-engine`), `keychain` (a random
+  256-bit key from the OS keychain via `keyring` — the platform backend features are
+  load-bearing; without them keyring silently compiles a non-persisting mock),
+  `passphrase` (the alternative key source: a user-chosen KDF — Argon2id default,
+  now at 64 MiB/t=3 for a local unlock, scrypt, or PBKDF2-SHA256 — over a user
+  passphrase; the algorithm, salt, and params live in a plaintext, self-describing
+  KDF sidecar that is authoritative for an existing archive; the launch boots
+  *locked* until unlocked). Either key source then fans the master into
+  per-purpose subkeys (`HistoryKeys`, `dorado_engine::kdf::derive_from_key_with`)
+  under a family-matched PRF (`settings::HistoryFanout`: BLAKE3 for ChaCha,
+  Skein-512 for Threefish, `Auto` by default, user-overridable, fixed at enable),
+  so the master never encrypts anything directly. `segment`
+  (one encrypted file per local calendar day, opaque random filename, atomic
+  temp-file+rename writes), `manifest` (the encrypted date→segment index),
+  `writer` (a single background thread, the sole writer — panes funnel
+  `HistoryEvent`s to it over an `mpsc` from `drain_effects`, so concurrent panes need
+  no file locking), and `reauth` (macOS LocalAuthentication gating: opening the
+  Scrollback History panel requires Touch ID / the device password once per session,
+  plus an optional idle interval; fail-closed; a no-op off macOS). Every start is
+  **async** (thread + oneshot into an `iced::Task` — the keychain read can block on an
+  OS dialog and must never run on the UI thread; an in-app explainer precedes the first
+  keychain access), landing in `apply_history_started`, which raises a command-id floor
+  on every screen (`reserve_command_ids` — deferred starts must not mint ids that
+  collide with today's archived entries) and seeds the newest entries into the first
+  tab only if its log is still empty; the panel's "Load older day" pages back through
+  the archive, and archived rows carry stable `(date, id)` targets so Clear/Delete on
+  them go straight to the writer. **Untracked** tabs (⌘⇧T; ○-marked, badged in the
+  panel, chip in the status bar) and untracked *sessions* (the `history_session_start`
+  setting's record/ask/untracked, or `tty --untracked`) suppress at the source: the
+  screen queues no events at all, and an untracked session does zero crypto and stays
+  untracked until relaunch. The settings History section drills into a
+  full-height archive browser behind the same gate (own paging cursor;
+  right-click a row to Copy or Delete… it — Delete confirms via `rime::dialog`
+  and tombstones through the writer; double-click copies; entries dropped when
+  the browser or settings close). Failure policy throughout: refuse to load, warn,
+  never crash — and a toggle-on failure reverts the setting rather than persisting
+  "on but broken". Deleting the archive is a separate, dialog-confirmed **Reset**
+  action; the off-toggle never deletes anything.
 
 ## Windows (detachable tabs)
 
@@ -149,10 +224,18 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   palette; a base16 import / panel edit becomes a "Custom" palette (chrome derived from
   the terminal colors). The settings panel also carries a **Highlight active tab**
   toggle (the rime `tabs` strip takes a `TabBarStyle { highlight_active, text_size }`,
-  so accent-ink vs. subtler emphasis is host-tunable) and a read-only **Keys** section
-  documenting the shortcuts. `tty.settings.json` persists the theme name, font
-  family/size, any custom palette, the active-tab highlight flag, and the
-  "Transparency On Blur" amount. `window_opacity()` drives
+  so accent-ink vs. subtler emphasis is host-tunable), an **auto-hide status bar**
+  toggle (on by default; when on, `main_view` drops the bar from the column and
+  floats it back over the bottom edge via a `stack` only while
+  `status_bar_revealed()` — the pointer within `STATUS_BAR_REVEAL_ZONE` of the
+  bottom — so toggling it never reflows the pane grid), and a read-only **Keys**
+  section documenting the shortcuts.
+  `tty.settings.json` persists the theme name, font family/size, any custom palette,
+  the active-tab highlight flag, the status-bar auto-hide flag, the
+  "Transparency On Blur" amount, and the encrypted-history fields
+  (`encrypted_history_enabled`, `history_key_source`, `history_kdf`,
+  `history_fanout`, `history_cipher`, `history_reauth_interval_minutes`,
+  `history_session_start`). `window_opacity()` drives
   a uniform per-surface fade when the window loses focus (no runtime window-opacity API
   in iced 0.14), clamped to `settings::MIN_OPACITY` so it tops out at 95% and never
   fades to an invisible, unrecoverable window.

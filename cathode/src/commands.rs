@@ -34,6 +34,37 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
     pi == p.len()
 }
 
+/// Strip a leading shell prompt from a captured command line, best-effort.
+///
+/// A recorded command is the full echoed terminal row — prompt included
+/// (`user@host dir % cargo build`), because the grid is the only place the
+/// fully-resolved text exists. Displays keep the whole line (it's honest
+/// context), but *copying* a command wants just the part the user typed.
+/// Heuristic: cut after the **earliest** occurrence of a common prompt
+/// terminator (`$ `, `% `, `# `, `❯ `, `> `). Earliest matters: in
+/// `user@host % echo $ hi` the real prompt marker precedes any marker-like
+/// text inside the command itself. A line with no marker (an exotic prompt),
+/// or where stripping would leave nothing, comes back unchanged — failing
+/// toward copying too much context rather than eating the command.
+pub fn strip_prompt(line: &str) -> &str {
+    const MARKERS: [&str; 5] = ["$ ", "% ", "# ", "❯ ", "> "];
+    let earliest = MARKERS
+        .iter()
+        .filter_map(|marker| line.find(marker).map(|at| at + marker.len()))
+        .min();
+    match earliest {
+        Some(start) => {
+            let rest = line[start..].trim_start();
+            if rest.is_empty() {
+                line
+            } else {
+                rest
+            }
+        }
+        None => line,
+    }
+}
+
 /// The output-line cap for `command`: the first matching `(pattern, cap)` override
 /// in order, else `default`.
 pub fn resolve_output_cap(command: &str, overrides: &[(String, usize)], default: usize) -> usize {

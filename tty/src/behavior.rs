@@ -46,6 +46,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         font_size: DEFAULT_FONT_SIZE,
         modifiers: Modifiers::default(),
         window_height: 600.0,
+        window_width: 0.0,
         hovered_tab: None,
         selection: None,
         search: None,
@@ -70,6 +71,32 @@ pub(crate) fn headless(n: usize) -> Tty {
         tab_drag: None,
         window_bounds: std::collections::HashMap::new(),
         last_detached_move: None,
+        history_writer: None,
+        history_read: None,
+        scrollback_archived: Vec::new(),
+        scrollback_archive_cursor: None,
+        history_start_failed: false,
+        confirm_reset_history: false,
+        last_history_auth: None,
+        history_reauth_pending: false,
+        show_settings_history: false,
+        settings_history: Vec::new(),
+        settings_history_cursor: None,
+        settings_history_selected: None,
+        settings_history_scroll: 0.0,
+        confirm_delete_settings_row: None,
+        history_starting: false,
+        history_id_floor: 0,
+        history_locked: false,
+        passphrase_prompt: None,
+        session_untracked: false,
+        untracked_forced_by_cli: false,
+        show_session_start_prompt: false,
+        metrics: Default::default(),
+        metric_detail: None,
+        metric_detail_expanded: false,
+        metric_detail_size: None,
+        metric_detail_resize: None,
     }
 }
 
@@ -223,6 +250,26 @@ fn clear_scrollback_empties_the_active_pane_without_touching_the_live_grid() {
 }
 
 #[test]
+fn clear_scrollback_and_toggle_scrollback_panel_close_the_pane_menu() {
+    // Both are pane-menu items ("Clear Scrollback" / "View Scrollback History"); picking
+    // either must dismiss the menu it was chosen from, same as every other menu action
+    // (Split, ClosePane, OpenLink, …) — a stale open menu used to render invisibly under
+    // the scrollback panel and only became visible once the panel's layering was fixed
+    // to render underneath the menu.
+    let mut tty = headless(1);
+    tty.menu = Some((MenuKind::Pane, tty.pointer));
+    let _ = update(&mut tty, Message::ClearScrollback);
+    assert!(tty.menu.is_none(), "Clear Scrollback closes the menu");
+
+    tty.menu = Some((MenuKind::Pane, tty.pointer));
+    let _ = update(&mut tty, Message::ToggleScrollbackPanel);
+    assert!(
+        tty.menu.is_none(),
+        "View Scrollback History closes the menu"
+    );
+}
+
+#[test]
 fn scrollback_panel_toggles_open_and_closed_and_clears_its_query_on_close() {
     let mut tty = headless(1);
     assert!(!tty.show_scrollback);
@@ -253,6 +300,184 @@ fn scrollback_row_activate_selects_and_copies() {
     // The clipboard write is a real iced::Task, not directly inspectable here;
     // the important thing is update() didn't just no-op it away.
     let _ = task;
+}
+
+#[test]
+fn scrollback_row_right_click_opens_the_menu_targeting_the_resolved_row() {
+    let mut tty = headless(1);
+    let target = crate::state::HistoryRowTarget::Live(crate::state::ScrollbackTarget::Command {
+        log_index: 2,
+        text: "ls -la".to_string(),
+    });
+    let _ = update(
+        &mut tty,
+        Message::ScrollbackRowRightClick(0, target.clone()),
+    );
+    assert_eq!(tty.scrollback_selected, Some(0));
+    assert_eq!(
+        tty.menu,
+        Some((MenuKind::ScrollbackRow(target), tty.pointer))
+    );
+}
+
+#[test]
+fn copy_scrollback_target_closes_the_menu() {
+    let mut tty = headless(1);
+    let target = crate::state::HistoryRowTarget::Live(crate::state::ScrollbackTarget::Command {
+        log_index: 0,
+        text: "ls".to_string(),
+    });
+    tty.menu = Some((MenuKind::ScrollbackRow(target.clone()), tty.pointer));
+    let task = update(&mut tty, Message::CopyScrollbackTarget(target));
+    assert!(tty.menu.is_none());
+    // The clipboard write is a real iced::Task, not directly inspectable here;
+    // the important thing is update() didn't just no-op it away.
+    let _ = task;
+}
+
+/// Feed a screen a `$ ls` command with two output lines, boundary-marked exactly
+/// like `update::handle_key` does live — the same fixture pattern
+/// `snapshot::scrollback_panel_view` uses.
+fn command_log_fixture(tty: &Tty) {
+    let term = tty.active_term().unwrap();
+    let mut screen = term.screen.lock();
+    let mut parser = cathode::parser::TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml\r\nsrc\r\n", &mut screen);
+}
+
+#[test]
+fn clear_scrollback_target_empties_a_commands_text_and_output() {
+    // Blanking the output alone would make "Clear" a silent no-op for any command
+    // that captured zero output (`cd`, `export`, `alias`, ...) — the row (and the
+    // command's own text) must empty too, so choosing Clear always has a visible
+    // effect.
+    let mut tty = headless(1);
+    command_log_fixture(&tty);
+    let _ = update(
+        &mut tty,
+        Message::ClearScrollbackTarget(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Command {
+                log_index: 0,
+                text: "$ ls".to_string(),
+            },
+        )),
+    );
+    let term = tty.active_term().unwrap();
+    let screen = term.screen.lock();
+    let entry = &screen.command_log[0];
+    assert_eq!(entry.command, "", "Clear blanks the command's own text too");
+    assert!(entry.output.is_empty(), "and its captured output");
+}
+
+#[test]
+fn clear_scrollback_target_blanks_a_single_output_line() {
+    let mut tty = headless(1);
+    command_log_fixture(&tty);
+    let _ = update(
+        &mut tty,
+        Message::ClearScrollbackTarget(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Output {
+                log_index: 0,
+                line: 0,
+                text: "Cargo.toml".to_string(),
+            },
+        )),
+    );
+    let term = tty.active_term().unwrap();
+    let screen = term.screen.lock();
+    let entry = &screen.command_log[0];
+    assert_eq!(entry.output[0], "", "only the targeted line blanks");
+    assert_eq!(entry.output[1], "src", "sibling lines are untouched");
+}
+
+#[test]
+fn delete_scrollback_target_removes_a_command_entry_entirely() {
+    let mut tty = headless(1);
+    command_log_fixture(&tty);
+    tty.scrollback_selected = Some(1);
+    tty.scrollback_expanded.insert(0);
+    let _ = update(
+        &mut tty,
+        Message::DeleteScrollbackTarget(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Command {
+                log_index: 0,
+                text: "$ ls".to_string(),
+            },
+        )),
+    );
+    let term = tty.active_term().unwrap();
+    assert!(
+        term.screen.lock().command_log.is_empty(),
+        "Delete removes the whole entry, not just its text"
+    );
+    assert_eq!(
+        tty.scrollback_selected, None,
+        "the deletion shifted row indices, so a stale selection must clear"
+    );
+    assert!(
+        tty.scrollback_expanded.is_empty(),
+        "and any expanded-command indices, for the same reason"
+    );
+}
+
+#[test]
+fn delete_scrollback_target_shifts_later_commands_down() {
+    let mut tty = headless(1);
+    {
+        let term = tty.active_term().unwrap();
+        let mut screen = term.screen.lock();
+        let mut parser = cathode::parser::TermParser::new();
+        parser.process(b"$ ls", &mut screen);
+        screen.mark_command_boundary(50);
+        parser.process(b"\r\nCargo.toml\r\n", &mut screen);
+        parser.process(b"$ pwd", &mut screen);
+        screen.mark_command_boundary(50);
+        parser.process(b"\r\n/tmp\r\n", &mut screen);
+    }
+    let _ = update(
+        &mut tty,
+        Message::DeleteScrollbackTarget(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Command {
+                log_index: 0,
+                text: "$ ls".to_string(),
+            },
+        )),
+    );
+    let term = tty.active_term().unwrap();
+    let screen = term.screen.lock();
+    assert_eq!(screen.command_log.len(), 1);
+    assert_eq!(
+        screen.command_log[0].command, "$ pwd",
+        "the surviving command shifts down to index 0"
+    );
+}
+
+#[test]
+fn delete_scrollback_target_is_a_no_op_for_an_output_line() {
+    // Only a command's header row can be deleted; an output line just has "Clear"
+    // (blank it), not "Delete" — no row concept to remove for a single line.
+    let mut tty = headless(1);
+    command_log_fixture(&tty);
+    let _ = update(
+        &mut tty,
+        Message::DeleteScrollbackTarget(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Output {
+                log_index: 0,
+                line: 0,
+                text: "Cargo.toml".to_string(),
+            },
+        )),
+    );
+    let term = tty.active_term().unwrap();
+    let screen = term.screen.lock();
+    assert_eq!(
+        screen.command_log.len(),
+        1,
+        "the command entry is untouched"
+    );
+    assert_eq!(screen.command_log[0].output, vec!["Cargo.toml", "src"]);
 }
 
 #[test]
@@ -437,6 +662,70 @@ fn settings_panel_toggles_and_switches_section() {
     let esc = Key::Named(iced::keyboard::key::Named::Escape);
     let _ = update(&mut tty, Message::Key(esc, Modifiers::default()));
     assert!(!tty.show_settings);
+}
+
+#[test]
+fn settings_history_viewer_toggles_and_clears_when_closed() {
+    // With no active archive (history off) there's no re-auth gate and
+    // nothing to page in — the viewer just opens empty and closes clean.
+    let mut tty = headless(1);
+    assert!(!tty.show_settings_history);
+    let _ = update(&mut tty, Message::ToggleSettingsHistoryViewer);
+    assert!(tty.show_settings_history);
+    assert!(tty.settings_history.is_empty());
+
+    tty.settings_history_selected = Some(3);
+    tty.settings_history_scroll = 40.0;
+    tty.confirm_delete_settings_row = Some(crate::state::ArchivedTarget {
+        date: chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+        id: 1,
+        started_at_epoch_ms: 0,
+        pane_tag: "Tab 0".to_string(),
+        command: "$ ls".to_string(),
+    });
+    let _ = update(&mut tty, Message::ToggleSettingsHistoryViewer);
+    assert!(!tty.show_settings_history);
+    assert_eq!(tty.settings_history_selected, None, "selection cleared");
+    assert_eq!(tty.settings_history_scroll, 0.0, "scroll reset");
+    assert_eq!(
+        tty.confirm_delete_settings_row, None,
+        "a pending delete confirmation dies with the browser"
+    );
+}
+
+#[test]
+fn closing_settings_also_closes_the_archive_viewer() {
+    let mut tty = headless(1);
+    tty.show_settings = true;
+    let _ = update(&mut tty, Message::ToggleSettingsHistoryViewer);
+    assert!(tty.show_settings_history);
+    let _ = update(&mut tty, Message::ToggleSettings);
+    assert!(!tty.show_settings);
+    assert!(
+        !tty.show_settings_history,
+        "paged-in decrypted entries must not linger behind a closed settings panel"
+    );
+}
+
+#[test]
+fn reset_encrypted_history_confirmation_opens_and_cancels_without_touching_anything() {
+    // `confirm_reset_encrypted_history` itself (the actual deletion) isn't
+    // exercised here, for the same reason `history::keychain` isn't in
+    // `history_integration`: it targets the real, hardcoded
+    // `history::history_dir()` on whatever machine runs the test, not an
+    // injectable temp path — a real side effect a test run shouldn't cause.
+    // This only checks the request/cancel state transitions, which touch
+    // nothing on disk.
+    let mut tty = headless(1);
+    assert!(!tty.confirm_reset_history);
+    let _ = update(&mut tty, Message::RequestResetEncryptedHistory);
+    assert!(tty.confirm_reset_history);
+    let _ = update(&mut tty, Message::CancelResetEncryptedHistory);
+    assert!(!tty.confirm_reset_history);
+    assert!(
+        tty.history_writer.is_none(),
+        "cancelling must not start or touch the writer"
+    );
 }
 
 #[test]
@@ -1068,6 +1357,26 @@ fn base16_and_palette_messages() {
 }
 
 #[test]
+fn history_reauth_interval_step_reaches_and_stays_at_zero() {
+    let mut tty = headless(1);
+    assert_eq!(tty.settings.history_reauth_interval_minutes(), 0);
+    let _ = update(&mut tty, Message::HistoryReauthIntervalStep(5));
+    assert_eq!(tty.settings.history_reauth_interval_minutes(), 5);
+    let _ = update(&mut tty, Message::HistoryReauthIntervalStep(-5));
+    assert_eq!(
+        tty.settings.history_reauth_interval_minutes(),
+        0,
+        "one decrement from 5 must land exactly on 0"
+    );
+    let _ = update(&mut tty, Message::HistoryReauthIntervalStep(-5));
+    assert_eq!(
+        tty.settings.history_reauth_interval_minutes(),
+        0,
+        "decrementing below 0 stays at 0, never wraps"
+    );
+}
+
+#[test]
 fn set_unfocused_opacity_message_clamps_and_persists() {
     let mut tty = headless(1);
     let _ = update(&mut tty, Message::SetUnfocusedOpacity(0.5));
@@ -1166,4 +1475,993 @@ fn pointer_released_message_finishes_an_armed_tab_drag() {
     tty.pointer = iced::Point::new(22.0, TAB_TEAR_THRESHOLD + 10.0);
     let _ = update(&mut tty, Message::PointerReleased);
     assert_eq!(tty.detached.len(), 1, "a long drag detaches on release");
+}
+
+/// End-to-end encrypted-history tests: the real background writer thread, the
+/// real `state.rs` wiring (`drain_effects` -> `drain_pane` -> `Writer::send`,
+/// `delete_archived_target`/`clear_archived_target`), and the real on-disk
+/// segment/manifest format, all together. Each module (`crypto`, `segment`,
+/// `manifest`, `writer`) already has its own focused unit tests; this is the
+/// layer above that, proving they're wired together correctly.
+///
+/// Deliberately not exercised here: `history::keychain::get_or_create_key`,
+/// since it would read/write an actual "tty" entry in whatever OS credential
+/// store the machine running the test has — a real side effect on a
+/// developer's or CI runner's system that a test run shouldn't cause. Its
+/// crypto correctness is covered by `history::crypto`'s tests; the OS
+/// integration itself is left to a manual check on a real build.
+mod history_integration {
+    use std::time::{Duration, Instant};
+
+    use zeroize::Zeroizing;
+
+    use cathode::history::{HistoryEvent, PersistedCommandEntry};
+    use cathode::screen::TerminalScreen;
+
+    use crate::history::crypto::{Cipher, Key};
+    use crate::history::manifest::Manifest;
+    use crate::history::writer::{Writer, MANIFEST_FILENAME};
+    use crate::history::{local_date_from_epoch_ms, segment, tmp_path};
+    use crate::state::ArchivedTarget;
+
+    use super::*;
+
+    // Three days apart so the two timestamps land on different local calendar
+    // dates in any timezone (clear of DST-transition edge cases) — the actual
+    // dates don't matter, only that they differ.
+    const DAY1_MS: u64 = 1_700_000_000_000;
+    const DAY2_MS: u64 = DAY1_MS + 3 * 86_400_000;
+
+    fn tmp_dir(name: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "tty-history-integration-{}-{name}-{}",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
+        std::fs::create_dir_all(&p).expect("create temp history dir");
+        p
+    }
+
+    fn key() -> Zeroizing<Key> {
+        Zeroizing::new([0x77; 32])
+    }
+
+    /// The per-purpose children [`key`] fans out into — what the writer,
+    /// `history_read`, and every on-disk file actually use (the master never
+    /// encrypts anything directly; see `HistoryKeys`).
+    fn keys() -> crate::history::HistoryKeys {
+        crate::history::HistoryKeys::from_master(&[0x77; 32], dorado_engine::kdf::KdfPrf::Skein512)
+    }
+
+    fn entry(id: u32, command: &str, started_at_epoch_ms: u64) -> PersistedCommandEntry {
+        PersistedCommandEntry {
+            id,
+            command: command.to_string(),
+            started_at_epoch_ms,
+            pane_tag: "Tab 0".to_string(),
+        }
+    }
+
+    fn manifest_path(dir: &std::path::Path) -> std::path::PathBuf {
+        dir.join(MANIFEST_FILENAME)
+    }
+
+    /// Poll until `cond` is true, or panic after `timeout` — the writer
+    /// thread applies events asynchronously (over an `mpsc` channel), so a
+    /// test has to wait for its effect on disk rather than assume it already
+    /// happened by the time `Writer::send` returns.
+    fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) {
+        let start = Instant::now();
+        while !cond() {
+            assert!(
+                start.elapsed() < timeout,
+                "timed out waiting for the history writer thread"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_completed_command_round_trips_through_the_real_writer_thread_into_a_day_segment() {
+        let dir = tmp_dir("roundtrip");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+
+        let mut tty = headless(1);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+
+        command_log_fixture(&tty);
+        tty.drain_effects();
+
+        wait_until(Duration::from_secs(2), || {
+            Manifest::load(&manifest_path(&dir), &keys().manifest)
+                .map(|m| m.latest_date().is_some())
+                .unwrap_or(false)
+        });
+
+        let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+        let date = manifest.latest_date().expect("a day was written");
+        let filename = manifest
+            .segment_filename(date)
+            .expect("segment registered")
+            .to_string();
+        let entries = segment::load(&dir.join(&filename), &keys().segments).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "$ ls");
+
+        // And it's consumable by the same seeding path startup uses.
+        let mut screen = TerminalScreen::new(80, 24);
+        screen.seed_command_log(entries);
+        assert_eq!(screen.command_log.len(), 1);
+        assert_eq!(screen.command_log[0].command, "$ ls");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// macOS-only because the gate itself is (`Tty::history_reauth_reason`
+    /// returns `None` off macOS). The prompt task `update` returns is dropped
+    /// here, never executed, so no real Touch ID dialog appears during the
+    /// test run — `reauth::authenticate` defers its native call until the
+    /// future is polled, which this test relies on.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn opening_the_panel_with_an_active_archive_is_gated_behind_reauth() {
+        let dir = tmp_dir("reauth-gate");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+
+        let mut tty = headless(1);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+
+        // The ⌘⇧H chord — the path that historically bypassed the gate.
+        // `Key` here is the crypto key alias (via `use super::super::...`),
+        // so the keyboard key needs its full path.
+        let chord = || {
+            Message::Key(
+                iced::keyboard::Key::Character("h".into()),
+                cmd() | Modifiers::SHIFT,
+            )
+        };
+        let _ = update(&mut tty, chord());
+        assert!(
+            !tty.show_scrollback,
+            "the panel must wait for the auth prompt, not open immediately"
+        );
+        assert!(tty.history_reauth_pending);
+
+        // Pressing the chord again while the prompt is up must not stack a
+        // second prompt (or open anything).
+        let _ = update(&mut tty, chord());
+        assert!(!tty.show_scrollback);
+
+        // A failed/cancelled prompt leaves it closed and clears the guard.
+        let _ = update(
+            &mut tty,
+            Message::HistoryReauthResult(crate::message::ReauthFor::ScrollbackPanel, false),
+        );
+        assert!(!tty.show_scrollback);
+        assert!(!tty.history_reauth_pending);
+
+        // A successful prompt opens it and records the auth time.
+        let _ = update(&mut tty, chord());
+        let _ = update(
+            &mut tty,
+            Message::HistoryReauthResult(crate::message::ReauthFor::ScrollbackPanel, true),
+        );
+        assert!(tty.show_scrollback);
+        assert!(tty.last_history_auth.is_some());
+
+        // Close (never prompts), reopen: within the same session and with no
+        // idle interval configured, no new prompt is due — it opens directly.
+        let _ = update(&mut tty, chord());
+        assert!(!tty.show_scrollback);
+        let _ = update(&mut tty, chord());
+        assert!(
+            tty.show_scrollback,
+            "once per session: the second open needs no fresh prompt"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Same macOS-only/lazy-prompt caveats as the panel gate test above.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn settings_archive_viewer_is_gated_and_pages_in_the_archive_on_unlock() {
+        let dir = tmp_dir("viewer-gate");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+        writer.send(HistoryEvent::Upsert(entry(1, "$ ls", DAY1_MS)));
+        wait_until(Duration::from_secs(2), || {
+            Manifest::load(&manifest_path(&dir), &keys().manifest)
+                .map(|m| m.latest_date().is_some())
+                .unwrap_or(false)
+        });
+
+        let mut tty = headless(1);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+
+        // NOTE: `page_older` reads from the real `history_dir()`, not `dir` —
+        // so this test asserts the gate + unlock flow, not the paged
+        // contents (covered by the panel paging path, which shares
+        // `history::page_older`).
+        let _ = update(&mut tty, Message::ToggleSettingsHistoryViewer);
+        assert!(
+            !tty.show_settings_history,
+            "the viewer shows the same protected data as the panel, so it must wait for auth"
+        );
+        assert!(tty.history_reauth_pending);
+
+        let _ = update(
+            &mut tty,
+            Message::HistoryReauthResult(crate::message::ReauthFor::SettingsHistory, true),
+        );
+        assert!(tty.show_settings_history);
+        assert!(!tty.history_reauth_pending);
+        assert!(tty.last_history_auth.is_some());
+
+        let _ = update(&mut tty, Message::ToggleSettingsHistoryViewer);
+        assert!(!tty.show_settings_history, "second toggle hides and clears");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_and_clear_on_an_archived_entry_only_touch_their_own_day_segment() {
+        let dir = tmp_dir("archive-target");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+
+        let mut tty = headless(1);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+
+        // Two entries on day 1, one on day 2.
+        {
+            let w = tty.history_writer.as_ref().unwrap();
+            w.send(HistoryEvent::Upsert(entry(1, "$ ls", DAY1_MS)));
+            w.send(HistoryEvent::Upsert(entry(2, "$ pwd", DAY1_MS)));
+            w.send(HistoryEvent::Upsert(entry(3, "$ whoami", DAY2_MS)));
+        }
+
+        let day1 = local_date_from_epoch_ms(DAY1_MS);
+        let day2 = local_date_from_epoch_ms(DAY2_MS);
+
+        wait_until(Duration::from_secs(2), || {
+            Manifest::load(&manifest_path(&dir), &keys().manifest)
+                .map(|m| m.segment_filename(day2).is_some())
+                .unwrap_or(false)
+        });
+
+        tty.delete_archived_target(&ArchivedTarget {
+            date: day1,
+            id: 1,
+            started_at_epoch_ms: DAY1_MS,
+            pane_tag: "Tab 0".to_string(),
+            command: "$ ls".to_string(),
+        });
+
+        wait_until(Duration::from_secs(2), || {
+            let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+            let Some(filename) = manifest.segment_filename(day1) else {
+                return false;
+            };
+            let entries = segment::load(&dir.join(filename), &keys().segments).unwrap();
+            entries.len() == 1 && entries[0].id == 2
+        });
+
+        let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+        let day2_filename = manifest
+            .segment_filename(day2)
+            .expect("day 2 is still registered")
+            .to_string();
+        let day2_entries = segment::load(&dir.join(&day2_filename), &keys().segments).unwrap();
+        assert_eq!(
+            day2_entries.len(),
+            1,
+            "deleting a day-1 entry must not touch day 2's segment"
+        );
+        assert_eq!(day2_entries[0].command, "$ whoami");
+
+        tty.clear_archived_target(&ArchivedTarget {
+            date: day1,
+            id: 2,
+            started_at_epoch_ms: DAY1_MS,
+            pane_tag: "Tab 0".to_string(),
+            command: "$ pwd".to_string(),
+        });
+
+        wait_until(Duration::from_secs(2), || {
+            let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+            let filename = manifest.segment_filename(day1).unwrap();
+            let entries = segment::load(&dir.join(filename), &keys().segments).unwrap();
+            entries.len() == 1 && entries[0].command.is_empty()
+        });
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The settings archive browser's per-row Delete asks first: Request
+    /// opens the confirmation dialog, Cancel touches nothing, and Confirm
+    /// tombstones the entry through the real writer thread and drops it from
+    /// the browser's paged-in copy immediately.
+    #[test]
+    fn settings_archive_row_delete_confirms_then_tombstones() {
+        let dir = tmp_dir("viewer-delete");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+
+        let mut tty = headless(1);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+
+        {
+            let w = tty.history_writer.as_ref().unwrap();
+            w.send(HistoryEvent::Upsert(entry(1, "$ ls", DAY1_MS)));
+            w.send(HistoryEvent::Upsert(entry(2, "$ pwd", DAY1_MS)));
+        }
+        let day1 = local_date_from_epoch_ms(DAY1_MS);
+        wait_until(Duration::from_secs(2), || {
+            Manifest::load(&manifest_path(&dir), &keys().manifest)
+                .map(|m| m.segment_filename(day1).is_some())
+                .unwrap_or(false)
+        });
+
+        // The browser with day 1 paged in — populated directly, since
+        // `page_older` reads the real `history_dir()`, not `dir` (same
+        // caveat as the viewer gate test).
+        tty.show_settings_history = true;
+        tty.settings_history = vec![entry(1, "$ ls", DAY1_MS), entry(2, "$ pwd", DAY1_MS)];
+        tty.settings_history_cursor = Some(day1);
+
+        let target = ArchivedTarget {
+            date: day1,
+            id: 1,
+            started_at_epoch_ms: DAY1_MS,
+            pane_tag: "Tab 0".to_string(),
+            command: "$ ls".to_string(),
+        };
+
+        // Right-click → "Delete…" only opens the confirmation.
+        let _ = update(
+            &mut tty,
+            Message::RequestDeleteSettingsHistoryRow(target.clone()),
+        );
+        assert_eq!(tty.confirm_delete_settings_row.as_ref(), Some(&target));
+        assert_eq!(tty.settings_history.len(), 2, "nothing deleted yet");
+
+        // Cancel closes the dialog and touches nothing.
+        let _ = update(&mut tty, Message::CancelDeleteSettingsHistoryRow);
+        assert_eq!(tty.confirm_delete_settings_row, None);
+        assert_eq!(tty.settings_history.len(), 2);
+
+        // Request again and confirm: gone from the browser immediately, and
+        // the tombstone reaches the day segment on disk.
+        let _ = update(&mut tty, Message::RequestDeleteSettingsHistoryRow(target));
+        let _ = update(&mut tty, Message::ConfirmDeleteSettingsHistoryRow);
+        assert_eq!(tty.confirm_delete_settings_row, None);
+        assert_eq!(tty.settings_history.len(), 1);
+        assert_eq!(tty.settings_history[0].id, 2);
+
+        wait_until(Duration::from_secs(2), || {
+            let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+            let Some(filename) = manifest.segment_filename(day1) else {
+                return false;
+            };
+            let entries = segment::load(&dir.join(filename), &keys().segments).unwrap();
+            entries.len() == 1 && entries[0].id == 2
+        });
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The pure launch-decision matrix: the CLI flag beats everything, "ask"
+    /// only fires when the feature is on, and "record" routes by key source.
+    #[test]
+    fn startup_history_plan_matrix() {
+        use crate::state::{startup_history_plan, StartupPlan};
+
+        let mut s = crate::settings::Settings::default();
+
+        // Feature off: nothing — unless the CLI flag forces untracked.
+        assert_eq!(startup_history_plan(&s, false), StartupPlan::Off);
+        assert_eq!(startup_history_plan(&s, true), StartupPlan::Untracked);
+
+        s.encrypted_history_enabled = Some(true);
+        assert_eq!(startup_history_plan(&s, false), StartupPlan::StartKeychain);
+        assert_eq!(
+            startup_history_plan(&s, true),
+            StartupPlan::Untracked,
+            "the CLI flag beats an enabled feature"
+        );
+
+        s.history_key_source = Some("passphrase".to_string());
+        assert_eq!(
+            startup_history_plan(&s, false),
+            StartupPlan::LockedPassphrase
+        );
+
+        s.history_session_start = Some("ask".to_string());
+        assert_eq!(startup_history_plan(&s, false), StartupPlan::Ask);
+        assert_eq!(
+            startup_history_plan(&s, true),
+            StartupPlan::Untracked,
+            "the CLI flag also skips the chooser"
+        );
+
+        s.history_session_start = Some("untracked".to_string());
+        assert_eq!(startup_history_plan(&s, false), StartupPlan::Untracked);
+
+        // Unrecognized value degrades to Record, the long-standing behavior.
+        s.history_session_start = Some("banana".to_string());
+        s.history_key_source = None;
+        assert_eq!(startup_history_plan(&s, false), StartupPlan::StartKeychain);
+    }
+
+    /// D2: an untracked session is immutable. Toggling the history setting
+    /// on persists it (for the next launch) but starts nothing now; even a
+    /// stray `Started` arriving would be dropped.
+    #[test]
+    fn an_untracked_session_stays_untracked_when_history_is_enabled_mid_session() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome, StartedHandle};
+
+        let mut tty = headless(1);
+        tty.session_untracked = true;
+
+        let _ = update(&mut tty, Message::SetEncryptedHistoryEnabled(true));
+        assert_eq!(
+            tty.settings.encrypted_history_enabled,
+            Some(true),
+            "the setting persists for the next launch"
+        );
+        assert!(tty.passphrase_prompt.is_none(), "no enable dialog");
+        assert!(tty.history_writer.is_none(), "nothing starts");
+
+        // Belt-and-braces: even a Started arriving somehow is dropped.
+        let dir = tmp_dir("untracked-session");
+        let started = crate::history::start_with_key_in(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            key(),
+            dorado_engine::kdf::KdfPrf::Skein512,
+        )
+        .unwrap();
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Startup,
+                HistoryStartOutcome::Ready(StartedHandle::new(started)),
+            ),
+        );
+        assert!(tty.history_writer.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // And the startup task is a no-op in an untracked session.
+        let _ = tty.startup_history_task();
+        assert!(!tty.history_starting);
+    }
+
+    /// The startup chooser: "Stay untracked" flips the whole session (every
+    /// existing tab and screen); "Record" begins the start instead.
+    #[test]
+    fn session_start_chooser_routes_both_answers() {
+        let mut tty = headless(2);
+        tty.settings.encrypted_history_enabled = Some(true);
+        tty.show_session_start_prompt = true;
+
+        let _ = update(&mut tty, Message::SessionStartChoice(false));
+        assert!(!tty.show_session_start_prompt);
+        assert!(tty.session_untracked);
+        for tab in &tty.tabs {
+            assert!(tab.untracked, "every existing tab is marked");
+            for (_, term) in tab.panes.iter() {
+                assert!(term.screen.lock().untracked(), "and every screen");
+            }
+        }
+
+        // Record path (fresh state): the async start kicks off.
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        tty.show_session_start_prompt = true;
+        let _ = update(&mut tty, Message::SessionStartChoice(true));
+        assert!(!tty.show_session_start_prompt);
+        assert!(!tty.session_untracked);
+        assert!(
+            tty.history_starting,
+            "keychain source: the start task is in flight"
+        );
+    }
+
+    /// An untracked tab's commands never reach the writer, even with the
+    /// feature fully running — while a tracked tab's (the control) do. The
+    /// suppression lives in cathode; this proves the tty wiring around it.
+    #[test]
+    fn an_untracked_tabs_commands_never_reach_the_writer() {
+        let dir = tmp_dir("untracked-tab");
+        let writer = Writer::spawn(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            keys(),
+            Manifest::default(),
+        );
+
+        let mut tty = headless(2);
+        tty.history_writer = Some(writer);
+        tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
+        tty.tabs[1].untracked = true;
+        for (_, term) in tty.tabs[1].panes.iter_mut() {
+            term.screen.lock().set_untracked(true);
+        }
+
+        let run = |term: &crate::state::Term, cmd: &str| {
+            let mut screen = term.screen.lock();
+            let mut parser = cathode::parser::TermParser::new();
+            parser.process(format!("$ {cmd}").as_bytes(), &mut screen);
+            screen.mark_command_boundary(50);
+            parser.process(b"\r\ndone\r\n", &mut screen);
+        };
+        run(tty.tabs[0].focused().unwrap(), "tracked-cmd");
+        run(tty.tabs[1].focused().unwrap(), "secret-cmd");
+        tty.drain_effects();
+
+        // The tracked command lands in a day segment; the untracked one never
+        // does. Waiting for the tracked write to appear first makes the
+        // negative assertion meaningful (the writer has demonstrably caught
+        // up past both sends).
+        wait_until(Duration::from_secs(2), || {
+            Manifest::load(&manifest_path(&dir), &keys().manifest)
+                .map(|m| m.latest_date().is_some())
+                .unwrap_or(false)
+        });
+        let manifest = Manifest::load(&manifest_path(&dir), &keys().manifest).unwrap();
+        let date = manifest.latest_date().unwrap();
+        let filename = manifest.segment_filename(date).unwrap().to_string();
+        let entries = segment::load(&dir.join(&filename), &keys().segments).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "$ tracked-cmd");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ⌘⇧T routes to the untracked-tab path and plain ⌘T stays tracked —
+    /// and the live `CommandEntry` rows carry the badge flag the panel shows.
+    #[test]
+    fn untracked_flag_shows_on_live_rows_and_shifted_chord_is_distinct() {
+        let mut tty = headless(1);
+        for (_, term) in tty.tabs[0].panes.iter_mut() {
+            term.screen.lock().set_untracked(true);
+        }
+        command_log_fixture(&tty);
+        {
+            let term = tty.active_term().unwrap();
+            let screen = term.screen.lock();
+            assert!(screen.command_log[0].untracked, "the row carries the badge");
+        }
+
+        // The chord dispatch: ⌘⇧T must not fall through to the plain
+        // new-tab arm. Headless tabs have no real shell, so the spawn is
+        // expected to still *attempt* an untracked tab — observable as the
+        // tab count either growing with `untracked: true` or (no shell in
+        // the test env) not growing at all; what must never happen is a new
+        // *tracked* tab.
+        let before = tty.tabs.len();
+        let _ = update(
+            &mut tty,
+            Message::Key(
+                iced::keyboard::Key::Character("t".into()),
+                cmd() | Modifiers::SHIFT,
+            ),
+        );
+        if tty.tabs.len() > before {
+            assert!(tty.tabs.last().unwrap().untracked);
+            assert!(tty
+                .tabs
+                .last()
+                .unwrap()
+                .focused()
+                .is_some_and(|t| t.screen.lock().untracked()));
+        }
+    }
+
+    /// With the passphrase key source, the enable dialog's fields validate
+    /// inline without touching anything, and Cancel leaves the setting off.
+    #[test]
+    fn passphrase_enable_prompts_and_validates_before_any_crypto() {
+        use crate::state::PassphrasePromptKind;
+
+        let mut tty = headless(1);
+        tty.settings.history_key_source = Some("passphrase".to_string());
+
+        let _ = update(&mut tty, Message::SetEncryptedHistoryEnabled(true));
+        let prompt = tty.passphrase_prompt.as_ref().expect("dialog opens");
+        assert_eq!(prompt.kind, PassphrasePromptKind::Enable);
+
+        // Too short: inline error, nothing starts.
+        let _ = update(&mut tty, Message::HistoryPassphraseChanged("short".into()));
+        let _ = update(&mut tty, Message::SubmitHistoryPassphrase);
+        let prompt = tty.passphrase_prompt.as_ref().unwrap();
+        assert!(prompt.error.is_some());
+        assert!(!prompt.busy);
+        assert!(!tty.history_starting);
+
+        // Mismatched confirm: inline error, nothing starts.
+        let _ = update(
+            &mut tty,
+            Message::HistoryPassphraseChanged("long enough now".into()),
+        );
+        let _ = update(
+            &mut tty,
+            Message::HistoryPassphraseConfirmChanged("but different".into()),
+        );
+        let _ = update(&mut tty, Message::SubmitHistoryPassphrase);
+        let prompt = tty.passphrase_prompt.as_ref().unwrap();
+        assert_eq!(
+            prompt.error.as_deref(),
+            Some("The two entries don't match.")
+        );
+        assert!(!tty.history_starting);
+
+        // Cancel: prompt gone, setting still off, nothing installed.
+        let _ = update(&mut tty, Message::CancelHistoryPassphrase);
+        assert!(tty.passphrase_prompt.is_none());
+        assert!(!tty.settings.encrypted_history_enabled());
+        assert!(tty.history_writer.is_none());
+    }
+
+    /// A wrong passphrase keeps history locked with an inline retry — it is
+    /// not the red "broken archive" banner and never flips the setting.
+    #[test]
+    fn wrong_passphrase_stays_locked_with_an_inline_error() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome};
+        use crate::state::{PassphrasePrompt, PassphrasePromptKind};
+
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        tty.settings.history_key_source = Some("passphrase".to_string());
+        tty.history_locked = true;
+        let mut prompt = PassphrasePrompt::new(PassphrasePromptKind::Unlock);
+        prompt.busy = true;
+        tty.passphrase_prompt = Some(prompt);
+        tty.history_starting = true;
+
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Unlock,
+                HistoryStartOutcome::WrongPassphrase,
+            ),
+        );
+        assert!(tty.history_locked, "stays locked");
+        assert!(tty.history_writer.is_none());
+        assert!(!tty.history_start_failed, "not the broken-archive banner");
+        assert_eq!(tty.settings.encrypted_history_enabled, Some(true));
+        let prompt = tty.passphrase_prompt.as_ref().expect("prompt stays open");
+        assert!(!prompt.busy);
+        assert!(prompt
+            .error
+            .as_deref()
+            .unwrap()
+            .starts_with("Wrong passphrase"));
+        assert!(prompt.draft.is_empty(), "the wrong entry is wiped");
+    }
+
+    /// Dismissing the unlock prompt keeps the session locked (and recording
+    /// off); the settings banner's Unlock… reopens it.
+    #[test]
+    fn dismissed_unlock_stays_locked_and_reopens_from_settings() {
+        use crate::state::{PassphrasePrompt, PassphrasePromptKind};
+
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        tty.settings.history_key_source = Some("passphrase".to_string());
+        tty.history_locked = true;
+        tty.passphrase_prompt = Some(PassphrasePrompt::new(PassphrasePromptKind::Unlock));
+
+        let _ = update(&mut tty, Message::CancelHistoryPassphrase);
+        assert!(tty.passphrase_prompt.is_none());
+        assert!(tty.history_locked);
+
+        let _ = update(&mut tty, Message::OpenHistoryUnlock);
+        let prompt = tty.passphrase_prompt.as_ref().expect("reopens");
+        assert_eq!(prompt.kind, PassphrasePromptKind::Unlock);
+
+        // The passphrase source never starts anything at boot — the startup
+        // task is a no-op (locked until the user submits).
+        let _ = tty.startup_history_task();
+        assert!(
+            !tty.history_starting,
+            "no keychain task for the passphrase source"
+        );
+    }
+
+    /// A successful unlock through the real passphrase path (tempdir): the
+    /// submitted passphrase derives the key, opens the archive, and clears
+    /// the locked state.
+    #[test]
+    fn a_correct_passphrase_unlocks_and_installs_the_writer() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome, StartedHandle};
+        use crate::state::{PassphrasePrompt, PassphrasePromptKind};
+
+        let dir = tmp_dir("unlock-ok");
+        // The real derive + open, exactly what `start_async` runs on its
+        // thread (driven synchronously here — behavior tests can't poll
+        // iced's executor).
+        let started = crate::history::passphrase::start_in(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            crate::settings::HistoryKdf::Argon2id,
+            dorado_engine::kdf::KdfPrf::Skein512,
+            "a fine passphrase",
+        )
+        .unwrap();
+
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        tty.settings.history_key_source = Some("passphrase".to_string());
+        tty.history_locked = true;
+        tty.passphrase_prompt = Some(PassphrasePrompt::new(PassphrasePromptKind::Unlock));
+        tty.history_starting = true;
+
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Unlock,
+                HistoryStartOutcome::Ready(StartedHandle::new(started)),
+            ),
+        );
+        assert!(!tty.history_locked);
+        assert!(tty.passphrase_prompt.is_none());
+        assert!(tty.history_writer.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The enable toggle must not touch the keychain (or anything else): it
+    /// only opens the one enable dialog, Cancel walks it back, and the
+    /// keychain-source "Continue" is what actually begins the start.
+    #[test]
+    fn enabling_history_opens_the_dialog_and_touches_nothing() {
+        use crate::state::PassphrasePromptKind;
+
+        let mut tty = headless(1);
+        let _ = update(&mut tty, Message::SetEncryptedHistoryEnabled(true));
+        let prompt = tty.passphrase_prompt.as_ref().expect("dialog opens");
+        assert_eq!(prompt.kind, PassphrasePromptKind::Enable);
+        assert!(tty.history_writer.is_none());
+        assert!(
+            !tty.settings.encrypted_history_enabled(),
+            "the setting commits only when the async start succeeds"
+        );
+
+        let _ = update(&mut tty, Message::CancelHistoryPassphrase);
+        assert!(tty.passphrase_prompt.is_none());
+        assert!(!tty.settings.encrypted_history_enabled());
+
+        // Keychain "Continue" closes the dialog and kicks off the start.
+        let _ = update(&mut tty, Message::SetEncryptedHistoryEnabled(true));
+        let _ = update(&mut tty, Message::ConfirmEnableHistory);
+        assert!(tty.passphrase_prompt.is_none());
+        assert!(tty.history_starting, "the keychain start is in flight");
+
+        // While a start is in flight, the toggle is inert (no second dialog).
+        let _ = update(&mut tty, Message::SetEncryptedHistoryEnabled(true));
+        assert!(tty.passphrase_prompt.is_none());
+    }
+
+    /// Failure semantics differ by origin, deliberately: an *enable* failure
+    /// reverts the setting (never "on but broken"); a *startup* failure
+    /// keeps it (the archive still exists, this session just can't open it).
+    #[test]
+    fn start_failure_reverts_the_setting_only_for_enable() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome};
+
+        let mut tty = headless(1);
+        tty.history_starting = true;
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(HistoryStartOrigin::Enable, HistoryStartOutcome::Failed),
+        );
+        assert!(!tty.history_starting);
+        assert!(tty.history_start_failed);
+        assert_eq!(tty.settings.encrypted_history_enabled, Some(false));
+
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(HistoryStartOrigin::Startup, HistoryStartOutcome::Failed),
+        );
+        assert!(tty.history_start_failed);
+        assert_eq!(
+            tty.settings.encrypted_history_enabled,
+            Some(true),
+            "a startup failure keeps the setting on"
+        );
+    }
+
+    /// A successful start installs the writer, raises the command-id floor
+    /// past the seeded ids on every screen, and seeds only an empty live log
+    /// — a log with pre-start commands keeps them, unseeded.
+    #[test]
+    fn ready_installs_writer_raises_id_floor_and_seeds_only_an_empty_log() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome, StartedHandle};
+
+        let build_started = |name: &str| {
+            let dir = tmp_dir(name);
+            // Archive two entries so the seed is non-empty and the floor is
+            // max(id) + 1 = 8.
+            let mut manifest = Manifest::default();
+            let date = local_date_from_epoch_ms(DAY1_MS);
+            let filename = manifest.segment_filename_or_create(date, segment::random_filename);
+            segment::save(
+                &dir.join(&filename),
+                Cipher::ChaCha20Poly1305,
+                &keys().segments,
+                &[entry(5, "$ ls", DAY1_MS), entry(7, "$ pwd", DAY1_MS)],
+            )
+            .unwrap();
+            manifest.set_count(date, 2);
+            manifest
+                .save(
+                    &dir.join(MANIFEST_FILENAME),
+                    Cipher::ChaCha20Poly1305,
+                    &keys().manifest,
+                )
+                .unwrap();
+            (
+                dir.clone(),
+                crate::history::start_with_key_in(
+                    dir,
+                    Cipher::ChaCha20Poly1305,
+                    key(),
+                    dorado_engine::kdf::KdfPrf::Skein512,
+                )
+                .unwrap(),
+            )
+        };
+
+        // Empty live log: seeded.
+        let (dir, started) = build_started("ready-empty");
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Startup,
+                HistoryStartOutcome::Ready(StartedHandle::new(started)),
+            ),
+        );
+        assert!(tty.history_writer.is_some());
+        assert_eq!(tty.history_id_floor, 8);
+        {
+            let term = tty.active_term().unwrap();
+            let screen = term.screen.lock();
+            assert_eq!(screen.command_log.len(), 2, "empty log gets the seed");
+            assert_eq!(screen.command_log[0].command, "$ ls");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Pre-start commands in the log: kept, not mixed with the seed.
+        let (dir, started) = build_started("ready-nonempty");
+        let mut tty = headless(1);
+        tty.settings.encrypted_history_enabled = Some(true);
+        command_log_fixture(&tty);
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Startup,
+                HistoryStartOutcome::Ready(StartedHandle::new(started)),
+            ),
+        );
+        assert!(tty.history_writer.is_some());
+        assert_eq!(tty.history_id_floor, 8, "the floor applies regardless");
+        {
+            let term = tty.active_term().unwrap();
+            let screen = term.screen.lock();
+            assert_eq!(screen.command_log.len(), 1, "not seeded over live entries");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Disabling while a start is in flight wins: the late `Started` is
+    /// dropped (its writer thread exits with it), nothing is installed.
+    #[test]
+    fn a_start_that_resolves_after_disable_is_dropped() {
+        use crate::message::{HistoryStartOrigin, HistoryStartOutcome, StartedHandle};
+
+        let dir = tmp_dir("late-start");
+        let started = crate::history::start_with_key_in(
+            dir.clone(),
+            Cipher::ChaCha20Poly1305,
+            key(),
+            dorado_engine::kdf::KdfPrf::Skein512,
+        )
+        .unwrap();
+
+        let mut tty = headless(1);
+        tty.history_starting = true;
+        // encrypted_history_enabled defaults to off — as if the user toggled
+        // it off (or never had it on) while the startup task ran.
+        let _ = update(
+            &mut tty,
+            Message::HistoryStarted(
+                HistoryStartOrigin::Startup,
+                HistoryStartOutcome::Ready(StartedHandle::new(started)),
+            ),
+        );
+        assert!(!tty.history_starting);
+        assert!(tty.history_writer.is_none(), "the late Started is dropped");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_writer_restarted_after_a_simulated_crash_still_writes_correctly() {
+        // Simulates a crash mid-compaction: a good segment + manifest already
+        // on disk, plus a stray `.tmp` next to each (a save that never got to
+        // the rename step). A restarted writer thread, pointed at the same
+        // directory, must load the last-good state and keep writing
+        // correctly, unaffected by the stray files.
+        let dir = tmp_dir("crash-replay");
+        let manifest_p = manifest_path(&dir);
+
+        let mut manifest = Manifest::default();
+        let date = local_date_from_epoch_ms(DAY1_MS);
+        let filename = manifest.segment_filename_or_create(date, segment::random_filename);
+        let segment_p = dir.join(&filename);
+        segment::save(
+            &segment_p,
+            Cipher::ChaCha20Poly1305,
+            &keys().segments,
+            &[entry(1, "$ ls", DAY1_MS)],
+        )
+        .unwrap();
+        manifest.set_count(date, 1);
+        manifest
+            .save(&manifest_p, Cipher::ChaCha20Poly1305, &keys().manifest)
+            .unwrap();
+
+        std::fs::write(tmp_path(&segment_p), b"garbage, not a valid wrapped blob").unwrap();
+        std::fs::write(tmp_path(&manifest_p), b"garbage, not a valid wrapped blob").unwrap();
+
+        let reloaded = Manifest::load(&manifest_p, &keys().manifest).unwrap();
+        assert_eq!(
+            reloaded.segment_filename(date),
+            Some(filename.as_str()),
+            "unaffected by the stray .tmp files"
+        );
+
+        let writer = Writer::spawn(dir.clone(), Cipher::ChaCha20Poly1305, keys(), reloaded);
+        writer.send(HistoryEvent::Upsert(entry(2, "$ pwd", DAY1_MS)));
+
+        wait_until(Duration::from_secs(2), || {
+            segment::load(&segment_p, &keys().segments)
+                .map(|e| e.len() == 2)
+                .unwrap_or(false)
+        });
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

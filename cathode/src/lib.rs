@@ -7,6 +7,7 @@
 //! iced-free — it's pure terminal emulation, embeddable by any front-end.
 
 pub mod commands;
+pub mod history;
 pub mod parser;
 pub mod pty;
 pub mod screen;

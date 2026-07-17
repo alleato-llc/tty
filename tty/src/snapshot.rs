@@ -15,6 +15,7 @@ use iced::Font;
 use cathode::parser::TermParser;
 use cathode::screen::TerminalScreen;
 
+use crate::message::Message;
 use crate::state::{MenuKind, Tab, Term, Tty, DEFAULT_FONT_SIZE};
 use crate::theme::Theme;
 use crate::view::root_view;
@@ -55,6 +56,7 @@ fn populated() -> Tty {
         font_size: DEFAULT_FONT_SIZE,
         modifiers: iced::keyboard::Modifiers::default(),
         window_height: 600.0,
+        window_width: 0.0,
         hovered_tab: None,
         selection: None,
         search: None,
@@ -64,7 +66,13 @@ fn populated() -> Tty {
         scrollback_selected: None,
         scrollback_scroll: 0.0,
         scrollback_expanded: std::collections::HashSet::new(),
-        settings: Default::default(),
+        // The status bar now auto-hides by default; pin it visible for the
+        // general chrome fixtures so they keep exercising it (the dedicated
+        // status-bar tests override this to exercise auto-hide).
+        settings: crate::settings::Settings {
+            status_bar_autohide: Some(false),
+            ..Default::default()
+        },
         show_settings: false,
         settings_section: 0,
         base16_input: String::new(),
@@ -79,6 +87,32 @@ fn populated() -> Tty {
         tab_drag: None,
         window_bounds: std::collections::HashMap::new(),
         last_detached_move: None,
+        history_writer: None,
+        history_read: None,
+        scrollback_archived: Vec::new(),
+        scrollback_archive_cursor: None,
+        history_start_failed: false,
+        confirm_reset_history: false,
+        last_history_auth: None,
+        history_reauth_pending: false,
+        show_settings_history: false,
+        settings_history: Vec::new(),
+        settings_history_cursor: None,
+        settings_history_selected: None,
+        settings_history_scroll: 0.0,
+        confirm_delete_settings_row: None,
+        history_starting: false,
+        history_id_floor: 0,
+        history_locked: false,
+        passphrase_prompt: None,
+        session_untracked: false,
+        untracked_forced_by_cli: false,
+        show_session_start_prompt: false,
+        metrics: Default::default(),
+        metric_detail: None,
+        metric_detail_expanded: false,
+        metric_detail_size: None,
+        metric_detail_resize: None,
     }
 }
 
@@ -256,6 +290,340 @@ fn scrollback_panel_view() {
 }
 
 #[test]
+fn scrollback_cleared_command_row_view() {
+    // What a command row looks like after "Clear" (blanks the command's own text
+    // and its output, per `TerminalScreen::clear_command_output`) — a real render
+    // check that a blank command text doesn't render as something broken/misaligned.
+    let mut screen = TerminalScreen::new(56, 6);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml  src  target\r\n", &mut screen);
+    parser.process(b"$ cd /tmp", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\n", &mut screen);
+    parser.process(b"$ ", &mut screen);
+    screen.clear_command_output(0);
+
+    let tab = Term {
+        screen: Arc::new(Mutex::new(screen)),
+        pty: None,
+        title: "zsh".into(),
+        alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
+    };
+    let mut tty = Tty {
+        tabs: vec![Tab::new(tab)],
+        ..populated()
+    };
+    tty.show_scrollback = true;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-scrollback-cleared-row.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-scrollback-cleared-row` changed — delete its PNG to re-baseline"
+    );
+}
+
+/// A `Tty` with the scrollback panel open over a single recorded `$ ls` command —
+/// the shared fixture for the real-widget-tree right-click dispatch tests below.
+fn tty_with_open_scrollback_panel() -> Tty {
+    let mut screen = TerminalScreen::new(56, 6);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml  src  target\r\n", &mut screen);
+    parser.process(b"$ ", &mut screen);
+
+    let tab = Term {
+        screen: Arc::new(Mutex::new(screen)),
+        pty: None,
+        title: "zsh".into(),
+        alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
+    };
+    let mut tty = Tty {
+        tabs: vec![Tab::new(tab)],
+        ..populated()
+    };
+    tty.show_scrollback = true;
+    tty
+}
+
+/// Assert `events`, simulated at the "$ ls" header row, dispatch a
+/// `ScrollbackRowRightClick` for that row through the real view tree — table →
+/// rime's `modal` → chrome — proving the hit-test/event-capture chain
+/// (`opaque`/`Stack`/`mouse_area` nesting) actually delivers the press instead of
+/// it being swallowed or misrouted to something else (e.g. the pane underneath).
+fn assert_dispatches_scrollback_right_click(events: Vec<iced::Event>) {
+    let tty = tty_with_open_scrollback_panel();
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let _ = sim.snapshot(&crate::state::theme(&tty)); // force a layout pass
+    sim.point_at(iced::Point::new(300.0, 273.0)); // over the "$ ls" header row
+    let statuses = sim.simulate(events);
+    assert_eq!(
+        statuses[statuses.len() - 2], // the ButtonPressed, one before the trailing release
+        iced::event::Status::Captured,
+        "the table (or something above it) must claim the press: {statuses:?}"
+    );
+    let messages: Vec<_> = sim.into_messages().collect();
+    assert!(
+        messages.iter().any(|m| matches!(
+            m,
+            Message::ScrollbackRowRightClick(0, crate::state::HistoryRowTarget::Live(crate::state::ScrollbackTarget::Command { log_index: 0, text }))
+                if text == "$ ls"
+        )),
+        "expected a ScrollbackRowRightClick for the header row, got {messages:?}"
+    );
+}
+
+#[test]
+fn scrollback_row_right_click_dispatches_through_the_real_widget_tree() {
+    assert_dispatches_scrollback_right_click(vec![
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Right,
+        )),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Right,
+        )),
+    ]);
+}
+
+#[test]
+fn scrollback_row_ctrl_click_dispatches_through_the_real_widget_tree() {
+    // macOS's secondary-click convention (Ctrl held on a *left* press) must resolve
+    // to the same right-click menu as a real right button — this is the exact bug
+    // reported live: a Ctrl+trackpad-click on a header row toggled its expand state
+    // (the left-click behavior) instead of opening the copy/clear menu.
+    assert_dispatches_scrollback_right_click(vec![
+        iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(
+            iced::keyboard::Modifiers::CTRL,
+        )),
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+}
+
+#[test]
+fn scrollback_output_row_context_menu_view() {
+    // Right-clicking an output row in the scrollback panel opens its copy/clear menu
+    // (no "Delete" — there's no row concept to remove for a single line), anchored
+    // over the panel — same fixture as `scrollback_panel_view`.
+    let mut screen = TerminalScreen::new(56, 6);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml  src  target\r\n", &mut screen);
+    parser.process(b"$ ", &mut screen);
+
+    let tab = Term {
+        screen: Arc::new(Mutex::new(screen)),
+        pty: None,
+        title: "zsh".into(),
+        alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
+    };
+    let mut tty = Tty {
+        tabs: vec![Tab::new(tab)],
+        ..populated()
+    };
+    tty.show_scrollback = true;
+    let at = iced::Point::new(220.0, 160.0);
+    tty.pointer = at;
+    tty.scrollback_selected = Some(1);
+    tty.menu = Some((
+        MenuKind::ScrollbackRow(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Output {
+                log_index: 0,
+                line: 0,
+                text: "Cargo.toml  src  target".to_string(),
+            },
+        )),
+        at,
+    ));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-scrollback-row-menu.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-scrollback-row-menu` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn scrollback_command_row_context_menu_view() {
+    // Right-clicking a command's header row gets a "Delete" item too (below a
+    // separator), unlike an output row's menu — same fixture as
+    // `scrollback_output_row_context_menu_view`, just targeting the header.
+    let mut screen = TerminalScreen::new(56, 6);
+    let mut parser = TermParser::new();
+    parser.process(b"$ ls", &mut screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\nCargo.toml  src  target\r\n", &mut screen);
+    parser.process(b"$ ", &mut screen);
+
+    let tab = Term {
+        screen: Arc::new(Mutex::new(screen)),
+        pty: None,
+        title: "zsh".into(),
+        alive: Arc::new(AtomicBool::new(true)),
+        dirty: Arc::new(AtomicBool::new(false)),
+        activity: false,
+    };
+    let mut tty = Tty {
+        tabs: vec![Tab::new(tab)],
+        ..populated()
+    };
+    tty.show_scrollback = true;
+    let at = iced::Point::new(220.0, 160.0);
+    tty.pointer = at;
+    tty.scrollback_selected = Some(0);
+    tty.menu = Some((
+        MenuKind::ScrollbackRow(crate::state::HistoryRowTarget::Live(
+            crate::state::ScrollbackTarget::Command {
+                log_index: 0,
+                text: "$ ls".to_string(),
+            },
+        )),
+        at,
+    ));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-scrollback-command-row-menu.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-scrollback-command-row-menu` changed — delete its PNG to re-baseline"
+    );
+}
+
+/// A `Tty` sitting in Settings → History with the drill-in archive browser
+/// open over a handful of archived commands spanning two days. `age_from_*`
+/// renders relative to now, so pin the timestamps off `Utc::now()` to keep the
+/// ages sensible (5m / 2h / yesterday) whenever the snapshot is regenerated.
+fn tty_in_archive_browser() -> (Tty, Vec<cathode::history::PersistedCommandEntry>) {
+    let now = chrono::Utc::now().timestamp_millis() as u64;
+    let min = 60_000u64;
+    let hr = 60 * min;
+    let day = 24 * hr;
+    let entries = vec![
+        cathode::history::PersistedCommandEntry {
+            id: 12,
+            command: "$ cargo nextest run -p tty".into(),
+            started_at_epoch_ms: now - 4 * min,
+            pane_tag: "zsh".into(),
+        },
+        cathode::history::PersistedCommandEntry {
+            id: 11,
+            command: "$ git push origin main".into(),
+            started_at_epoch_ms: now - 2 * hr,
+            pane_tag: "zsh".into(),
+        },
+        cathode::history::PersistedCommandEntry {
+            id: 9,
+            command: "$ docker compose up -d".into(),
+            started_at_epoch_ms: now - 5 * hr,
+            pane_tag: "build".into(),
+        },
+        cathode::history::PersistedCommandEntry {
+            id: 4,
+            command: "$ rg --hidden TODO src/".into(),
+            started_at_epoch_ms: now - day - 3 * hr,
+            pane_tag: "zsh".into(),
+        },
+        cathode::history::PersistedCommandEntry {
+            id: 2,
+            command: "$ ssh deploy@edge-01 systemctl restart tty".into(),
+            started_at_epoch_ms: now - day - 6 * hr,
+            pane_tag: "ops".into(),
+        },
+    ];
+    let cursor =
+        crate::history::local_date_from_epoch_ms(entries.last().unwrap().started_at_epoch_ms);
+    let tty = Tty {
+        tabs: vec![Tab::new(painted_term("zsh", 56, 6, b"$ "))],
+        show_settings: true,
+        settings_section: 3,
+        show_settings_history: true,
+        settings_history: entries.clone(),
+        settings_history_cursor: Some(cursor),
+        settings_history_selected: Some(1),
+        ..populated()
+    };
+    (tty, entries)
+}
+
+#[test]
+fn settings_history_browser_view() {
+    // Settings → History, drilled into the archive browser: the "‹ Back" /
+    // "Archived Commands" / "Load older day" header, the "archived back to
+    // <date>" caption, and the monospace command table with one row selected.
+    let (tty, _) = tty_in_archive_browser();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-browser.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-browser` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_history_row_context_menu_view() {
+    // Right-clicking an archived row opens its Copy / Delete… menu (the
+    // per-row actions the archive browser adds over the read-only list).
+    let (mut tty, entries) = tty_in_archive_browser();
+    let e = &entries[1];
+    let target = crate::state::ArchivedTarget {
+        date: crate::history::local_date_from_epoch_ms(e.started_at_epoch_ms),
+        id: e.id,
+        started_at_epoch_ms: e.started_at_epoch_ms,
+        pane_tag: e.pane_tag.clone(),
+        command: e.command.clone(),
+    };
+    let at = iced::Point::new(300.0, 210.0);
+    tty.pointer = at;
+    tty.menu = Some((MenuKind::SettingsHistoryRow(target), at));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-row-menu.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-row-menu` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn tab_context_menu_view() {
     // Right-clicking a tab opens its menu (new tab / split / close tab).
     let mut tty = populated();
@@ -273,5 +641,429 @@ fn tab_context_menu_view() {
     assert!(
         matches,
         "snapshot `tty-tab-menu` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_machine_stats_view() {
+    // Machine stats enabled with a landed sample: the status bar leads with
+    // `CPU nn% · MEM used/total` before the grid/tab/font cluster. (populated()
+    // pins auto-hide off, so the bar is visible.)
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![
+        crate::settings::MetricConfig {
+            metric: "cpu".to_string(),
+            style: "sparkline".to_string(),
+        },
+        crate::settings::MetricConfig {
+            metric: "mem".to_string(),
+            style: "sparkline".to_string(),
+        },
+    ];
+    tty.metrics.latest = Some(crate::metrics::MachineStats {
+        cpu_percent: 72.0,
+        mem_used: 41_000_000_000,
+        mem_total: 128 * 1024 * 1024 * 1024,
+        ..Default::default()
+    });
+    // A recent CPU history that ramps up (so the sparkline shows a curve and the
+    // color grades into the caution band at 72%), plus a steady memory line.
+    tty.metrics.cpu_history = [
+        8.0, 12.0, 10.0, 18.0, 30.0, 26.0, 40.0, 55.0, 48.0, 60.0, 68.0, 72.0,
+    ]
+    .into_iter()
+    .collect();
+    tty.metrics.mem_history = [30.0, 31.0, 30.0, 32.0, 33.0, 32.0, 31.0, 32.0]
+        .into_iter()
+        .collect();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-machine-stats.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-machine-stats` changed — delete its PNG to re-baseline"
+    );
+}
+
+/// Give `tty` a landed sample with a ramping CPU history and a steady memory
+/// line, plus network/disk rate series, so the metric cells render with real
+/// curves (shared by the config-list snapshots below).
+fn seed_metric_sample(tty: &mut Tty) {
+    const M: f32 = 1024.0 * 1024.0;
+    tty.metrics.latest = Some(crate::metrics::MachineStats {
+        cpu_percent: 72.0,
+        mem_used: 41_000_000_000,
+        mem_total: 128 * 1024 * 1024 * 1024,
+        net_rx_bps: 3.2 * M,
+        net_tx_bps: 512.0 * 1024.0,
+        disk_r_bps: 8.0 * M,
+        disk_w_bps: 1.0 * M,
+    });
+    tty.metrics.cpu_history = [
+        8.0, 12.0, 10.0, 18.0, 30.0, 26.0, 40.0, 55.0, 48.0, 60.0, 68.0, 72.0,
+    ]
+    .into_iter()
+    .collect();
+    tty.metrics.mem_history = [30.0, 31.0, 30.0, 32.0, 33.0, 32.0, 31.0, 32.0]
+        .into_iter()
+        .collect();
+    tty.metrics.net_rx_history = [0.4 * M, 1.1 * M, 0.8 * M, 2.0 * M, 2.6 * M, 3.2 * M]
+        .into_iter()
+        .collect();
+    tty.metrics.net_tx_history = [
+        80.0 * 1024.0,
+        120.0 * 1024.0,
+        300.0 * 1024.0,
+        512.0 * 1024.0,
+    ]
+    .into_iter()
+    .collect();
+    tty.metrics.disk_r_history = [1.0 * M, 3.0 * M, 2.0 * M, 6.0 * M, 7.5 * M, 8.0 * M]
+        .into_iter()
+        .collect();
+    tty.metrics.disk_w_history = [0.2 * M, 0.5 * M, 0.3 * M, 1.0 * M].into_iter().collect();
+}
+
+fn metric(kind: &str, style: &str) -> crate::settings::MetricConfig {
+    crate::settings::MetricConfig {
+        metric: kind.to_string(),
+        style: style.to_string(),
+    }
+}
+
+#[test]
+fn status_bar_metric_styles_view() {
+    // A mixed config: CPU as a sparkline, memory as the plain `number` style
+    // (label only, no canvas), proving the per-metric style selection renders.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "number")];
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-metric-styles.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-metric-styles` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_metrics_shed_when_narrow_view() {
+    // Two metrics configured, but a narrow tracked window width: the rightmost
+    // cell (memory) is shed before the bar overflows, so only CPU shows.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
+    tty.window_width = 400.0;
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-metrics-shed.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-metrics-shed` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_rate_metrics_view() {
+    // The network/disk throughput metrics: rate sparklines (neutral accent,
+    // auto-scaled to their own peak) with formatted byte-rate labels, in the
+    // configured order.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![
+        metric("net_rx", "sparkline"),
+        metric("net_tx", "sparkline"),
+        metric("disk_w", "sparkline"),
+    ];
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-rate-metrics.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-rate-metrics` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_net_io_view() {
+    // The combined network I/O metric: rx (accent) and tx (warn) overlaid on a
+    // single sparkline, with both rates in the label.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("net_io", "sparkline")];
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-net-io.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-net-io` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_disk_io_view() {
+    // The combined disk I/O metric: read (accent) and write (warn) overlaid on a
+    // single sparkline, with both rates in the label.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("disk_io", "sparkline")];
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-disk-io.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-disk-io` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_popover_view() {
+    // Clicking the disk I/O sparkline drills in: the bottom-centered popover
+    // card shows the full-size line chart (read accent + write warn on a shared
+    // scale, peak byte-rate on the y axis), the current readout, the two-line
+    // legend, and the sample-count caption, floating over the status bar.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("disk_io", "sparkline")];
+    seed_metric_sample(&mut tty);
+    tty.metric_detail = Some(crate::settings::MetricKind::DiskIo);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-popover.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-popover` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_popover_empty_view() {
+    // Drilling into a metric whose history isn't chartable yet (here disk read,
+    // with a sample landed but no rate history — as on a platform without the
+    // sampler): the popover still shows a card, with the "collecting" note in
+    // place of a blank chart, so click-away/Escape have a target.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("disk_r", "sparkline")];
+    tty.metrics.latest = Some(crate::metrics::MachineStats::default());
+    tty.metric_detail = Some(crate::settings::MetricKind::DiskR);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-popover-empty.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-popover-empty` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_cpu_per_core_view() {
+    // Clicking CPU drills into the per-core grid: the aggregate readout + "+",
+    // then a sparkline per logical core (color-graded by load, current % below),
+    // grouped into Performance and Efficiency sections. Seeded for a 16-core
+    // machine (4 E + 12 P), matching this project's dev hardware.
+    use prexp_core::system::CpuKind;
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline")];
+    seed_metric_sample(&mut tty);
+    let currents: [f32; 16] = [
+        12.0, 8.0, 20.0, 5.0, // E cores
+        72.0, 95.0, 40.0, 18.0, 60.0, 33.0, 88.0, 27.0, 55.0, 10.0, 70.0, 45.0, // P cores
+    ];
+    tty.metrics.core_history = currents
+        .iter()
+        .map(|&cur| {
+            let mut d: std::collections::VecDeque<f32> = (0..8)
+                .map(|k| (cur * (0.4 + 0.07 * k as f32)).min(100.0))
+                .collect();
+            *d.back_mut().unwrap() = cur;
+            d
+        })
+        .collect();
+    tty.metrics.perf_levels = Some(
+        (0..16)
+            .map(|i| {
+                if i < 4 {
+                    CpuKind::Efficiency
+                } else {
+                    CpuKind::Performance
+                }
+            })
+            .collect(),
+    );
+    tty.metric_detail = Some(crate::settings::MetricKind::Cpu);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-cpu-per-core.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-cpu-per-core` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_popover_resized_view() {
+    // A drag-resized compact popover: a `metric_detail_size` override makes the
+    // card wider and its chart taller than the default, with the corner grip.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("disk_io", "sparkline")];
+    seed_metric_sample(&mut tty);
+    tty.metric_detail = Some(crate::settings::MetricKind::DiskIo);
+    tty.metric_detail_size = Some((480.0, 280.0));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-popover-resized.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-popover-resized` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_popover_expanded_view() {
+    // The popover's "Expand" state: a large centered card whose line chart fills
+    // most of the window (here Net I/O, two series), sized off the window
+    // geometry. The chart carries a "Collapse" affordance top-right.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("net_io", "sparkline")];
+    tty.window_width = 1100.0;
+    tty.window_height = 800.0;
+    seed_metric_sample(&mut tty);
+    tty.metric_detail = Some(crate::settings::MetricKind::NetIo);
+    tty.metric_detail_expanded = true;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(1100.0, 800.0),
+        main_chrome(&tty),
+    );
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-popover-expanded.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-popover-expanded` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_autohidden_view() {
+    // Auto-hide on, pointer up near the top: the status bar is gone and the
+    // pane grid takes the full height (no reflow versus the revealed state).
+    let mut tty = populated();
+    tty.settings.status_bar_autohide = Some(true);
+    tty.pointer = iced::Point::new(300.0, 40.0);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-autohidden.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-autohidden` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_revealed_view() {
+    // Auto-hide on, pointer down within the reveal zone: the status bar floats
+    // back in over the bottom edge.
+    let mut tty = populated();
+    tty.settings.status_bar_autohide = Some(true);
+    tty.pointer = iced::Point::new(300.0, tty.window_height - 8.0);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-revealed.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-revealed` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn enable_history_dialog_with_fanout_knob_view() {
+    // The "Enable encrypted history" dialog with the Passphrase key source
+    // selected, so every fixed-at-enable choice shows: key source, KDF,
+    // passphrase fields, cipher, and the new fan-out PRF knob (Auto/Skein/
+    // BLAKE3) with its family-matched caption.
+    use crate::state::{PassphrasePrompt, PassphrasePromptKind};
+    let mut tty = populated();
+    tty.show_settings = true;
+    tty.settings_section = 3;
+    tty.settings.encrypted_history_enabled = Some(false);
+    tty.settings.history_key_source = Some("passphrase".to_string());
+    tty.settings.history_fanout = Some("auto".to_string());
+    tty.passphrase_prompt = Some(PassphrasePrompt::new(PassphrasePromptKind::Enable));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-enable-history-fanout.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-enable-history-fanout` changed — delete its PNG to re-baseline"
     );
 }

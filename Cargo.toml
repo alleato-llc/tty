@@ -12,14 +12,18 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
+chacha20poly1305 = "0.10"
 dirs = "5"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 parking_lot = "0.12"
 portable-pty = "0.9"
+rand = "0.8"
 serde_json = "1"
 thiserror = "2"
 toml = "0.8"
 tracing = "0.1"
 vte = "0.15"
+zeroize = "1"
 
 [workspace.dependencies.iced]
 features = [
@@ -33,6 +37,28 @@ version = "0.14"
 # the same arrangement fed uses. See CLAUDE.md.
 [workspace.dependencies.rime]
 path = "../rime/rime"
+
+# dorado is a sibling path dependency (../dorado), the same arrangement as rime
+# above. Two pieces of dorado-engine are used: the raw-key authenticated
+# construction (see tty/src/history/crypto.rs) and the exported `kdf` module
+# (see tty/src/history/passphrase.rs — dorado's derive/validate over tty's own
+# sidecar). Never dorado's self-contained password container format, whose
+# per-file salt would re-run the KDF on every file read.
+[workspace.dependencies.dorado-engine]
+path = "../dorado/rust/crates/dorado-engine"
+
+# prexp-core is a sibling path dependency (../fdtop), the fdtop process
+# explorer's system-metrics core. tty uses only its system-level sampling
+# (`ProcessSource::cpu_ticks` / `memory_info`, native on macOS, procfs on
+# Linux) to surface machine stats in the status bar. See tty/src/metrics.rs and
+# docs/ideas/status-bar-metrics.md.
+[workspace.dependencies.prexp-core]
+path = "../fdtop/crates/prexp-core"
+
+[workspace.dependencies.chrono]
+default-features = false
+features = ["clock", "std", "serde"]
+version = "0.4"
 
 [workspace.dependencies.serde]
 features = ["derive"]

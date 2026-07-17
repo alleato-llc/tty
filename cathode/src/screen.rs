@@ -1,9 +1,11 @@
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine as _;
 use unicode_width::UnicodeWidthChar;
+
+use crate::history::{HistoryEvent, PersistedCommandEntry};
 
 const DEFAULT_SCROLLBACK: usize = 2000;
 const TAB_WIDTH: usize = 8;
@@ -108,6 +110,20 @@ pub struct CommandEntry {
     pub output: Vec<String>,
     pub started_at: Instant,
     max_output_lines: usize,
+    /// Unique within [`TerminalScreen::pending_history_events`]'s destination file
+    /// (a single day's persisted segment) — see [`crate::history::PersistedCommandEntry`].
+    pub id: u32,
+    /// Wall-clock counterpart of `started_at` (`Instant` has no epoch and can't be
+    /// persisted or reconstructed after a restart).
+    pub started_at_wall: SystemTime,
+    /// Which pane recorded this command — copied from [`TerminalScreen::pane_tag`]
+    /// at push time.
+    pub pane_tag: String,
+    /// Whether this command was recorded on an untracked screen — copied from
+    /// [`TerminalScreen::untracked`] at push time, so a host's history UI can
+    /// badge the row. Untracked entries exist only in this live log; the
+    /// screen never queues history events for them.
+    pub untracked: bool,
 }
 
 impl CommandEntry {
@@ -120,8 +136,10 @@ impl CommandEntry {
 
 /// How many commands [`TerminalScreen::mark_command_boundary`] remembers before
 /// evicting the oldest — not user-configurable (unlike the per-command output cap),
-/// just a generous backstop.
-const MAX_COMMAND_LOG: usize = 500;
+/// just a generous backstop. `pub` so a host loading persisted history back in (see
+/// [`TerminalScreen::seed_command_log`]) can bound how many entries it bothers
+/// reading off disk at startup, rather than duplicating this number.
+pub const MAX_COMMAND_LOG: usize = 500;
 
 /// A queued command boundary — see [`TerminalScreen::pending_boundaries`].
 struct PendingBoundary {
@@ -178,6 +196,23 @@ pub struct TerminalScreen {
     /// of their echoes — with the previous command's real output legitimately
     /// completing rows in between.
     pending_boundaries: VecDeque<PendingBoundary>,
+    /// Which pane this screen belongs to, for [`CommandEntry::pane_tag`] — set once
+    /// by the host via [`Self::set_pane_tag`]; empty until then.
+    pane_tag: String,
+    /// An untracked ("incognito") screen: commands still enter the live
+    /// `command_log` (badged via [`CommandEntry::untracked`]) but no history
+    /// event is ever queued — suppressed at the source, so no host drain
+    /// path can leak them to persistence. Set once at spawn via
+    /// [`Self::set_untracked`].
+    untracked: bool,
+    /// The next id [`Self::record_output_line`] assigns to a new [`CommandEntry`].
+    /// Monotonic for the life of this screen; ids only need to be unique within a
+    /// single persisted day, and a globally-increasing counter trivially satisfies
+    /// that without cathode needing to know what day it is.
+    next_command_id: u32,
+    /// Changes queued for the host's persisted-history writer, drained by
+    /// [`Self::take_pending_history_events`]. See [`crate::history::HistoryEvent`].
+    pending_history_events: Vec<HistoryEvent>,
     pub dirty_rows: BTreeSet<usize>,
     // Pen (current SGR state).
     fg: TermColor,
@@ -233,6 +268,10 @@ impl TerminalScreen {
             max_scrollback,
             command_log: VecDeque::new(),
             pending_boundaries: VecDeque::new(),
+            pane_tag: String::new(),
+            untracked: false,
+            next_command_id: 0,
+            pending_history_events: Vec::new(),
             dirty_rows: BTreeSet::new(),
             fg: TermColor::Default,
             bg: TermColor::Default,
@@ -273,6 +312,82 @@ impl TerminalScreen {
         self.clipboard.take()
     }
 
+    /// Set which pane this screen belongs to, for [`CommandEntry::pane_tag`] on
+    /// every command recorded from here on. Called once by the host right after
+    /// creating a pane's screen.
+    pub fn set_pane_tag(&mut self, tag: String) {
+        self.pane_tag = tag;
+    }
+
+    /// Mark this screen untracked (or not) — see the `untracked` field. Set
+    /// once by the host right after creating a pane's screen, alongside
+    /// [`Self::set_pane_tag`].
+    pub fn set_untracked(&mut self, untracked: bool) {
+        self.untracked = untracked;
+    }
+
+    /// Whether this screen is untracked.
+    pub fn untracked(&self) -> bool {
+        self.untracked
+    }
+
+    /// Queue a change for the host's persisted-history writer — the single
+    /// gate every push site goes through: an untracked screen queues nothing,
+    /// ever, so nothing downstream can persist it.
+    fn queue_history_event(&mut self, event: HistoryEvent) {
+        if self.untracked {
+            return;
+        }
+        self.pending_history_events.push(event);
+    }
+
+    /// Read-and-clear the changes queued for the host's persisted-history writer
+    /// since the last call.
+    pub fn take_pending_history_events(&mut self) -> Vec<HistoryEvent> {
+        std::mem::take(&mut self.pending_history_events)
+    }
+
+    /// Raise the command-id floor: the next recorded command gets an id of at
+    /// least `next`. Never regresses an id counter that is already higher.
+    ///
+    /// Persisted-history hosts need this when their archive unlocks *after*
+    /// the screen has already recorded commands (a deferred or passphrase-
+    /// gated start): day segments upsert by id, so a fresh screen's ids
+    /// (`0..n`) would otherwise overwrite same-day entries persisted by an
+    /// earlier launch. [`Self::seed_command_log`] applies the same rule for
+    /// the ids it loads; this is the hook for screens that were never seeded.
+    pub fn reserve_command_ids(&mut self, next: u32) {
+        self.next_command_id = self.next_command_id.max(next);
+    }
+
+    /// Load previously-persisted entries back into `command_log` (most recent
+    /// last, matching how live entries accumulate), respecting `MAX_COMMAND_LOG`
+    /// and advancing `next_command_id` past every loaded id so a new command this
+    /// session can never collide with one restored from today's segment. Does not
+    /// queue any history events — loading is the reverse of a mutation, not one.
+    pub fn seed_command_log(&mut self, entries: Vec<PersistedCommandEntry>) {
+        for persisted in entries {
+            self.next_command_id = self.next_command_id.max(persisted.id + 1);
+            self.command_log.push_back(CommandEntry {
+                command: persisted.command,
+                output: Vec::new(),
+                started_at: instant_for(persisted.started_at_epoch_ms),
+                // Output is never populated for a loaded entry (it was never
+                // persisted), so any cap here reads as "not truncated" — the
+                // point is just to avoid `0 >= 0` reading as truncated.
+                max_output_lines: usize::MAX,
+                id: persisted.id,
+                started_at_wall: wall_time_from_epoch_ms(persisted.started_at_epoch_ms),
+                pane_tag: persisted.pane_tag,
+                // Loaded from the archive, so by definition it was tracked.
+                untracked: false,
+            });
+            if self.command_log.len() > MAX_COMMAND_LOG {
+                self.command_log.pop_front();
+            }
+        }
+    }
+
     /// Change the scrollback cap, truncating from the front if the buffer is now over
     /// it — so lowering the setting applies immediately to an already-open terminal,
     /// not just ones spawned afterward.
@@ -290,8 +405,66 @@ impl TerminalScreen {
     pub fn clear_scrollback(&mut self) {
         self.scrollback.clear();
         self.scrollback_times.clear();
+        let tombstones: Vec<HistoryEvent> = self
+            .command_log
+            .iter()
+            .map(|entry| HistoryEvent::Tombstone {
+                id: entry.id,
+                started_at_epoch_ms: crate::history::epoch_ms(entry.started_at_wall),
+            })
+            .collect();
+        for tombstone in tombstones {
+            self.queue_history_event(tombstone);
+        }
         self.command_log.clear();
         self.pending_boundaries.clear();
+    }
+
+    /// Blank one recorded command's own text *and* its captured output in place
+    /// (index into `command_log`) — the row stays (so later commands keep their
+    /// index), its displayed value just empties. Blanking the command text too
+    /// (not just the output) matters: plenty of real commands (`cd`, `export`,
+    /// `alias`) capture zero output, so leaving the command text untouched would
+    /// make "Clear" a silent no-op for them. Distinct from `clear_scrollback`'s
+    /// wholesale wipe: this is the Scrollback History panel's per-row "Clear" menu
+    /// item, scoped to a single command.
+    pub fn clear_command_output(&mut self, index: usize) {
+        if let Some(entry) = self.command_log.get_mut(index) {
+            entry.command.clear();
+            entry.output.clear();
+            let event = HistoryEvent::Upsert(PersistedCommandEntry::from(&*entry));
+            self.queue_history_event(event);
+        }
+    }
+
+    /// Blank a single recorded output line's text in place (index into
+    /// `command_log`, then into that command's `output`) — the line stays (so
+    /// later lines keep their index), its text just empties. The per-row
+    /// "Clear" menu item for an output row, as opposed to a whole command's. No
+    /// history event: captured output is never persisted, so blanking one
+    /// output line has nothing to reflect in the archive.
+    pub fn clear_command_output_line(&mut self, index: usize, line: usize) {
+        if let Some(entry) = self.command_log.get_mut(index) {
+            if let Some(l) = entry.output.get_mut(line) {
+                l.clear();
+            }
+        }
+    }
+
+    /// Permanently remove one recorded command (its header row and all captured
+    /// output) — index into `command_log`. Every later command's index shifts
+    /// down by one. Distinct from `clear_command_output`'s "blank the value, keep
+    /// the row": this is the Scrollback History panel's per-row "Delete" menu
+    /// item, which only applies to a command's header row.
+    pub fn remove_command(&mut self, index: usize) {
+        if let Some(entry) = self.command_log.get(index) {
+            let tombstone = HistoryEvent::Tombstone {
+                id: entry.id,
+                started_at_epoch_ms: crate::history::epoch_ms(entry.started_at_wall),
+            };
+            self.queue_history_event(tombstone);
+        }
+        self.command_log.remove(index);
     }
 
     /// The current cursor row's text, trimmed of trailing whitespace — what
@@ -370,12 +543,23 @@ impl TerminalScreen {
                     .pending_boundaries
                     .pop_front()
                     .expect("front() just returned Some");
-                self.command_log.push_back(CommandEntry {
+                let id = self.next_command_id;
+                self.next_command_id += 1;
+                let entry = CommandEntry {
                     command: pending.command.unwrap_or_else(|| trimmed.to_string()),
                     output: Vec::new(),
                     started_at: Instant::now(),
                     max_output_lines: pending.max_output_lines,
-                });
+                    id,
+                    started_at_wall: SystemTime::now(),
+                    pane_tag: self.pane_tag.clone(),
+                    untracked: self.untracked,
+                };
+                let event = HistoryEvent::Upsert(PersistedCommandEntry::from(&entry));
+                self.queue_history_event(event);
+                self.command_log.push_back(entry);
+                // A window eviction, not a delete: the archived copy (if any) is
+                // untouched, only today's in-memory live view shrinks back down.
                 if self.command_log.len() > MAX_COMMAND_LOG {
                     self.command_log.pop_front();
                 }
@@ -787,6 +971,26 @@ impl TerminalScreen {
     }
 }
 
+fn wall_time_from_epoch_ms(epoch_ms: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(epoch_ms)
+}
+
+/// An `Instant` that elapses the same duration as a wall-clock timestamp from
+/// `epoch_ms` — restores a loaded [`CommandEntry`]'s live "how long ago" display
+/// correctly instead of resetting it to "just now". Falls back to
+/// `Instant::now()` (reads as "0s ago") for a timestamp in the future or an
+/// elapsed duration this platform's `Instant` can't represent — a display
+/// nicety, never a correctness issue.
+fn instant_for(epoch_ms: u64) -> Instant {
+    let wall = wall_time_from_epoch_ms(epoch_ms);
+    match SystemTime::now().duration_since(wall) {
+        Ok(elapsed) => Instant::now()
+            .checked_sub(elapsed)
+            .unwrap_or_else(Instant::now),
+        Err(_) => Instant::now(),
+    }
+}
+
 impl vte::Perform for TerminalScreen {
     fn print(&mut self, c: char) {
         self.write_char(c);
@@ -968,8 +1172,20 @@ impl vte::Perform for TerminalScreen {
             }
             b'c' => {
                 // RIS — full reset. Preserve the configured scrollback cap (a
-                // plain `new()` would silently drop back to the default).
+                // plain `new()` would silently drop back to the default), the
+                // pane tag, and the command-id counter. This also wipes the live
+                // `command_log`, same as it always has — deliberately *not*
+                // treated as a delete (no tombstones emitted for the archive):
+                // RIS is a terminal control-state reset a program can trigger
+                // (e.g. `reset`), not a user history-management action, so the
+                // persisted archive is left alone even though the in-memory
+                // window clears, the same "eviction isn't deletion" reasoning
+                // `record_output_line`'s `MAX_COMMAND_LOG` trim already uses.
+                let pane_tag = self.pane_tag.clone();
+                let next_command_id = self.next_command_id;
                 *self = TerminalScreen::with_scrollback(self.cols, self.rows, self.max_scrollback);
+                self.pane_tag = pane_tag;
+                self.next_command_id = next_command_id;
             }
             _ => {}
         }

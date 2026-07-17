@@ -72,6 +72,13 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
                 .map(|_| Message::CheckDragReattach),
         );
     }
+    // Machine stats: sample at the configured interval, but only while at least
+    // one metric is shown, so idle cost stays zero by default.
+    if !state.settings.status_bar_metrics().is_empty() {
+        let interval =
+            std::time::Duration::from_millis(state.settings.status_bar_metrics_interval_ms());
+        subs.push(iced::time::every(interval).map(|_| Message::SampleMetrics));
+    }
     Subscription::batch(subs)
 }
 

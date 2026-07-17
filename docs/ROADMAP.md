@@ -34,6 +34,22 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   a glob pattern, e.g. `"tail *" → 200`) so a streaming command (`tail -f`) just stops
   growing instead of recording forever, and full-screen apps (htop, vim) are excluded
   entirely via the alt-screen check.
+- **Encrypted command history (opt-in, off by default)** — persist the Scrollback
+  History panel's commands across launches: command text only (never output),
+  encrypted at rest (ChaCha20-Poly1305, or dorado's Threefish-256 as an explicit
+  opt-in) with a random key from the OS keychain or a passphrase-derived one
+  (Argon2id, scrypt, or PBKDF2 — user's choice) where no keychain exists, one
+  file per local day plus an
+  encrypted index, written by a single background thread. Startup is async and
+  narrated (no cold OS prompts, no UI freeze). The panel pages back
+  through prior days; on macOS, opening it is gated behind Touch ID / the device
+  password (once per launch + an optional idle interval). Disabling never deletes;
+  a separate confirmed **Reset** action does. (ADRs 0006/0007.)
+- **Untracked sessions** — incognito for command history: ⌘⇧T opens an untracked
+  tab (live in the panel, badged, never persisted); a launch can start untracked
+  via a setting, an each-launch chooser, or `tty --untracked` — zero crypto
+  activity, immutable until relaunch, marked in the strip/title/status bar.
+  (ADR 0008.)
 - **Clickable links (URL autodetection)** — `⌘`-hover underlines a detected URL,
   `⌘`-click opens it directly, and a plain right-click offers **Open Link** / **Copy
   Link**.
@@ -124,6 +140,17 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 - **Reflow on resize** — rewrap scrollback to the new width (hard; nice-to-have).
 
 ### Workflow / app
+- **Machine stats in the status bar** — ✦ — configurable CPU / memory / network /
+  disk as compact canvas sparklines, reusing `fdtop`'s `prexp-core` sampler and
+  `rime`'s chart kernel; an ambient peek line for the auto-hidden bar, and a
+  click-through mini-fdtop system overlay as the north star. Phases 1-3 + the
+  drill-in popover shipped: CPU + memory sparkline/number cells, network/disk
+  throughput rate cells (macOS samplers via `prexp-core`/`prexp-ffi`), the ordered
+  `status_bar_metrics` config list (add/reorder/style + sample interval),
+  width-shedding, and a single-metric drill-in popover (click a sparkline for its
+  full-size line chart over the retained history). Remaining: the Linux net/disk
+  samplers, the peek line, the full mini-fdtop overlay. Design sketch:
+  [`ideas/status-bar-metrics.md`](ideas/status-bar-metrics.md).
 - **Profiles** — § — named tab presets (shell + command + cwd + theme). Keep it light.
 - **Command palette (`⌘K`)** — § — new tab, theme, settings, search — one fuzzy entry.
 - **Quick-open recent dirs / `ssh` hosts** — small launcher conveniences.

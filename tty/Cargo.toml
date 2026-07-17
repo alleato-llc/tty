@@ -23,12 +23,32 @@ serde_json = { workspace = true }
 # Decode the embedded app-icon PNG into an iced window icon (app_icon module).
 png = "0.17"
 
+# Encrypted history (tty/src/history/) — see settings.rs's history_cipher field.
+chacha20poly1305 = { workspace = true }
+chrono = { workspace = true }
+dorado-engine = { workspace = true }
+# Machine stats in the status bar (tty/src/metrics.rs) — system-level sampling
+# from fdtop's process-explorer core.
+prexp-core = { workspace = true }
+keyring = { workspace = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }
+# Bridges blocking work (the keychain read, the passphrase KDF, LAContext's
+# callback API) into awaitable iced::Tasks — already in the dependency tree
+# transitively via iced, just not exposed to this crate.
+futures-channel = "0.3"
+
 # macOS: set the Dock icon at runtime so a bare `cargo run` binary (not an .app
 # bundle) shows the real icon too. AppKit via objc2 (already in the tree via winit).
+# Also LocalAuthentication (Touch ID / device password) for encrypted-history
+# re-auth gating — see history/reauth.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.5"
-objc2-app-kit = "0.2"
-objc2-foundation = "0.2"
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+objc2-local-authentication = "0.3"
+block2 = "0.6"
 
 [dev-dependencies]
 # Headless view snapshots (no GPU/window) — see src/snapshot.rs.

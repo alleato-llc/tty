@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn strip_prompt_cuts_common_shell_prompts() {
+    assert_eq!(strip_prompt("$ ls -la"), "ls -la");
+    assert_eq!(strip_prompt("user@host tty % cargo build"), "cargo build");
+    assert_eq!(strip_prompt("user@host:~/dev$ git status"), "git status");
+    assert_eq!(strip_prompt("❯ npm test"), "npm test");
+    assert_eq!(strip_prompt("# apt-get update"), "apt-get update");
+}
+
+#[test]
+fn strip_prompt_uses_the_earliest_marker_so_command_text_survives() {
+    // The real prompt marker comes before any marker-like text *inside* the
+    // command — cutting at the earliest keeps `echo $ hi` intact.
+    assert_eq!(strip_prompt("user@host % echo $ hi"), "echo $ hi");
+    assert_eq!(strip_prompt("$ echo 2 > out.txt"), "echo 2 > out.txt");
+}
+
+#[test]
+fn strip_prompt_fails_toward_the_full_line() {
+    // No recognizable marker (an exotic prompt): unchanged.
+    assert_eq!(strip_prompt("➜ dorado cargo test"), "➜ dorado cargo test");
+    // Stripping would leave nothing (a bare prompt): unchanged.
+    assert_eq!(strip_prompt("user@host % "), "user@host % ");
+    assert_eq!(strip_prompt(""), "");
+}
+
+#[test]
 fn glob_match_is_fully_anchored() {
     assert!(glob_match("ls", "ls"));
     assert!(!glob_match("ls", "ls -la"), "no substring matching");

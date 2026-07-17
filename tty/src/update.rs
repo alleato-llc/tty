@@ -27,7 +27,18 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
         }
         Message::ResizeSplit(win, e) => state.resize_split(win, e.split, e.ratio),
-        Message::PointerMoved(p) => state.pointer = p,
+        Message::PointerMoved(p) => {
+            state.pointer = p;
+            // While the popover corner grip is held, the pointer delta since the
+            // drag began resizes the card (width, chart height), clamped so it
+            // stays usable and on-screen.
+            if let Some((start, (bw, bh))) = state.metric_detail_resize {
+                let w = (bw + (p.x - start.x)).clamp(280.0, (state.window_width - 40.0).max(280.0));
+                let h =
+                    (bh + (p.y - start.y)).clamp(110.0, (state.window_height - 150.0).max(110.0));
+                state.metric_detail_size = Some((w, h));
+            }
+        }
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
         Message::TabRightClick(idx) => state.open_tab_menu(idx),
         Message::LinkClick(url) => {
@@ -82,8 +93,65 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 state.search_match += 1;
             }
         }
-        Message::ClearScrollback => state.clear_active_scrollback(),
-        Message::ToggleScrollbackPanel => state.toggle_scrollback_panel(),
+        Message::ClearScrollback => {
+            state.close_menu();
+            state.clear_active_scrollback();
+        }
+        Message::ToggleScrollbackPanel => {
+            state.close_menu();
+            return toggle_scrollback_gated(state);
+        }
+        Message::HistoryReauthResult(unlock, true) => {
+            state.history_reauth_pending = false;
+            state.mark_history_authenticated();
+            match unlock {
+                crate::message::ReauthFor::ScrollbackPanel => state.toggle_scrollback_panel(),
+                crate::message::ReauthFor::SettingsHistory => state.open_settings_history_viewer(),
+            }
+        }
+        Message::HistoryReauthResult(_, false) => state.history_reauth_pending = false,
+        Message::ToggleSettingsHistoryViewer => {
+            if state.show_settings_history {
+                state.close_settings_history_viewer();
+            } else if !state.history_reauth_pending {
+                if let Some(reason) = state.history_reauth_reason() {
+                    state.history_reauth_pending = true;
+                    return iced::Task::perform(
+                        crate::history::reauth::authenticate(reason),
+                        |ok| {
+                            Message::HistoryReauthResult(
+                                crate::message::ReauthFor::SettingsHistory,
+                                ok,
+                            )
+                        },
+                    );
+                }
+                state.open_settings_history_viewer();
+            }
+        }
+        Message::SettingsHistoryPageOlder => state.page_settings_history_older(),
+        Message::SettingsHistoryScrolled(offset) => state.settings_history_scroll = offset,
+        Message::SettingsHistoryRowSelected(row) => state.settings_history_selected = Some(row),
+        Message::SettingsHistoryRowActivated(row, text) => {
+            state.settings_history_selected = Some(row);
+            return iced::clipboard::write(text);
+        }
+        Message::SettingsHistoryRowRightClick(row, target) => {
+            state.settings_history_selected = Some(row);
+            state.menu = Some((
+                crate::state::MenuKind::SettingsHistoryRow(target),
+                state.pointer,
+            ));
+        }
+        Message::RequestDeleteSettingsHistoryRow(target) => {
+            state.request_delete_settings_history_row(target)
+        }
+        Message::CancelDeleteSettingsHistoryRow => state.cancel_delete_settings_history_row(),
+        Message::ConfirmDeleteSettingsHistoryRow => state.confirm_delete_settings_history_row(),
+        Message::CopyText(text) => {
+            state.close_menu();
+            return iced::clipboard::write(text);
+        }
         Message::ScrollbackQueryChanged(q) => state.set_scrollback_query(q),
         Message::ScrollbackRowSelected(row) => state.scrollback_selected = Some(row),
         Message::ScrollbackRowActivated(row, text) => {
@@ -91,12 +159,50 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             return iced::clipboard::write(text);
         }
         Message::ScrollbackToggleExpand(i) => state.toggle_scrollback_expand(i),
+        Message::ScrollbackRowRightClick(row, target) => {
+            state.scrollback_selected = Some(row);
+            state.menu = Some((crate::state::MenuKind::ScrollbackRow(target), state.pointer));
+        }
+        Message::CopyScrollbackTarget(target) => {
+            state.close_menu();
+            // Copying a *command* strips its captured shell prompt (the row
+            // is the full echoed line); an output line is copied verbatim —
+            // its text is data, not a prompt.
+            let text = match &target {
+                crate::state::HistoryRowTarget::Live(crate::state::ScrollbackTarget::Output {
+                    text,
+                    ..
+                }) => text.as_str(),
+                other => cathode::commands::strip_prompt(other.text()),
+            };
+            return iced::clipboard::write(text.to_string());
+        }
+        Message::ClearScrollbackTarget(target) => {
+            state.close_menu();
+            match target {
+                crate::state::HistoryRowTarget::Live(t) => state.clear_scrollback_target(&t),
+                crate::state::HistoryRowTarget::Archived(t) => state.clear_archived_target(&t),
+            }
+        }
+        Message::DeleteScrollbackTarget(target) => {
+            state.close_menu();
+            match target {
+                crate::state::HistoryRowTarget::Live(t) => state.delete_scrollback_target(&t),
+                crate::state::HistoryRowTarget::Archived(t) => state.delete_archived_target(&t),
+            }
+        }
+        Message::ScrollbackPageOlder => state.page_scrollback_older(),
+        Message::ScrollbackPageNewer => state.page_scrollback_newer(),
         Message::ScrollbackScrolled(offset) => state.scrollback_scroll = offset,
         Message::MaxScrollbackStep(delta) => state.step_max_scrollback(delta),
         Message::DefaultOutputLinesStep(delta) => state.step_default_output_lines(delta),
         Message::NewTab => {
             state.close_menu();
             state.new_tab();
+        }
+        Message::NewUntrackedTab => {
+            state.close_menu();
+            state.new_tab_with(true);
         }
         Message::CloseTab(idx) => {
             state.close_menu();
@@ -149,6 +255,58 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::Focused(f) => state.focused = f,
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
+        Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
+        Message::StatusBarMetricAdd(metric) => state.add_status_bar_metric(&metric),
+        Message::StatusBarMetricRemove(idx) => state.remove_status_bar_metric(idx),
+        Message::StatusBarMetricMove(idx, delta) => state.move_status_bar_metric(idx, delta),
+        Message::StatusBarMetricStyle(idx, style) => state.set_status_bar_metric_style(idx, &style),
+        Message::SampleMetrics => state.metrics.sample(),
+        Message::OpenMetricDetail(metric) => {
+            state.metric_detail = crate::settings::MetricKind::from_setting_str(&metric);
+            // A fresh open always starts compact, at the default size.
+            state.metric_detail_expanded = false;
+            state.metric_detail_size = None;
+            state.metric_detail_resize = None;
+        }
+        Message::CloseMetricDetail => {
+            state.metric_detail = None;
+            state.metric_detail_expanded = false;
+            state.metric_detail_size = None;
+            state.metric_detail_resize = None;
+        }
+        Message::ToggleMetricDetailExpanded => {
+            state.metric_detail_expanded = !state.metric_detail_expanded
+        }
+        Message::MetricDetailResizeStart => {
+            let cur = state.metric_detail_size.unwrap_or((320.0, 150.0));
+            state.metric_detail_resize = Some((state.pointer, cur));
+        }
+        Message::SetEncryptedHistoryEnabled(true) => state.request_enable_encrypted_history(),
+        Message::SetEncryptedHistoryEnabled(false) => state.disable_encrypted_history(),
+        Message::ConfirmEnableHistory => {
+            // The enable dialog's "Continue", keychain source: the dialog
+            // closes and the keychain start begins.
+            state.cancel_passphrase_prompt();
+            return state.begin_history_start(crate::message::HistoryStartOrigin::Enable);
+        }
+        Message::HistoryStarted(origin, outcome) => state.apply_history_started(origin, outcome),
+        Message::SetHistoryKeySource(source) => state.set_history_key_source(source),
+        Message::SetHistoryKdf(kdf) => state.set_history_kdf(kdf),
+        Message::SetHistoryFanout(fanout) => state.set_history_fanout(fanout),
+        Message::OpenHistoryUnlock => state.open_history_unlock(),
+        Message::HistoryPassphraseChanged(text) => state.set_passphrase_draft(text),
+        Message::HistoryPassphraseConfirmChanged(text) => state.set_passphrase_confirm(text),
+        Message::SubmitHistoryPassphrase => return state.submit_passphrase(),
+        Message::CancelHistoryPassphrase => state.cancel_passphrase_prompt(),
+        Message::SessionStartChoice(record) => return state.choose_session_start(record),
+        Message::SetHistorySessionStart(mode) => state.set_history_session_start(mode),
+        Message::SetHistoryCipher(cipher) => state.set_history_cipher(cipher),
+        Message::RequestResetEncryptedHistory => state.request_reset_encrypted_history(),
+        Message::CancelResetEncryptedHistory => state.cancel_reset_encrypted_history(),
+        Message::ConfirmResetEncryptedHistory => return state.confirm_reset_encrypted_history(),
+        Message::HistoryReauthIntervalStep(delta) => {
+            state.step_history_reauth_interval_minutes(delta)
+        }
 
         // ---- multi-window: detachable tabs (ADR 0003) ----
         Message::DetachTab(idx) => {
@@ -172,6 +330,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::WindowResizedAt(id, size) => {
             if state.main_window == Some(id) {
                 state.window_height = size.height;
+                state.window_width = size.width;
             }
             crate::detach_drag::on_resized(state, id, size);
         }
@@ -197,6 +356,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.reattach_window(id);
         }
         Message::PointerReleased => {
+            state.metric_detail_resize = None;
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }
@@ -205,16 +365,49 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
     iced::Task::none()
 }
 
+/// Open/close the Scrollback History panel through the re-auth gate — the one
+/// shared entry point for every open path (the ⌘⇧H chord and the pane menu's
+/// "View Scrollback History"), so no path can skip the Touch ID/password
+/// check. Closing never prompts; opening prompts only when a check is due
+/// (see `Tty::history_reauth_reason`), deferring the actual open to the
+/// `HistoryReauthResult(true)` handler.
+fn toggle_scrollback_gated(state: &mut Tty) -> iced::Task<Message> {
+    if !state.show_scrollback {
+        if state.history_reauth_pending {
+            // A prompt is already up — pressing the chord again while it's
+            // showing must not stack a second one.
+            return iced::Task::none();
+        }
+        if let Some(reason) = state.history_reauth_reason() {
+            state.history_reauth_pending = true;
+            return iced::Task::perform(crate::history::reauth::authenticate(reason), |ok| {
+                Message::HistoryReauthResult(crate::message::ReauthFor::ScrollbackPanel, ok)
+            });
+        }
+    }
+    state.toggle_scrollback_panel();
+    iced::Task::none()
+}
+
 fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message> {
     // Escape closes the rename field / settings panel / find bar (when open) instead of
     // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.metric_detail.is_some() {
+            state.metric_detail = None;
+            state.metric_detail_expanded = false;
+            state.metric_detail_size = None;
+            state.metric_detail_resize = None;
+            return iced::Task::none();
+        }
         if state.renaming.is_some() {
             state.cancel_rename();
             return iced::Task::none();
         }
         if state.show_settings {
-            state.show_settings = false;
+            // Through toggle_settings, so the archive viewer's paged-in
+            // entries are dropped too.
+            state.toggle_settings();
             return iced::Task::none();
         }
         if state.search.is_some() {
@@ -251,9 +444,17 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     if mods.command() {
         if let Key::Character(s) = &key {
             match s.as_str() {
+                // ⌘⇧T: a new *untracked* tab — commands in it are never
+                // written to encrypted history. Must precede the plain
+                // new-tab arm (some platforms deliver a shifted chord as a
+                // lowercase character + SHIFT).
+                s if is_main && mods.shift() && s.eq_ignore_ascii_case("t") => {
+                    state.new_tab_with(true);
+                    return iced::Task::none();
+                }
                 // Tab/settings/find chrome lives only in the main window, so a detached
                 // window ignores these (a no-op rather than acting on the hidden strip).
-                "t" | "n" if is_main => {
+                "t" | "n" if is_main && !mods.shift() => {
                     state.new_tab();
                     return iced::Task::none();
                 }
@@ -313,10 +514,10 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                     state.clear_active_scrollback();
                     return iced::Task::none();
                 }
-                // ⌘⇧H opens/closes the scrollback history panel (main window only).
+                // ⌘⇧H opens/closes the scrollback history panel (main window only) —
+                // through the same re-auth gate as the menu path.
                 s if is_main && mods.shift() && s.eq_ignore_ascii_case("h") => {
-                    state.toggle_scrollback_panel();
-                    return iced::Task::none();
+                    return toggle_scrollback_gated(state);
                 }
                 d if is_main && d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
                     let n = d.parse::<usize>().unwrap_or(0);

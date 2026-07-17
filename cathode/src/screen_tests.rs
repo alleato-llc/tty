@@ -614,3 +614,251 @@ fn current_row_text_reflects_in_progress_edits() {
     parser.process(b"$ gti\x08\x08\x08git status", &mut screen);
     assert_eq!(screen.current_row_text(), "$ git status");
 }
+
+// --- Persisted-history event queue ---
+
+/// Run a command to completion (boundary marked, then the shell's echo of it),
+/// mirroring the real call order (`mark_command_boundary` right before the
+/// Enter bytes) that every other boundary test in this file already uses.
+fn run_command(screen: &mut TerminalScreen, parser: &mut TermParser, command: &str) {
+    parser.process(command.as_bytes(), screen);
+    screen.mark_command_boundary(50);
+    parser.process(b"\r\n", screen);
+}
+
+#[test]
+fn a_new_command_queues_an_upsert_event() {
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.set_pane_tag("Tab 1".to_string());
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+
+    let events = screen.take_pending_history_events();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        HistoryEvent::Upsert(p) => {
+            assert_eq!(p.command, "echo hi");
+            assert_eq!(p.pane_tag, "Tab 1");
+            assert_eq!(p.id, screen.command_log[0].id);
+        }
+        other => panic!("expected Upsert, got {other:?}"),
+    }
+    // Draining clears it.
+    assert!(screen.take_pending_history_events().is_empty());
+}
+
+#[test]
+fn clear_command_output_queues_a_superseding_upsert_with_blanked_command() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    let id = screen.command_log[0].id;
+    screen.take_pending_history_events(); // drain the original Upsert
+
+    screen.clear_command_output(0);
+    let events = screen.take_pending_history_events();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        HistoryEvent::Upsert(p) => {
+            assert_eq!(p.id, id, "supersedes the same id, doesn't mint a new one");
+            assert_eq!(p.command, "", "blanked, matching the in-memory clear");
+        }
+        other => panic!("expected a superseding Upsert, got {other:?}"),
+    }
+}
+
+#[test]
+fn clear_command_output_line_queues_no_history_event() {
+    // Output is never persisted, so blanking one output line has nothing to
+    // reflect in the archive.
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    parser.process(b"hi\r\n", &mut screen); // captured output
+    screen.take_pending_history_events();
+
+    screen.clear_command_output_line(0, 0);
+    assert!(screen.take_pending_history_events().is_empty());
+}
+
+#[test]
+fn remove_command_queues_a_tombstone_for_its_id() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    let id = screen.command_log[0].id;
+    screen.take_pending_history_events();
+
+    screen.remove_command(0);
+    let events = screen.take_pending_history_events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0], HistoryEvent::Tombstone { id: t, .. } if t == id));
+}
+
+#[test]
+fn clear_scrollback_queues_a_tombstone_per_command() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo one");
+    run_command(&mut screen, &mut parser, "echo two");
+    let ids: Vec<u32> = screen.command_log.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), 2);
+    screen.take_pending_history_events();
+
+    screen.clear_scrollback();
+    let events = screen.take_pending_history_events();
+    let tombstoned: Vec<u32> = events
+        .iter()
+        .map(|e| match e {
+            HistoryEvent::Tombstone { id, .. } => *id,
+            other => panic!("expected only Tombstones, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(tombstoned, ids);
+}
+
+#[test]
+fn command_log_eviction_past_the_cap_does_not_queue_a_tombstone() {
+    // Falling off the live in-memory window is not a delete: the archived copy
+    // (if any) must be untouched, so no Tombstone should ever be queued for it.
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    for _ in 0..(MAX_COMMAND_LOG + 5) {
+        run_command(&mut screen, &mut parser, "x");
+    }
+    assert_eq!(screen.command_log.len(), MAX_COMMAND_LOG);
+
+    let events = screen.take_pending_history_events();
+    assert_eq!(
+        events.len(),
+        MAX_COMMAND_LOG + 5,
+        "one Upsert per command, no evictions"
+    );
+    assert!(
+        events.iter().all(|e| matches!(e, HistoryEvent::Upsert(_))),
+        "eviction must never itself queue a Tombstone"
+    );
+}
+
+#[test]
+fn seed_command_log_queues_no_events_and_advances_the_id_counter_past_loaded_ids() {
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.seed_command_log(vec![
+        PersistedCommandEntry {
+            id: 3,
+            command: "ls".to_string(),
+            started_at_epoch_ms: 1_750_000_000_000,
+            pane_tag: "Tab 1".to_string(),
+        },
+        PersistedCommandEntry {
+            id: 9,
+            command: "pwd".to_string(),
+            started_at_epoch_ms: 1_750_000_001_000,
+            pane_tag: "Tab 1".to_string(),
+        },
+    ]);
+    assert_eq!(screen.command_log.len(), 2);
+    assert!(
+        screen.take_pending_history_events().is_empty(),
+        "loading is the reverse of a mutation, not one"
+    );
+
+    // A new command's id must not collide with the highest loaded id (9).
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    let new_id = screen.command_log.back().unwrap().id;
+    assert!(
+        new_id > 9,
+        "got id {new_id}, expected something past the loaded max"
+    );
+}
+
+#[test]
+fn an_untracked_screen_queues_no_history_events_ever() {
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.set_untracked(true);
+    let mut parser = TermParser::new();
+
+    // Recording a command: live log yes, history event no.
+    run_command(&mut screen, &mut parser, "echo hi");
+    assert_eq!(screen.command_log.len(), 1, "the live log still works");
+    assert!(
+        screen.take_pending_history_events().is_empty(),
+        "recording on an untracked screen must queue nothing"
+    );
+
+    // The mutation paths queue nothing either.
+    screen.clear_command_output(0);
+    screen.remove_command(0);
+    run_command(&mut screen, &mut parser, "echo again");
+    screen.clear_scrollback();
+    assert!(
+        screen.take_pending_history_events().is_empty(),
+        "clear/remove/wipe on an untracked screen must queue nothing"
+    );
+}
+
+#[test]
+fn command_entries_carry_the_untracked_flag() {
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.set_untracked(true);
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    assert!(screen.command_log[0].untracked);
+
+    let mut tracked = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+    run_command(&mut tracked, &mut parser, "echo hi");
+    assert!(!tracked.command_log[0].untracked);
+
+    // Seeded (archived) entries are by definition tracked.
+    tracked.seed_command_log(vec![PersistedCommandEntry {
+        id: 9,
+        command: "ls".to_string(),
+        started_at_epoch_ms: 1_750_000_000_000,
+        pane_tag: "Tab 1".to_string(),
+    }]);
+    assert!(!tracked.command_log.back().unwrap().untracked);
+}
+
+#[test]
+fn reserve_command_ids_advances_but_never_regresses() {
+    let mut screen = TerminalScreen::new(20, 5);
+    let mut parser = TermParser::new();
+
+    // A floor set on a fresh screen: the next command starts there.
+    screen.reserve_command_ids(40);
+    run_command(&mut screen, &mut parser, "echo hi");
+    assert_eq!(screen.command_log.back().unwrap().id, 40);
+
+    // A lower floor after commands have run must not roll the counter back
+    // (that would mint colliding ids).
+    screen.reserve_command_ids(3);
+    run_command(&mut screen, &mut parser, "echo again");
+    assert_eq!(screen.command_log.back().unwrap().id, 41);
+}
+
+#[test]
+fn ris_reset_preserves_pane_tag_and_does_not_tombstone_the_wiped_log() {
+    let mut screen = TerminalScreen::new(20, 5);
+    screen.set_pane_tag("Tab 1".to_string());
+    let mut parser = TermParser::new();
+    run_command(&mut screen, &mut parser, "echo hi");
+    assert_eq!(screen.command_log.len(), 1, "sanity: something to wipe");
+    screen.take_pending_history_events();
+
+    parser.process(b"\x1bc", &mut screen); // RIS
+    assert!(
+        screen.command_log.is_empty(),
+        "RIS still wipes the live log"
+    );
+    assert_eq!(
+        screen.pane_tag, "Tab 1",
+        "but the pane tag survives a control-state reset"
+    );
+    assert!(
+        screen.take_pending_history_events().is_empty(),
+        "RIS is a terminal control-state reset, not a user delete — the \
+         archived copy must be left alone"
+    );
+}
