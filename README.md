@@ -89,7 +89,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 
 ## Customize
 
-`⌘,` opens a visual settings panel (no config file to hand-edit): pick one of 8 named
+`⌘,` opens a visual settings panel (no config file to hand-edit). Its **Appearance**
+section is split into sub-tabs — Theme, Tabs, Status bar, Terminal, Window — so each
+shows a focused pane instead of one long scroll. Pick one of 8 named
 themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
 size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and the

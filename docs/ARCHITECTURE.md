@@ -228,23 +228,33 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   `Palette` with a `phosphor::TerminalStyle`. Named themes come from rime's shared
   `builtin_themes()` catalog (8, the same list fed-ide shows), each with a base16 ANSI
   palette; a base16 import / panel edit becomes a "Custom" palette (chrome derived from
-  the terminal colors). The settings panel also carries a **Highlight active tab**
-  toggle (the rime `tabs` strip takes a `TabBarStyle { highlight_active, text_size }`,
-  so accent-ink vs. subtler emphasis is host-tunable), an **auto-hide status bar**
-  toggle (on by default; when on, `main_view` drops the bar from the column and
-  floats it back over the bottom edge via a `stack` only while
-  `status_bar_revealed()` — the pointer within `STATUS_BAR_REVEAL_ZONE` of the
-  bottom — so toggling it never reflows the pane grid), and a read-only **Keys**
-  section documenting the shortcuts.
+  the terminal colors). The **Appearance** section is itself split into horizontal
+  sub-tabs (`APPEARANCE_TABS`: Theme / Tabs / Status bar / Terminal / Window,
+  tracked by `Tty::appearance_tab`) so it shows one pane at a time instead of one
+  long scroll; `settings_subtabs` renders the chip strip. Those panes carry a
+  **Highlight active tab** toggle (the rime `tabs` strip takes a `TabBarStyle {
+  highlight_active, text_size }`, so accent-ink vs. subtler emphasis is
+  host-tunable); the status-bar controls — **Disable status bar** (drops it
+  entirely; wins over auto-hide) and **auto-hide status bar** (on by default; when
+  on, `main_view` drops the bar from the column and floats it back over the bottom
+  edge via a `stack` only while `status_bar_revealed()` — the pointer within
+  `STATUS_BAR_REVEAL_ZONE` of the bottom — so toggling it never reflows the pane
+  grid), plus the pin-popovers toggle and the machine-stats cell editor; and the
+  **Window** controls — **Keep window on top** (drives the iced `window::Level`,
+  broadcast to every live window via `window::set_level`) and the two transparency
+  amounts. A read-only **Keys** section documents the shortcuts.
   `tty.settings.json` persists the theme name, font family/size, any custom palette,
-  the active-tab highlight flag, the status-bar auto-hide flag, the
-  "Transparency On Blur" amount, and the encrypted-history fields
+  the active-tab highlight flag, the status-bar flags (`status_bar_autohide`,
+  `status_bar_disabled`, `status_bar_metrics_pinned`) and the ordered
+  `status_bar_metrics`, the window flags (`window_always_on_top`), the
+  `unfocused_opacity` / `focused_opacity` amounts, and the encrypted-history fields
   (`encrypted_history_enabled`, `history_key_source`, `history_kdf`,
   `history_fanout`, `history_cipher`, `history_reauth_interval_minutes`,
-  `history_session_start`). `window_opacity()` drives
-  a uniform per-surface fade when the window loses focus (no runtime window-opacity API
-  in iced 0.14), clamped to `settings::MIN_OPACITY` so it tops out at 95% and never
-  fades to an invisible, unrecoverable window.
+  `history_session_start`). `window_opacity()` drives a uniform per-surface fade —
+  the `focused_opacity` while focused (floored at `MIN_FOCUSED_OPACITY`, so active
+  transparency tops out at 50% and stays readable) and the `unfocused_opacity`
+  otherwise (floored at `MIN_OPACITY`, 95%) — since iced 0.14 has no runtime
+  window-opacity API, and never fades to an invisible, unrecoverable window.
 - **`app_icon`** — the neon "tty." icon glue (shared shape with fed/rift): decodes the
   embedded `assets/icon-512.png` into an `iced::window::Icon` (Linux/Windows) and sets the
   macOS **Dock** icon at runtime via AppKit (`objc2`) from the first `root_view` render
