@@ -11,11 +11,12 @@ use crate::message::Message;
 use crate::state::{Term, Tty};
 
 mod metrics;
+mod popover;
 mod scrollback;
 mod settings;
 mod status_bar;
 mod util;
-use metrics::{metric_pane_content, metric_popover_card, place_metric_popover};
+use popover::{metric_pane_content, metric_popover_card, place_metric_popover};
 use scrollback::{age_from_epoch_ms, scrollback_panel_view};
 use settings::{passphrase_prompt_view, settings_body};
 pub use status_bar::status_bar_scroll_max;
