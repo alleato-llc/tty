@@ -275,56 +275,29 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
         chrome.into()
     };
 
-    // A metric's drill-in popover floats over the status bar when a sparkline is
-    // clicked; a transparent full-window layer closes it on a click away.
-    // `opaque` on the card stops a click *on* it from hitting that close layer.
-    // Pressing the card body starts a drag-move; the grip and buttons handle
-    // their own press first (so those don't move it).
-    let chrome: Element<'_, Message> = match metric_detail_popover(state) {
-        Some(card) => {
-            let draggable = opaque(mouse_area(card).on_press(Message::MetricDetailMoveStart));
-            let (dx, dy) = state.metric_detail_move;
-            let known = state.window_width > 1.0 && state.window_height > 1.0;
-            let anchored = if (dx != 0.0 || dy != 0.0) && known {
-                // Moved: place absolutely from the default anchor plus the drag
-                // offset (top-left via padding; horizontal is exact, vertical is
-                // measured up from the bottom). Clamped to stay on-screen.
-                let (card_w, _) = state.metric_detail_effective_size();
-                let base_gap = if state.metric_detail_expanded {
-                    60.0
-                } else {
-                    44.0
-                };
-                let left = ((state.window_width - card_w) / 2.0 + dx)
-                    .clamp(8.0, (state.window_width - card_w - 8.0).max(8.0));
-                let bottom = (base_gap - dy).clamp(8.0, (state.window_height - 120.0).max(8.0));
-                container(draggable)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Left)
-                    .align_y(iced::alignment::Vertical::Bottom)
-                    .padding(iced::Padding::ZERO.left(left).bottom(bottom))
-            } else {
-                // Default: compact anchored above the status bar, expanded centered.
-                let a = container(draggable)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center);
-                if state.metric_detail_expanded {
-                    a.align_y(iced::alignment::Vertical::Center)
-                } else {
-                    a.align_y(iced::alignment::Vertical::Bottom)
-                        .padding(iced::Padding::ZERO.bottom(44.0))
-                }
-            };
+    // The metric drill-in popovers float over the status bar. Each card starts a
+    // drag-move when its body is pressed (`opaque` stops that press from falling
+    // through); its edges/controls take their own press first. In the default
+    // one-at-a-time mode a transparent full-window layer beneath the single card
+    // closes it on a click away. When pinned, several cards stack (cascaded so
+    // they don't fully overlap) with no click-away closer — each is dismissed by
+    // its own "×" or Escape.
+    let mut chrome = chrome;
+    let pinned = state.settings.status_bar_metrics_pinned();
+    for (i, pop) in state.metric_details.iter().enumerate() {
+        let card = metric_popover_card(state, pop, i);
+        let draggable = opaque(mouse_area(card).on_press(Message::MetricDetailMoveStart(i)));
+        let anchored = place_metric_popover(state, pop, i, draggable);
+        chrome = if pinned {
+            iced::widget::stack![chrome, anchored].into()
+        } else {
             iced::widget::stack![
                 chrome,
                 opaque(mouse_area(anchored).on_press(Message::CloseMetricDetail)),
             ]
             .into()
-        }
-        None => chrome,
-    };
+        };
+    }
 
     // The settings panel floats over the terminal when ⌘, is open.
     let mut base: Element<'_, Message> = if state.show_settings {
@@ -1557,6 +1530,11 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             state.settings.status_bar_autohide(),
             Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
         ),
+        toggle(
+            "Keep metric popovers open (pin several; click away won't close)",
+            state.settings.status_bar_metrics_pinned(),
+            Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
+        ),
         status_bar_metrics_editor(state),
         section("Terminal"),
         stepper(
@@ -1760,7 +1738,9 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
         };
 
     let render = match cfg.kind {
-        K::Cpu => single(
+        // All three CPU drill-ins share the aggregate cell; only their popover
+        // body differs.
+        K::Cpu | K::CpuCores | K::CpuAll => single(
             mx::cpu_label(stats),
             &m.cpu_history,
             100.0,
@@ -1869,11 +1849,16 @@ fn metric_cell<'a>(style: crate::settings::MetricStyle, r: MetricRender) -> Elem
 /// click-away/Escape have a target and the drill-in gives visible feedback. The
 /// chart reuses [`metric_render`], so it shows exactly the series and scale the
 /// clicked cell did, just larger.
-fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
+fn metric_popover_card<'a>(
+    state: &'a Tty,
+    pop: &crate::state::MetricPopover,
+    index: usize,
+) -> Element<'a, Message> {
     use crate::settings::{MetricKind as K, MetricStyle, ResolvedMetric};
 
-    let kind = state.metric_detail?;
-    let expanded = state.metric_detail_expanded;
+    let kind = pop.kind;
+    let expanded = pop.expanded;
+    let pinned = state.settings.status_bar_metrics_pinned();
     let t = theme::tokens();
     let render = metric_render(
         ResolvedMetric {
@@ -1884,8 +1869,8 @@ fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
     );
 
     // The current size: the user's dragged override, else the compact or
-    // expanded default (see `metric_detail_effective_size`).
-    let (card_w, chart_h) = state.metric_detail_effective_size();
+    // expanded default (see `MetricPopover::effective_size`).
+    let (card_w, chart_h) = pop.effective_size(state.window_width, state.window_height);
 
     // The line chart needs at least a couple of points to draw a segment; below
     // that (an empty or single-point history) the card shows a plain note.
@@ -1893,10 +1878,15 @@ fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
         r.series.iter().map(|(v, _)| v.len()).max().unwrap_or(0)
     });
 
-    let body: Element<'_, Message> = if kind == K::Cpu && has_per_core_cpu(state) {
-        // CPU drills into the aggregate line chart *and* a per-core sparkline
-        // grid grouped by cluster (P/E), below it.
-        per_core_cpu_body(state, expanded, card_w, chart_h)
+    // CPU has three drill-ins: total (the aggregate line chart), per-core (the
+    // cluster grid), and "all" (both). Per-core / all fall back to the aggregate
+    // where the platform reports no per-core history.
+    let has_cores = kind.is_cpu() && has_per_core_cpu(state);
+
+    let body: Element<'a, Message> = if kind == K::CpuAll && has_cores {
+        combined_cpu_body(state, expanded, card_w, chart_h)
+    } else if kind == K::CpuCores && has_cores {
+        core_grid_body(state, expanded, card_w)
     } else if let (true, Some(r)) = (filled >= 2, render) {
         // Each history series becomes a polyline over its sample index, on the
         // same shared 0..max scale the sparkline used.
@@ -1917,22 +1907,19 @@ fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
         // as a fraction of full capacity (39% memory sits at 39% height, not the
         // top). The open-ended rate metrics auto-scale to their own recent peak
         // and label the axis with that peak.
-        let (y_max, y_max_label) = match kind {
-            K::Cpu | K::Mem => (Some(100.0), Some("100%".to_string())),
-            _ => {
-                let peak = r
-                    .series
-                    .iter()
-                    .flat_map(|(v, _)| v.iter().copied())
-                    .fold(1.0_f32, f32::max);
-                (None, Some(crate::metrics::format_rate(peak)))
-            }
-        };
-        let hover_format: Option<fn(f64) -> String> = Some(if matches!(kind, K::Cpu | K::Mem) {
-            hover_percent
+        let bounded = kind.is_cpu() || kind == K::Mem;
+        let (y_max, y_max_label) = if bounded {
+            (Some(100.0), Some("100%".to_string()))
         } else {
-            hover_rate
-        });
+            let peak = r
+                .series
+                .iter()
+                .flat_map(|(v, _)| v.iter().copied())
+                .fold(1.0_f32, f32::max);
+            (None, Some(crate::metrics::format_rate(peak)))
+        };
+        let hover_format: Option<fn(f64) -> String> =
+            Some(if bounded { hover_percent } else { hover_rate });
         let chart = line_chart(
             LineChart {
                 title: kind.to_string(),
@@ -1944,18 +1931,7 @@ fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
             chart_h,
         );
 
-        // The expand / collapse affordance floats over the chart's top-right:
-        // "+" grows it to the window-sized card, "−" shrinks back to compact.
-        let toggle = container(button::ghost(
-            if expanded { "−" } else { "+" },
-            Message::ToggleMetricDetailExpanded,
-        ))
-        .width(Length::Fill)
-        .align_x(iced::alignment::Horizontal::Right)
-        .padding([2, 4]);
-        let chart_layer = iced::widget::stack![chart, toggle];
-
-        let mut card = column![chart_layer, text(r.label).size(13).color(t.ink)].spacing(8);
+        let mut card = column![chart, text(r.label).size(13).color(t.ink)].spacing(8);
         // A small legend names the two overlaid lines for the combined metrics
         // (single-series metrics carry their identity in the title/label already).
         match kind {
@@ -1986,7 +1962,82 @@ fn metric_detail_popover(state: &Tty) -> Option<Element<'_, Message>> {
             },
             ..container::background(t.surface)
         });
-    Some(with_resize_edges(card.into()))
+    // Border-resize strips and the top-right controls (expand, plus a close "×"
+    // when popovers are pinned) overlay the card.
+    iced::widget::stack![
+        with_resize_edges(index, card.into()),
+        popover_controls(index, expanded, pinned),
+    ]
+    .into()
+}
+
+/// The top-right control cluster overlaid on a popover card: the expand "+" /
+/// collapse "−" toggle, plus a close "×" when popovers are pinned (in the
+/// one-at-a-time mode a click away closes it, so no per-card button is needed).
+fn popover_controls<'a>(index: usize, expanded: bool, pinned: bool) -> Element<'a, Message> {
+    let mut controls = row![button::ghost(
+        if expanded { "−" } else { "+" },
+        Message::ToggleMetricDetailExpanded(index),
+    )]
+    .spacing(4)
+    .align_y(iced::Alignment::Center);
+    if pinned {
+        controls = controls.push(button::ghost("×", Message::CloseMetricPopover(index)));
+    }
+    container(controls)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Right)
+        .align_y(iced::alignment::Vertical::Top)
+        .padding([2, 4])
+        .into()
+}
+
+/// Place a popover `card` in the window: compact cards anchor just above the
+/// status bar (centered), expanded ones center; a user drag offsets from there,
+/// laid out absolutely via top-left padding (horizontal exact, vertical measured
+/// up from the bottom). Pinned popovers past the first cascade up-and-right so a
+/// stack stays legible. All clamped to stay on-screen; the headless path (window
+/// size 0) falls back to the alignment anchor.
+fn place_metric_popover<'a>(
+    state: &Tty,
+    pop: &crate::state::MetricPopover,
+    index: usize,
+    card: Element<'a, Message>,
+) -> Element<'a, Message> {
+    use iced::alignment::{Horizontal, Vertical};
+
+    let known = state.window_width > 1.0 && state.window_height > 1.0;
+    let cascade = 28.0 * index as f32;
+    let dx = pop.move_offset.0 + cascade;
+    let dy = pop.move_offset.1 - cascade;
+    let (card_w, _) = pop.effective_size(state.window_width, state.window_height);
+
+    if (dx != 0.0 || dy != 0.0) && known {
+        let base_gap = if pop.expanded { 60.0 } else { 44.0 };
+        let left = ((state.window_width - card_w) / 2.0 + dx)
+            .clamp(8.0, (state.window_width - card_w - 8.0).max(8.0));
+        let bottom = (base_gap - dy).clamp(8.0, (state.window_height - 120.0).max(8.0));
+        container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Left)
+            .align_y(Vertical::Bottom)
+            .padding(iced::Padding::ZERO.left(left).bottom(bottom))
+            .into()
+    } else {
+        let a = container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center);
+        if pop.expanded {
+            a.align_y(Vertical::Center).into()
+        } else {
+            a.align_y(Vertical::Bottom)
+                .padding(iced::Padding::ZERO.bottom(44.0))
+                .into()
+        }
+    }
 }
 
 /// Whether the per-core CPU grid has enough history to draw (a baseline plus at
@@ -2045,22 +2096,14 @@ fn core_color(kind: prexp_core::system::CpuKind, cur: f32) -> iced::Color {
     }
 }
 
-/// The CPU drill-in's body: the aggregate line chart (with the size toggle over
-/// its top-right), then a grid of per-core sparklines grouped by cluster.
-fn per_core_cpu_body(
-    state: &Tty,
-    expanded: bool,
-    card_w: f32,
-    chart_h: f32,
-) -> Element<'_, Message> {
-    let t = theme::tokens();
-    let m = &state.metrics;
-    let agg = m.latest.map(|s| s.cpu_percent).unwrap_or(0.0);
-
-    // (1) The overall CPU chart — the same line chart the other metrics drill
-    // into (peak-scaled y axis, hover readout), with the "+"/"−" size toggle.
+/// The aggregate CPU line chart: overall CPU% over its retained history on a
+/// fixed 0..100 gauge, with the hover readout. Shared by the `Cpu` drill-in
+/// (via the generic branch) and the `CpuAll` combined body.
+fn aggregate_cpu_chart(state: &Tty, chart_h: f32) -> Element<'_, Message> {
+    let agg = state.metrics.latest.map(|s| s.cpu_percent).unwrap_or(0.0);
     let series = vec![Series {
-        points: m
+        points: state
+            .metrics
             .cpu_history
             .iter()
             .enumerate()
@@ -2068,37 +2111,29 @@ fn per_core_cpu_body(
             .collect(),
         color: load_color(agg),
     }];
-    let chart = line_chart(
+    line_chart(
         LineChart {
             title: "CPU".into(),
             series,
-            // A fixed 0..100 gauge, matching the per-core sparklines below.
             y_max: Some(100.0),
             y_max_label: Some("100%".to_string()),
             hover_format: Some(hover_percent),
         },
         chart_h,
-    );
-    let toggle = container(button::ghost(
-        if expanded { "−" } else { "+" },
-        Message::ToggleMetricDetailExpanded,
-    ))
-    .width(Length::Fill)
-    .align_x(iced::alignment::Horizontal::Right)
-    .padding([2, 4]);
-    let mut col = column![
-        iced::widget::stack![chart, toggle],
-        text(format!("CPU {}%", agg.round() as u32))
-            .size(13)
-            .color(t.ink),
-    ]
-    .spacing(8);
+    )
+}
 
-    // (2) The per-core grid under it, grouped by cluster.
+/// The per-core sparkline grid, grouped into Performance / Efficiency clusters,
+/// each cell colored by its cluster (see [`core_color`]). Column count fits the
+/// card width. Shared by the `CpuCores` and `CpuAll` drill-ins.
+fn cpu_core_grid(state: &Tty, expanded: bool, card_w: f32) -> iced::widget::Column<'_, Message> {
+    let t = theme::tokens();
+    let m = &state.metrics;
     let (cell_w, cell_h) = if expanded { (96.0, 34.0) } else { (58.0, 20.0) };
     // Fit as many columns as the card width holds (accounting for padding + gap).
     let cols = (((card_w - 28.0) / (cell_w + 8.0)).floor() as usize).max(2);
     let n = m.core_history.len();
+    let mut col = column![].spacing(8);
     for (name, kind, cores) in core_groups(m.perf_levels.as_deref(), n) {
         col = col.push(text(name).size(11).color(t.muted));
         let mut grid = column![].spacing(6);
@@ -2111,8 +2146,41 @@ fn per_core_cpu_body(
         }
         col = col.push(grid);
     }
+    col
+}
 
-    col.into()
+/// The `CpuAll` drill-in body: the aggregate line chart, the current readout,
+/// then the per-core grid — the two CPU views stacked.
+fn combined_cpu_body(
+    state: &Tty,
+    expanded: bool,
+    card_w: f32,
+    chart_h: f32,
+) -> Element<'_, Message> {
+    let t = theme::tokens();
+    let agg = state.metrics.latest.map(|s| s.cpu_percent).unwrap_or(0.0);
+    column![
+        aggregate_cpu_chart(state, chart_h),
+        text(format!("CPU {}%", agg.round() as u32))
+            .size(13)
+            .color(t.ink),
+    ]
+    .spacing(8)
+    .push(cpu_core_grid(state, expanded, card_w))
+    .into()
+}
+
+/// The `CpuCores` drill-in body: the per-core grid alone, under a compact
+/// aggregate readout (no line chart — that is the separate `Cpu` drill-in).
+fn core_grid_body(state: &Tty, expanded: bool, card_w: f32) -> Element<'_, Message> {
+    let t = theme::tokens();
+    let agg = state.metrics.latest.map(|s| s.cpu_percent).unwrap_or(0.0);
+    column![text(format!("CPU cores — {}%", agg.round() as u32))
+        .size(13)
+        .color(t.ink),]
+    .spacing(8)
+    .push(cpu_core_grid(state, expanded, card_w))
+    .into()
 }
 
 /// One core's cell: a small sparkline of its recent load (colored by cluster via
@@ -2153,13 +2221,14 @@ fn core_cell<'a>(
 /// resize cursor on hover. It carries no paint of its own; the card's own border
 /// is the visible edge the user grabs.
 fn resize_strip<'a>(
+    index: usize,
     edge: crate::state::ResizeEdge,
     width: Length,
     height: Length,
     cursor: iced::mouse::Interaction,
 ) -> Element<'a, Message> {
     mouse_area(iced::widget::Space::new().width(width).height(height))
-        .on_press(Message::MetricDetailResizeStart(edge))
+        .on_press(Message::MetricDetailResizeStart(index, edge))
         .interaction(cursor)
         .into()
 }
@@ -2168,8 +2237,8 @@ fn resize_strip<'a>(
 /// and its bottom-right corner, so the popover resizes by dragging its borders
 /// (each with the matching resize cursor) rather than a separate grip. The strips
 /// stack over the card; `iced`'s `stack` sizes to its first child, so they span
-/// exactly the card, not the window.
-fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
+/// exactly the card, not the window. `index` is the popover the drag addresses.
+fn with_resize_edges(index: usize, card: Element<'_, Message>) -> Element<'_, Message> {
     use crate::state::ResizeEdge;
     use iced::alignment::{Horizontal::Right, Vertical::Bottom};
     use iced::mouse::Interaction;
@@ -2178,6 +2247,7 @@ fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
     const CORNER: f32 = 16.0;
 
     let right = container(resize_strip(
+        index,
         ResizeEdge::Right,
         Length::Fixed(EDGE),
         Length::Fill,
@@ -2187,6 +2257,7 @@ fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
     .height(Length::Fill)
     .align_x(Right);
     let bottom = container(resize_strip(
+        index,
         ResizeEdge::Bottom,
         Length::Fill,
         Length::Fixed(EDGE),
@@ -2196,6 +2267,7 @@ fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
     .height(Length::Fill)
     .align_y(Bottom);
     let corner = container(resize_strip(
+        index,
         ResizeEdge::Corner,
         Length::Fixed(CORNER),
         Length::Fixed(CORNER),
@@ -2209,7 +2281,7 @@ fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
     iced::widget::stack![card, right, bottom, corner].into()
 }
 
-/// Hover-readout formatters for [`metric_detail_popover`]'s chart, as plain `fn`
+/// Hover-readout formatters for [`metric_popover_card`]'s chart, as plain `fn`
 /// pointers `rime`'s `LineChart` can hold: a percentage for CPU/memory, a
 /// throughput rate for the network/disk series.
 fn hover_percent(v: f64) -> String {

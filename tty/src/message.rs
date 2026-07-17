@@ -197,6 +197,8 @@ pub enum Message {
     SetTabHighlight(bool),
     /// Toggle the auto-hiding status bar (reveals on near-hover at the bottom).
     SetStatusBarAutohide(bool),
+    /// Toggle pinning metric popovers open on a click away (several at once).
+    SetStatusBarMetricsPinned(bool),
     /// Append a machine-stat cell to the status bar's ordered list, by metric
     /// key (`"cpu"`, `"mem"`).
     StatusBarMetricAdd(String),
@@ -213,17 +215,21 @@ pub enum Message {
     /// Open the detail popover for a status-bar metric (clicked its sparkline),
     /// by metric key (`"cpu"`, `"disk_io"`, …).
     OpenMetricDetail(String),
-    /// Close the metric detail popover (click-away or Escape).
+    /// Close all open metric popovers (a click on the background in the default
+    /// one-at-a-time mode, or Escape in any mode).
     CloseMetricDetail,
-    /// Toggle the open metric popover between the compact bottom-anchored card
-    /// and the large centered one (its "Expand" / "Collapse" affordance).
-    ToggleMetricDetailExpanded,
-    /// Begin a drag-resize of the metric popover from one of its edges/corner.
-    /// Tracked via `PointerMoved` and ended by `PointerReleased`.
-    MetricDetailResizeStart(crate::state::ResizeEdge),
-    /// Begin a drag-move of the metric popover (its body was pressed). Tracked
-    /// via `PointerMoved` and ended by `PointerReleased`.
-    MetricDetailMoveStart,
+    /// Close the single metric popover at this index (its "×" button, shown when
+    /// popovers are pinned).
+    CloseMetricPopover(usize),
+    /// Toggle the metric popover at this index between the compact card and the
+    /// large one (its "+" / "−" affordance).
+    ToggleMetricDetailExpanded(usize),
+    /// Begin a drag-resize of the metric popover at this index from one of its
+    /// edges/corner. Tracked via `PointerMoved` and ended by `PointerReleased`.
+    MetricDetailResizeStart(usize, crate::state::ResizeEdge),
+    /// Begin a drag-move of the metric popover at this index (its body was
+    /// pressed). Tracked via `PointerMoved` and ended by `PointerReleased`.
+    MetricDetailMoveStart(usize),
     /// Toggle encrypted, persisted command history. Turning it on opens the
     /// keychain explainer first (nothing is touched until the user
     /// continues); the start itself is async and commits the setting only on

@@ -110,9 +110,12 @@ window is too narrow to hold every cell the bar sheds them from the right rather
 than wrapping. Click any sparkline to **drill in** — a small popover shows that
 metric's full-size line chart over its retained history, with the current
 readout; hover a point to read its value, hit **+** for a large centered chart,
-drag the corner to resize, and click away or press `Esc` to close it. Clicking
-**CPU** drills into a per-core sparkline grid grouped into Performance and
-Efficiency cores. The samplers reuse the sibling `fdtop` project's `prexp-core`
+drag any **border** to resize, and click away or press `Esc` to close it. CPU is
+offered as three separate cells — **CPU** (the aggregate chart), **CPU Cores**
+(a per-core sparkline grid grouped into Performance and Efficiency cores), and
+**CPU (all)** (both) — so you pick the view you want. Turn on **Keep metric
+popovers open** to pin several side by side at once (each with its own **×**;
+`Esc` closes all). The samplers reuse the sibling `fdtop` project's `prexp-core`
 (network / disk and the per-core P/E split are macOS-only for now). Design sketch
 in `docs/ideas/status-bar-metrics.md`.
 

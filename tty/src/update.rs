@@ -33,21 +33,27 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             // (body); resize takes precedence if both somehow started. Deltas are
             // from where the drag began, clamped to stay usable / on-screen. Only
             // the grabbed edge's axes move; the other keeps its starting value.
-            if let Some((start, (bw, bh), edge)) = state.metric_detail_resize {
-                let (h_ax, v_ax) = edge.axes();
-                let w = if h_ax {
-                    (bw + (p.x - start.x)).clamp(280.0, (state.window_width - 40.0).max(280.0))
-                } else {
-                    bw
-                };
-                let h = if v_ax {
-                    (bh + (p.y - start.y)).clamp(110.0, (state.window_height - 150.0).max(110.0))
-                } else {
-                    bh
-                };
-                state.metric_detail_size = Some((w, h));
-            } else if let Some((start, (bx, by))) = state.metric_detail_move_drag {
-                state.metric_detail_move = (bx + (p.x - start.x), by + (p.y - start.y));
+            // Both address a popover by its index in `metric_details`.
+            let (ww, wh) = (state.window_width, state.window_height);
+            if let Some((i, start, (bw, bh), edge)) = state.metric_detail_resize {
+                if let Some(pop) = state.metric_details.get_mut(i) {
+                    let (h_ax, v_ax) = edge.axes();
+                    let w = if h_ax {
+                        (bw + (p.x - start.x)).clamp(280.0, (ww - 40.0).max(280.0))
+                    } else {
+                        bw
+                    };
+                    let h = if v_ax {
+                        (bh + (p.y - start.y)).clamp(110.0, (wh - 150.0).max(110.0))
+                    } else {
+                        bh
+                    };
+                    pop.size = Some((w, h));
+                }
+            } else if let Some((i, start, (bx, by))) = state.metric_detail_move_drag {
+                if let Some(pop) = state.metric_details.get_mut(i) {
+                    pop.move_offset = (bx + (p.x - start.x), by + (p.y - start.y));
+                }
             }
         }
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
@@ -267,32 +273,60 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
+        Message::SetStatusBarMetricsPinned(on) => state.set_status_bar_metrics_pinned(on),
         Message::StatusBarMetricAdd(metric) => state.add_status_bar_metric(&metric),
         Message::StatusBarMetricRemove(idx) => state.remove_status_bar_metric(idx),
         Message::StatusBarMetricMove(idx, delta) => state.move_status_bar_metric(idx, delta),
         Message::StatusBarMetricStyle(idx, style) => state.set_status_bar_metric_style(idx, &style),
         Message::SampleMetrics => state.metrics.sample(),
         Message::OpenMetricDetail(metric) => {
-            state.metric_detail = crate::settings::MetricKind::from_setting_str(&metric);
-            // A fresh open always starts compact, at the default size/position.
-            state.reset_metric_detail_layout();
+            if let Some(kind) = crate::settings::MetricKind::from_setting_str(&metric) {
+                let pop = crate::state::MetricPopover::new(kind);
+                if state.settings.status_bar_metrics_pinned() {
+                    // Pinned: accumulate, but don't stack a duplicate of a metric
+                    // already open (a re-click on an open one is a no-op).
+                    if !state.metric_details.iter().any(|p| p.kind == kind) {
+                        state.metric_details.push(pop);
+                    }
+                } else {
+                    // One-at-a-time: replace whatever was open.
+                    state.metric_details = vec![pop];
+                }
+            }
         }
         Message::CloseMetricDetail => {
-            state.metric_detail = None;
-            state.reset_metric_detail_layout();
+            // Click-away / Escape: close every open popover and drop any drag.
+            state.metric_details.clear();
+            state.metric_detail_resize = None;
+            state.metric_detail_move_drag = None;
         }
-        Message::ToggleMetricDetailExpanded => {
-            state.metric_detail_expanded = !state.metric_detail_expanded;
-            // Snap to the new state's default size/position; drags re-customize.
-            state.metric_detail_size = None;
-            state.metric_detail_move = (0.0, 0.0);
+        Message::CloseMetricPopover(i) => {
+            if i < state.metric_details.len() {
+                state.metric_details.remove(i);
+                // Indices shift on remove; cancel any in-flight drag to be safe.
+                state.metric_detail_resize = None;
+                state.metric_detail_move_drag = None;
+            }
         }
-        Message::MetricDetailResizeStart(edge) => {
-            state.metric_detail_resize =
-                Some((state.pointer, state.metric_detail_effective_size(), edge));
+        Message::ToggleMetricDetailExpanded(i) => {
+            if let Some(pop) = state.metric_details.get_mut(i) {
+                pop.expanded = !pop.expanded;
+                // Snap to the new state's default size/position; drags re-customize.
+                pop.size = None;
+                pop.move_offset = (0.0, 0.0);
+            }
         }
-        Message::MetricDetailMoveStart => {
-            state.metric_detail_move_drag = Some((state.pointer, state.metric_detail_move));
+        Message::MetricDetailResizeStart(i, edge) => {
+            let (ww, wh) = (state.window_width, state.window_height);
+            if let Some(pop) = state.metric_details.get(i) {
+                state.metric_detail_resize =
+                    Some((i, state.pointer, pop.effective_size(ww, wh), edge));
+            }
+        }
+        Message::MetricDetailMoveStart(i) => {
+            if let Some(pop) = state.metric_details.get(i) {
+                state.metric_detail_move_drag = Some((i, state.pointer, pop.move_offset));
+            }
         }
         Message::SetEncryptedHistoryEnabled(true) => state.request_enable_encrypted_history(),
         Message::SetEncryptedHistoryEnabled(false) => state.disable_encrypted_history(),
@@ -407,9 +441,11 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     // Escape closes the rename field / settings panel / find bar (when open) instead of
     // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
-        if state.metric_detail.is_some() {
-            state.metric_detail = None;
-            state.reset_metric_detail_layout();
+        if !state.metric_details.is_empty() {
+            // Escape closes every open popover at once (in both modes).
+            state.metric_details.clear();
+            state.metric_detail_resize = None;
+            state.metric_detail_move_drag = None;
             return iced::Task::none();
         }
         if state.renaming.is_some() {

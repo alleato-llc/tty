@@ -227,14 +227,30 @@ that metric's full-size chart, rather than a whole system panel.
      third up the plot, not at the top. The open-ended rate metrics (net / disk
      I/O) instead auto-scale to their own recent peak, labeling the axis with that
      peak in the metric's units (bytes/sec) rather than a meaningless fixed max.
-   - **Per-core CPU grid.** CPU drills into a grid of small per-core sparklines
-     (each color-graded by its current load) instead of the single aggregate
-     chart, grouped into **Performance** / **Efficiency** sections. Per-core %
-     history lives in `Metrics::core_history`; the P/E split comes from
+   - **Per-core CPU grid.** A grid of small per-core sparklines (each color-graded
+     by its current load) grouped into **Performance** / **Efficiency** sections.
+     Per-core % history lives in `Metrics::core_history`; the P/E split comes from
      `prexp-core`'s `cpu_perf_levels()` (each core's IORegistry `cluster-type`,
      read once and cached), falling back to one ungrouped section where the
      platform reports no perf levels. The aggregate sparkline stays in the inline
      status-bar cell.
+   - **Three CPU drill-ins, separately configurable.** CPU is offered as three
+     status-bar metrics (`cpu`, `cpu_cores`, `cpu_all`) that share the same
+     aggregate sparkline cell but drill into different popovers: **CPU** → the
+     aggregate line chart alone; **CPU Cores** → the per-core grid alone; **CPU
+     (all)** → both stacked. A user can pin whichever they want (even all three).
+     The dispatch is in `view::metric_popover_card` off `MetricKind` (see
+     `combined_cpu_body` / `core_grid_body` / `aggregate_cpu_chart`); the per-core
+     variants fall back to the aggregate where no per-core history exists.
+   - **Pinned popovers.** A "Keep metric popovers open" setting
+     (`status_bar_metrics_pinned`) switches the drill-in from one-at-a-time to a
+     pinboard: clicking a metric adds a popover to `Tty::metric_details` (a `Vec`
+     of `MetricPopover`, each with independent expand / size / position) instead
+     of replacing the open one, a click away no longer closes them, and each card
+     carries its own "×" (Escape still closes all). Pinned cards cascade
+     up-and-right from the anchor so a stack stays legible. Off (the default) keeps
+     the single-card, click-away-closes behavior; turning it off truncates any
+     stack back to one.
 6. **System overlay** (mini-fdtop) on click.
 
 ## Open questions

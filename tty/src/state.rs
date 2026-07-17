@@ -283,29 +283,73 @@ pub struct Tty {
     /// unless `settings.status_bar_metrics()` is non-empty; fed by the periodic
     /// `SampleMetrics` tick. See `metrics.rs`.
     pub metrics: crate::metrics::Metrics,
-    /// Which metric's detail popover is open (a click on its status-bar
-    /// sparkline), or `None` when closed. Shows that metric's full history as a
-    /// larger line chart floating above the bar.
-    pub metric_detail: Option<crate::settings::MetricKind>,
-    /// Whether the open metric popover is expanded to a large, centered card
-    /// (the "Expand" affordance) rather than the compact bottom-anchored one.
-    /// Reset to `false` each time a metric is opened or the popover closes.
-    pub metric_detail_expanded: bool,
-    /// A user-dragged size override, `(card_width, chart_height)` in px, or
-    /// `None` for the current state's default. Applies whether compact or
-    /// expanded. Reset to `None` on open/close and when toggling expand.
-    pub metric_detail_size: Option<(f32, f32)>,
-    /// An in-progress popover resize drag: the pointer where it began, the size
-    /// then, and which edge/corner was grabbed (so only the dragged axes
-    /// change). `None` when not resizing. Ended by `PointerReleased`.
-    pub metric_detail_resize: Option<(iced::Point, (f32, f32), ResizeEdge)>,
-    /// A user-dragged position offset `(dx, dy)` in px from the popover's
-    /// default anchor (bottom-centered compact / centered expanded). `(0, 0)`
-    /// keeps the default placement. Reset on open/close and expand toggle.
-    pub metric_detail_move: (f32, f32),
-    /// An in-progress popover move drag: the pointer where it began and the
-    /// offset then; `None` when not moving. Ended by `PointerReleased`.
-    pub metric_detail_move_drag: Option<(iced::Point, (f32, f32))>,
+    /// The metric drill-in popovers currently open (a click on a status-bar
+    /// sparkline opens one), each with its own layout. Empty when none are open.
+    /// In the default one-at-a-time mode this holds 0 or 1; with
+    /// [`crate::settings::Settings::status_bar_metrics_pinned`] on it can hold
+    /// several, stacked and independently placed.
+    pub metric_details: Vec<MetricPopover>,
+    /// An in-progress popover resize drag: which popover (index into
+    /// [`Self::metric_details`]), the pointer where it began, the size then, and
+    /// which edge/corner was grabbed (so only the dragged axes change). `None`
+    /// when not resizing. Ended by `PointerReleased`.
+    pub metric_detail_resize: Option<(usize, iced::Point, (f32, f32), ResizeEdge)>,
+    /// An in-progress popover move drag: which popover (index), the pointer where
+    /// it began, and its offset then; `None` when not moving. Ended by
+    /// `PointerReleased`.
+    pub metric_detail_move_drag: Option<(usize, iced::Point, (f32, f32))>,
+}
+
+/// One open metric drill-in popover: its metric plus per-popover layout, so
+/// several can be pinned at once with independent expand / size / position.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MetricPopover {
+    /// Which metric this popover charts.
+    pub kind: crate::settings::MetricKind,
+    /// Expanded to a large card (the "+" affordance) vs the compact default.
+    pub expanded: bool,
+    /// A user-dragged size override `(card_width, chart_height)` in px, or `None`
+    /// for the current state's default. Reset on expand toggle.
+    pub size: Option<(f32, f32)>,
+    /// A user-dragged position offset `(dx, dy)` in px from this popover's anchor
+    /// (its cascade slot). `(0, 0)` keeps the default placement.
+    pub move_offset: (f32, f32),
+}
+
+impl MetricPopover {
+    /// A freshly opened popover at the compact default size and position.
+    pub fn new(kind: crate::settings::MetricKind) -> Self {
+        Self {
+            kind,
+            expanded: false,
+            size: None,
+            move_offset: (0.0, 0.0),
+        }
+    }
+
+    /// This popover's current size `(card_width, chart_height)`: the user's
+    /// dragged override if any, else the default for its compact/expanded state
+    /// (the expanded default is sized off the window). Shared by the view (to lay
+    /// out) and the update loop (to seed a resize drag).
+    pub fn effective_size(&self, window_width: f32, window_height: f32) -> (f32, f32) {
+        self.size.unwrap_or_else(|| {
+            if self.expanded {
+                let w = if window_width > 1.0 {
+                    (window_width - 96.0).clamp(420.0, 1200.0)
+                } else {
+                    900.0
+                };
+                let h = if window_height > 1.0 {
+                    (window_height - 240.0).clamp(220.0, 900.0)
+                } else {
+                    360.0
+                };
+                (w, h)
+            } else {
+                (320.0, 150.0)
+            }
+        })
+    }
 }
 
 /// Which edge or corner of the metric popover a resize drag grabbed. The card
@@ -329,42 +373,6 @@ impl ResizeEdge {
             Self::Bottom => (false, true),
             Self::Corner => (true, true),
         }
-    }
-}
-
-impl Tty {
-    /// The metric popover's current size `(card_width, chart_height)`: the
-    /// user's dragged override if any, else the default for the current
-    /// compact/expanded state. Shared by the view (to lay out) and the update
-    /// loop (to seed a resize drag).
-    pub fn metric_detail_effective_size(&self) -> (f32, f32) {
-        self.metric_detail_size.unwrap_or_else(|| {
-            if self.metric_detail_expanded {
-                let w = if self.window_width > 1.0 {
-                    (self.window_width - 96.0).clamp(420.0, 1200.0)
-                } else {
-                    900.0
-                };
-                let h = if self.window_height > 1.0 {
-                    (self.window_height - 240.0).clamp(220.0, 900.0)
-                } else {
-                    360.0
-                };
-                (w, h)
-            } else {
-                (320.0, 150.0)
-            }
-        })
-    }
-
-    /// Clear the metric popover's expand / size / move state back to the compact
-    /// default and drop any in-progress drag. Used on open and close.
-    pub fn reset_metric_detail_layout(&mut self) {
-        self.metric_detail_expanded = false;
-        self.metric_detail_size = None;
-        self.metric_detail_resize = None;
-        self.metric_detail_move = (0.0, 0.0);
-        self.metric_detail_move_drag = None;
     }
 }
 
@@ -563,11 +571,8 @@ impl Tty {
             modifiers: Modifiers::default(),
             window_height: 620.0,
             window_width: 0.0,
-            metric_detail: None,
-            metric_detail_expanded: false,
-            metric_detail_size: None,
+            metric_details: Vec::new(),
             metric_detail_resize: None,
-            metric_detail_move: (0.0, 0.0),
             metric_detail_move_drag: None,
             hovered_tab: None,
             selection: None,
@@ -771,6 +776,17 @@ impl Tty {
     /// Toggle the auto-hiding status bar (persisted).
     pub fn set_status_bar_autohide(&mut self, on: bool) {
         self.settings.status_bar_autohide = Some(on);
+        self.settings.save();
+    }
+
+    /// Toggle whether metric popovers stay pinned on a click away (persisted).
+    /// Turning it off drops back to one-at-a-time: any open popovers past the
+    /// first are closed so the view can't keep a stack the mode no longer allows.
+    pub fn set_status_bar_metrics_pinned(&mut self, on: bool) {
+        self.settings.status_bar_metrics_pinned = Some(on);
+        if !on {
+            self.metric_details.truncate(1);
+        }
         self.settings.save();
     }
 

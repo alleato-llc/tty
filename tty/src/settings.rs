@@ -43,6 +43,11 @@ pub struct OutputLineOverride {
 #[serde(rename_all = "snake_case")]
 pub enum MetricKind {
     Cpu,
+    /// CPU, drilling into the per-core grid only (same status-bar cell as `Cpu`).
+    CpuCores,
+    /// CPU, drilling into the aggregate line chart *and* the per-core grid (same
+    /// status-bar cell as `Cpu`).
+    CpuAll,
     Mem,
     NetRx,
     NetTx,
@@ -57,8 +62,10 @@ pub enum MetricKind {
 impl MetricKind {
     /// Every metric that has a sampler today, in a stable order (used to offer
     /// the not-yet-added metrics in the settings editor).
-    pub const ALL: [MetricKind; 8] = [
+    pub const ALL: [MetricKind; 10] = [
         MetricKind::Cpu,
+        MetricKind::CpuCores,
+        MetricKind::CpuAll,
         MetricKind::Mem,
         MetricKind::NetRx,
         MetricKind::NetTx,
@@ -68,10 +75,21 @@ impl MetricKind {
         MetricKind::DiskIo,
     ];
 
+    /// Whether this kind is one of the CPU drill-ins (they share the aggregate
+    /// status-bar cell and sampler; only their popover body differs).
+    pub fn is_cpu(self) -> bool {
+        matches!(
+            self,
+            MetricKind::Cpu | MetricKind::CpuCores | MetricKind::CpuAll
+        )
+    }
+
     /// The `status_bar_metrics[].metric` string this kind is stored as.
     pub fn as_setting_str(self) -> &'static str {
         match self {
             MetricKind::Cpu => "cpu",
+            MetricKind::CpuCores => "cpu_cores",
+            MetricKind::CpuAll => "cpu_all",
             MetricKind::Mem => "mem",
             MetricKind::NetRx => "net_rx",
             MetricKind::NetTx => "net_tx",
@@ -87,6 +105,8 @@ impl MetricKind {
     pub fn from_setting_str(s: &str) -> Option<Self> {
         match s {
             "cpu" => Some(MetricKind::Cpu),
+            "cpu_cores" => Some(MetricKind::CpuCores),
+            "cpu_all" => Some(MetricKind::CpuAll),
             "mem" => Some(MetricKind::Mem),
             "net_rx" => Some(MetricKind::NetRx),
             "net_tx" => Some(MetricKind::NetTx),
@@ -103,6 +123,8 @@ impl std::fmt::Display for MetricKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             MetricKind::Cpu => "CPU",
+            MetricKind::CpuCores => "CPU Cores",
+            MetricKind::CpuAll => "CPU (all)",
             MetricKind::Mem => "Memory",
             MetricKind::NetRx => "Net RX",
             MetricKind::NetTx => "Net TX",
@@ -217,6 +239,13 @@ pub struct Settings {
     /// sane range so a bad value can't peg the sampler or stall it.
     #[serde(default)]
     pub status_bar_metrics_interval_ms: Option<u64>,
+    /// Keep metric drill-in popovers open on a click away (`true`), so several
+    /// can stay pinned side by side, each dismissed by its own close button or
+    /// Escape-closes-all. Absent/`false` (the default) is the one-at-a-time mode
+    /// where clicking a metric replaces any open popover and a click away closes
+    /// it.
+    #[serde(default)]
+    pub status_bar_metrics_pinned: Option<bool>,
     /// Deprecated: the old on/off machine-stats toggle, replaced by the ordered
     /// [`Self::status_bar_metrics`] list. Read only to migrate an existing
     /// `true` into `[cpu, mem]` on load (see [`Self::load`]); never written back.
@@ -570,6 +599,12 @@ impl Settings {
     /// edge (default `true`).
     pub fn status_bar_autohide(&self) -> bool {
         self.status_bar_autohide.unwrap_or(true)
+    }
+
+    /// Whether metric popovers stay open on a click away so several can be
+    /// pinned at once (default `false`, the one-at-a-time mode).
+    pub fn status_bar_metrics_pinned(&self) -> bool {
+        self.status_bar_metrics_pinned.unwrap_or(false)
     }
 
     /// The configured status-bar metrics resolved to typed metric + style, in

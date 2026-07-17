@@ -140,14 +140,20 @@ Thin glue, mirroring `fed`'s module shape:
   rates auto-scaled to their recent peak; the combined Net/Disk I/O metrics overlay two
   series on one scale) or a plain number, in configured order. `visible_metric_count`
   sheds cells from the right when the tracked window width can't hold them all, so the
-  bar never wraps. Clicking a cell emits `OpenMetricDetail`; `metric_detail_popover`
-  then floats a card (bottom-centered over the bar, layered in `main_view` with an
-  `opaque` click-away backdrop that fires `CloseMetricDetail`) with the metric's
-  full-size `rime` `line_chart` over its retained history — or a "collecting" note when
-  the history isn't chartable yet. The chart carries an "Expand" / "Collapse" affordance
-  (`metric_detail_expanded`): compact is bottom-anchored, expanded is a large centered
-  card sized off the window; hovering a point reads its value off the chart
-  (`LineChart::hover_format`). `Esc` closes it (checked before the other overlays).
+  bar never wraps. Clicking a cell emits `OpenMetricDetail`, which pushes a
+  `MetricPopover` (metric + per-popover expand / size / position) onto
+  `Tty::metric_details`; `metric_popover_card` builds each and `main_view` places them
+  (bottom-centered over the bar, cascaded when several are open). The card holds the
+  metric's full-size `rime` `line_chart` over its retained history — or a "collecting"
+  note when the history isn't chartable yet — with a "+" / "−" expand affordance
+  (compact is bottom-anchored, expanded is a large centered card sized off the window)
+  and border-resize strips (`with_resize_edges`, one `ResizeEdge` per side/corner);
+  hovering a point reads its value off the chart (`LineChart::hover_format`). CPU has
+  three drill-in variants keyed by `MetricKind` (`Cpu` aggregate / `CpuCores` grid /
+  `CpuAll` both) that share one status-bar cell. By default one popover is open at a
+  time and an `opaque` click-away backdrop fires `CloseMetricDetail`; with
+  `status_bar_metrics_pinned` on, several stay open (each with a `CloseMetricPopover`
+  "×", no backdrop). `Esc` closes all (checked before the other overlays).
 - **`metrics`** — the status-bar sampler: `Metrics::sample()` reads CPU ticks + memory
   (required) and network / disk byte counters (optional) from `fdtop`'s `prexp-core`,
   folds the aggregate CPU% from tick deltas and the throughput rates from byte-counter

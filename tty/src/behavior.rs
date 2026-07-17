@@ -93,11 +93,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         untracked_forced_by_cli: false,
         show_session_start_prompt: false,
         metrics: Default::default(),
-        metric_detail: None,
-        metric_detail_expanded: false,
-        metric_detail_size: None,
+        metric_details: Vec::new(),
         metric_detail_resize: None,
-        metric_detail_move: (0.0, 0.0),
         metric_detail_move_drag: None,
     }
 }
@@ -163,17 +160,25 @@ fn metric_popover_drags_to_move_and_resizes_in_both_states() {
     let mut tty = headless(1);
     tty.window_width = 1000.0;
     tty.window_height = 700.0;
-    tty.metric_detail = Some(crate::settings::MetricKind::Cpu);
+    let _ = update(
+        &mut tty,
+        Message::OpenMetricDetail(
+            crate::settings::MetricKind::Cpu
+                .as_setting_str()
+                .to_string(),
+        ),
+    );
+    assert_eq!(tty.metric_details.len(), 1, "one popover opens");
 
-    // Move: press the body at (500,500), drag to (530,450), release.
+    // Move: press popover 0's body at (500,500), drag to (530,450), release.
     tty.pointer = Point::new(500.0, 500.0);
-    let _ = update(&mut tty, Message::MetricDetailMoveStart);
+    let _ = update(&mut tty, Message::MetricDetailMoveStart(0));
     let _ = update(&mut tty, Message::PointerMoved(Point::new(530.0, 450.0)));
-    assert_eq!(tty.metric_detail_move, (30.0, -50.0));
+    assert_eq!(tty.metric_details[0].move_offset, (30.0, -50.0));
     let _ = update(&mut tty, Message::PointerReleased);
     assert!(tty.metric_detail_move_drag.is_none());
     assert_eq!(
-        tty.metric_detail_move,
+        tty.metric_details[0].move_offset,
         (30.0, -50.0),
         "offset persists after release"
     );
@@ -182,39 +187,90 @@ fn metric_popover_drags_to_move_and_resizes_in_both_states() {
     // both axes.
     let _ = update(
         &mut tty,
-        Message::MetricDetailResizeStart(crate::state::ResizeEdge::Corner),
+        Message::MetricDetailResizeStart(0, crate::state::ResizeEdge::Corner),
     );
     let _ = update(&mut tty, Message::PointerMoved(Point::new(630.0, 490.0)));
-    let (cw, ch) = tty.metric_detail_size.expect("compact resized");
+    let (cw, ch) = tty.metric_details[0].size.expect("compact resized");
     assert!(cw > 320.0 && ch > 150.0, "grew from the compact default");
     let _ = update(&mut tty, Message::PointerReleased);
 
     // Toggling expand snaps back to the new state's default size + position.
-    let _ = update(&mut tty, Message::ToggleMetricDetailExpanded);
-    assert!(tty.metric_detail_expanded);
-    assert!(tty.metric_detail_size.is_none());
-    assert_eq!(tty.metric_detail_move, (0.0, 0.0));
+    let _ = update(&mut tty, Message::ToggleMetricDetailExpanded(0));
+    assert!(tty.metric_details[0].expanded);
+    assert!(tty.metric_details[0].size.is_none());
+    assert_eq!(tty.metric_details[0].move_offset, (0.0, 0.0));
 
     // Resize works while expanded too, and a single-edge drag moves only its
     // axis: dragging the right edge changes width but leaves height alone.
-    let (start_w, start_h) = tty.metric_detail_effective_size();
+    let (start_w, start_h) = tty.metric_details[0].effective_size(1000.0, 700.0);
     tty.pointer = Point::new(400.0, 300.0);
     let _ = update(
         &mut tty,
-        Message::MetricDetailResizeStart(crate::state::ResizeEdge::Right),
+        Message::MetricDetailResizeStart(0, crate::state::ResizeEdge::Right),
     );
     let _ = update(&mut tty, Message::PointerMoved(Point::new(360.0, 330.0)));
-    let (ew, eh) = tty.metric_detail_size.expect("expanded card is resizable");
+    let (ew, eh) = tty.metric_details[0]
+        .size
+        .expect("expanded card is resizable");
     assert!(ew < start_w, "right-edge drag left shrank the width");
     assert_eq!(eh, start_h, "right-edge drag left the height unchanged");
 
-    // Close resets the whole layout.
+    // Close (click-away) clears everything.
     let _ = update(&mut tty, Message::CloseMetricDetail);
-    assert!(tty.metric_detail.is_none());
-    assert!(tty.metric_detail_size.is_none());
-    assert_eq!(tty.metric_detail_move, (0.0, 0.0));
+    assert!(tty.metric_details.is_empty());
     assert!(tty.metric_detail_resize.is_none());
     assert!(tty.metric_detail_move_drag.is_none());
+}
+
+#[test]
+fn pinned_mode_keeps_multiple_popovers_until_closed() {
+    let mut tty = headless(1);
+    tty.window_width = 1000.0;
+    tty.window_height = 700.0;
+    tty.settings.status_bar_metrics_pinned = Some(true);
+    let open = |tty: &mut _, k: crate::settings::MetricKind| {
+        let _ = update(
+            tty,
+            Message::OpenMetricDetail(k.as_setting_str().to_string()),
+        );
+    };
+
+    // Pinned: each distinct metric accumulates; re-opening one is a no-op.
+    open(&mut tty, crate::settings::MetricKind::Cpu);
+    open(&mut tty, crate::settings::MetricKind::CpuCores);
+    open(&mut tty, crate::settings::MetricKind::Mem);
+    open(&mut tty, crate::settings::MetricKind::Cpu);
+    assert_eq!(
+        tty.metric_details.len(),
+        3,
+        "three distinct popovers, no dup"
+    );
+
+    // A click away does NOT close them while pinned.
+    let _ = update(&mut tty, Message::PointerReleased);
+    assert_eq!(
+        tty.metric_details.len(),
+        3,
+        "click-away is inert when pinned"
+    );
+
+    // The per-card close button removes just that one (drops CpuCores at idx 1).
+    let _ = update(&mut tty, Message::CloseMetricPopover(1));
+    assert_eq!(tty.metric_details.len(), 2);
+    assert!(
+        tty.metric_details
+            .iter()
+            .all(|p| p.kind != crate::settings::MetricKind::CpuCores),
+        "the closed metric is gone"
+    );
+
+    // Turning pinning off collapses to at most one open popover.
+    tty.set_status_bar_metrics_pinned(false);
+    assert_eq!(tty.metric_details.len(), 1, "un-pinning truncates to one");
+
+    // Escape closes all remaining.
+    let _ = update(&mut tty, Message::CloseMetricDetail);
+    assert!(tty.metric_details.is_empty());
 }
 
 #[test]

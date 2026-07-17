@@ -109,11 +109,8 @@ fn populated() -> Tty {
         untracked_forced_by_cli: false,
         show_session_start_prompt: false,
         metrics: Default::default(),
-        metric_detail: None,
-        metric_detail_expanded: false,
-        metric_detail_size: None,
+        metric_details: Vec::new(),
         metric_detail_resize: None,
-        metric_detail_move: (0.0, 0.0),
         metric_detail_move_drag: None,
     }
 }
@@ -858,7 +855,9 @@ fn metric_detail_popover_view() {
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("disk_io", "sparkline")];
     seed_metric_sample(&mut tty);
-    tty.metric_detail = Some(crate::settings::MetricKind::DiskIo);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::DiskIo,
+    )];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -882,7 +881,9 @@ fn metric_detail_popover_empty_view() {
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("disk_r", "sparkline")];
     tty.metrics.latest = Some(crate::metrics::MachineStats::default());
-    tty.metric_detail = Some(crate::settings::MetricKind::DiskR);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::DiskR,
+    )];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -906,7 +907,9 @@ fn metric_detail_memory_view() {
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("mem", "sparkline")];
     seed_metric_sample(&mut tty);
-    tty.metric_detail = Some(crate::settings::MetricKind::Mem);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Mem,
+    )];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -921,16 +924,11 @@ fn metric_detail_memory_view() {
     );
 }
 
-#[test]
-fn metric_detail_cpu_per_core_view() {
-    // Clicking CPU drills into the per-core grid: the aggregate readout + "+",
-    // then a sparkline per logical core (color-graded by load, current % below),
-    // grouped into Performance and Efficiency sections. Seeded for a 16-core
-    // machine (4 E + 12 P), matching this project's dev hardware.
+/// Seed a 16-core machine (4 Efficiency + 12 Performance, matching this
+/// project's dev hardware) with a per-core history and perf levels, so the CPU
+/// per-core / combined drill-ins render a full grid.
+fn seed_cpu_cores(tty: &mut Tty) {
     use prexp_core::system::CpuKind;
-    let mut tty = populated();
-    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline")];
-    seed_metric_sample(&mut tty);
     let currents: [f32; 16] = [
         12.0, 8.0, 20.0, 5.0, // E cores
         72.0, 95.0, 40.0, 18.0, 60.0, 33.0, 88.0, 27.0, 55.0, 10.0, 70.0, 45.0, // P cores
@@ -956,30 +954,69 @@ fn metric_detail_cpu_per_core_view() {
             })
             .collect(),
     );
-    tty.metric_detail = Some(crate::settings::MetricKind::Cpu);
+}
+
+#[test]
+fn metric_detail_cpu_all_view() {
+    // The "CPU (all)" drill-in: the aggregate line chart *and* the per-core grid
+    // stacked — a sparkline per logical core (color-graded by load, current %
+    // below), grouped into Performance and Efficiency sections.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu_all", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_cpu_cores(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::CpuAll,
+    )];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
         .snapshot(&crate::state::theme(&tty))
         .expect("render snapshot");
     let matches = snap
-        .matches_image("snapshots/tty-metric-detail-cpu-per-core.png")
+        .matches_image("snapshots/tty-metric-detail-cpu-all.png")
         .expect("write/compare snapshot");
     assert!(
         matches,
-        "snapshot `tty-metric-detail-cpu-per-core` changed — delete its PNG to re-baseline"
+        "snapshot `tty-metric-detail-cpu-all` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_cpu_cores_view() {
+    // The standalone "CPU Cores" drill-in: the per-core grid alone (no aggregate
+    // line chart — that is the separate "CPU" drill-in), under a compact readout.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu_cores", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_cpu_cores(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::CpuCores,
+    )];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-cpu-cores.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-cpu-cores` changed — delete its PNG to re-baseline"
     );
 }
 
 #[test]
 fn metric_detail_popover_resized_view() {
-    // A drag-resized compact popover: a `metric_detail_size` override makes the
-    // card wider and its chart taller than the default, with the corner grip.
+    // A drag-resized compact popover: a per-popover `size` override makes the
+    // card wider and its chart taller than the default.
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("disk_io", "sparkline")];
     seed_metric_sample(&mut tty);
-    tty.metric_detail = Some(crate::settings::MetricKind::DiskIo);
-    tty.metric_detail_size = Some((480.0, 280.0));
+    let mut pop = crate::state::MetricPopover::new(crate::settings::MetricKind::DiskIo);
+    pop.size = Some((480.0, 280.0));
+    tty.metric_details = vec![pop];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -1004,8 +1041,9 @@ fn metric_detail_popover_expanded_view() {
     tty.window_width = 1100.0;
     tty.window_height = 800.0;
     seed_metric_sample(&mut tty);
-    tty.metric_detail = Some(crate::settings::MetricKind::NetIo);
-    tty.metric_detail_expanded = true;
+    let mut pop = crate::state::MetricPopover::new(crate::settings::MetricKind::NetIo);
+    pop.expanded = true;
+    tty.metric_details = vec![pop];
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::with_size(
         iced::Settings::default(),
@@ -1021,6 +1059,39 @@ fn metric_detail_popover_expanded_view() {
     assert!(
         matches,
         "snapshot `tty-metric-detail-popover-expanded` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_pinned_view() {
+    // With popovers pinned, several stay open at once: two cards (memory + CPU),
+    // cascaded up-and-right so they don't fully overlap, each carrying its own
+    // "×" close button in the top-right control cluster.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
+    tty.settings.status_bar_metrics_pinned = Some(true);
+    tty.window_width = 1024.0;
+    tty.window_height = 768.0;
+    seed_metric_sample(&mut tty);
+    tty.metric_details = vec![
+        crate::state::MetricPopover::new(crate::settings::MetricKind::Mem),
+        crate::state::MetricPopover::new(crate::settings::MetricKind::Cpu),
+    ];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(1024.0, 768.0),
+        main_chrome(&tty),
+    );
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-pinned.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-pinned` changed — delete its PNG to re-baseline"
     );
 }
 
