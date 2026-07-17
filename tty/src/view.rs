@@ -1911,41 +1911,64 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
                 iced::widget::Space::new().width(Length::Fixed(0.0)).into()
             }
         };
-        // The window shows `visible` cells from `start`. A normal cell opens its
-        // drill-in on press; in edit mode it instead outlines, starts a reorder
-        // drag on press, and reorders as the pointer crosses other cells (like the
-        // tab drag).
-        let cluster: Vec<Element<'_, Message>> = cells
-            .into_iter()
-            .skip(start)
-            .take(visible)
-            .map(|(raw_i, cfg, r)| {
-                let cell = metric_cell(cfg.style, r);
-                if editing {
-                    let outlined =
-                        container(cell)
-                            .padding([1, 4])
-                            .style(move |_| container::Style {
-                                border: Border {
-                                    color: t.accent,
-                                    width: 1.0,
-                                    radius: 5.0.into(),
-                                },
-                                ..Default::default()
-                            });
-                    mouse_area(outlined)
-                        .on_press(Message::StatusMetricDragStart(raw_i))
-                        .on_enter(Message::StatusMetricDragOver(raw_i))
-                        .interaction(iced::mouse::Interaction::Grab)
-                        .into()
-                } else {
-                    let key = cfg.kind.as_setting_str().to_string();
-                    mouse_area(cell)
-                        .on_press(Message::OpenMetricDetail(key))
-                        .into()
-                }
-            })
-            .collect();
+        // Which cell (if any) is mid press-hold, being dragged, and where a drop
+        // would land — for the outline / lift / insertion-bar affordances.
+        let pending = state.status_metric_press.map(|(i, _)| i);
+        let dragging = state.status_metric_drag;
+        let drop = state.status_metric_drop;
+        // The window shows `visible` cells from `start`. A cell arms a press on
+        // press-down (a quick release opens its drill-in; a hold enters edit mode
+        // and starts dragging it); in edit mode it also reports drag-overs. An
+        // accent insertion bar shows where a dragged cell would drop.
+        let mut cluster: Vec<Element<'_, Message>> = Vec::new();
+        for (raw_i, cfg, r) in cells.into_iter().skip(start).take(visible) {
+            // The drop insertion bar goes just before the target cell (only while
+            // actually dragging to a *different* slot).
+            if editing && dragging.is_some() && dragging != Some(raw_i) && drop == Some(raw_i) {
+                cluster.push(
+                    container(
+                        iced::widget::Space::new()
+                            .width(Length::Fixed(2.0))
+                            .height(Length::Fixed(16.0)),
+                    )
+                    .style(move |_| container::background(t.accent))
+                    .into(),
+                );
+            }
+            let cell = metric_cell(cfg.style, r);
+            // Outline a cell that is being edited or mid press-hold; fill the one
+            // actively being dragged so it reads as "lifted".
+            let is_dragged = dragging == Some(raw_i);
+            let el: Element<'_, Message> = if editing || pending == Some(raw_i) {
+                container(cell)
+                    .padding([1, 4])
+                    .style(move |_| container::Style {
+                        border: Border {
+                            color: t.accent,
+                            width: 1.0,
+                            radius: 5.0.into(),
+                        },
+                        background: is_dragged.then(|| {
+                            iced::Color {
+                                a: 0.18,
+                                ..t.accent
+                            }
+                            .into()
+                        }),
+                        ..Default::default()
+                    })
+                    .into()
+            } else {
+                cell
+            };
+            let mut area = mouse_area(el).on_press(Message::StatusMetricPress(raw_i));
+            if editing {
+                area = area
+                    .on_enter(Message::StatusMetricDragOver(raw_i))
+                    .interaction(iced::mouse::Interaction::Grab);
+            }
+            cluster.push(area.into());
+        }
         let cluster = row![
             chevron(start > 0, "‹"),
             row(cluster).spacing(14).align_y(iced::Alignment::Center),
@@ -1971,15 +1994,15 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
         content = content.push(right_text());
     }
 
-    // A right-press anywhere on the bar arms the long-press-to-edit gesture; in
-    // edit mode a left-press on empty bar space (a chevron / the flex gaps, not a
-    // cell — those consume their own press) exits.
-    let mut area =
-        mouse_area(status_bar_content(content)).on_right_press(Message::StatusBarArmEdit);
+    // In edit mode a press on empty bar space (the flex gaps / hint — cells and
+    // the scroll region consume their own press) exits. Otherwise the bar is
+    // inert to background presses.
+    let area = status_bar_content(content);
     if editing {
-        area = area.on_press(Message::ExitStatusBarEdit);
+        mouse_area(area).on_press(Message::ExitStatusBarEdit).into()
+    } else {
+        area
     }
-    area.into()
 }
 
 /// The vertical component of a wheel `ScrollDelta`, for panning the status bar.

@@ -40,10 +40,6 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
         Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
             Some(Message::PointerReleased)
         }
-        // A right-button release cancels an armed (not-yet-entered) long-press.
-        Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Right)) => {
-            Some(Message::StatusBarDisarmEdit)
-        }
         _ => None,
     });
 
@@ -92,11 +88,12 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
     {
         subs.push(iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::ClockTick));
     }
-    // While the long-press-to-edit gesture is armed, poll whether the hold has
-    // completed. Only armed during the press, so idle cost stays zero.
-    if state.status_bar_edit_arm.is_some() {
+    // While a metric-cell press is pending, poll whether it has been held long
+    // enough to enter drag-to-reorder edit mode. Only armed during the press, so
+    // idle cost stays zero.
+    if state.status_metric_press.is_some() {
         subs.push(
-            iced::time::every(std::time::Duration::from_millis(150))
+            iced::time::every(std::time::Duration::from_millis(120))
                 .map(|_| Message::StatusBarEditTick),
         );
     }

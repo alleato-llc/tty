@@ -112,8 +112,9 @@ fn populated() -> Tty {
         metrics: Default::default(),
         status_bar_scroll: 0,
         status_bar_edit: false,
+        status_metric_press: None,
         status_metric_drag: None,
-        status_bar_edit_arm: None,
+        status_metric_drop: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -1132,6 +1133,34 @@ fn status_bar_edit_mode_view() {
     assert!(
         matches,
         "snapshot `tty-status-bar-edit` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_edit_dragging_view() {
+    // Mid-drag in edit mode: the dragged cell (CPU) is filled/"lifted", and an
+    // accent insertion bar shows where it would drop (before Memory).
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![
+        metric("cpu", "sparkline"),
+        metric("mem", "sparkline"),
+        metric("net_io", "sparkline"),
+    ];
+    seed_metric_sample(&mut tty);
+    tty.status_bar_edit = true;
+    tty.status_metric_drag = Some(0);
+    tty.status_metric_drop = Some(1);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-edit-dragging.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-edit-dragging` changed — delete its PNG to re-baseline"
     );
 }
 

@@ -297,12 +297,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 state.status_bar_scroll = state.status_bar_scroll.saturating_sub(1).min(max);
             }
         }
-        Message::StatusBarArmEdit => state.arm_status_bar_edit(),
-        Message::StatusBarDisarmEdit => state.disarm_status_bar_edit(),
-        Message::StatusBarEditTick => state.check_status_bar_edit_hold(),
+        Message::StatusMetricPress(idx) => state.press_status_metric(idx),
+        Message::StatusBarEditTick => state.check_status_metric_hold(),
+        Message::StatusMetricDragOver(idx) => state.drag_status_metric_over(idx),
         Message::ExitStatusBarEdit => state.exit_status_bar_edit(),
-        Message::StatusMetricDragStart(idx) => state.start_status_metric_drag(idx),
-        Message::StatusMetricDragOver(idx) => state.reorder_dragged_metric(idx),
         Message::SetStatusBarEditHold(delta) => state.step_status_bar_edit_hold(delta),
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
@@ -318,21 +316,6 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.step_status_bar_metric_threshold(idx, warn, delta)
         }
         Message::SampleMetrics => state.metrics.sample(),
-        Message::OpenMetricDetail(metric) => {
-            if let Some(kind) = crate::settings::MetricKind::from_setting_str(&metric) {
-                let pop = crate::state::MetricPopover::new(kind);
-                if state.settings.status_bar_metrics_pinned() {
-                    // Pinned: accumulate, but don't stack a duplicate of a metric
-                    // already open (a re-click on an open one is a no-op).
-                    if !state.metric_details.iter().any(|p| p.kind == kind) {
-                        state.metric_details.push(pop);
-                    }
-                } else {
-                    // One-at-a-time: replace whatever was open.
-                    state.metric_details = vec![pop];
-                }
-            }
-        }
         Message::CloseMetricDetail => {
             // Click-away / Escape: close every open popover and drop any drag.
             state.metric_details.clear();
@@ -444,7 +427,17 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::PointerReleased => {
             state.metric_detail_resize = None;
             state.metric_detail_move_drag = None;
-            state.finish_status_metric_drag();
+            // A metric drag commits its reorder; a quick tap opens the drill-in.
+            if let Some(idx) = state.release_status_metric() {
+                if let Some(key) = state
+                    .settings
+                    .status_bar_metrics
+                    .get(idx)
+                    .map(|c| c.metric.clone())
+                {
+                    state.open_metric_detail(&key);
+                }
+            }
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }

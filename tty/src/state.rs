@@ -293,16 +293,20 @@ pub struct Tty {
     /// through the full list (so the shed cells are still reachable). `0` = the
     /// front. Clamped to the scrollable range in `update`.
     pub status_bar_scroll: usize,
-    /// Whether the status bar is in live-edit (drag-to-reorder) mode, and an
-    /// in-progress metric-cell drag `(config index, pointer anchor)` — mirrors
-    /// [`Self::tab_drag`]. Edit mode is entered by a long right-press on the bar
-    /// and left by Escape or a click on empty bar space.
+    /// Whether the status bar is in live-edit (drag-to-reorder) mode. Entered by
+    /// pressing and holding a metric cell; left by Escape or a press on empty bar
+    /// space.
     pub status_bar_edit: bool,
-    pub status_metric_drag: Option<(usize, iced::Point)>,
-    /// When a right-press on the bar armed the long-press-to-edit gesture (the
-    /// instant it began); `None` when not armed. A tick checks the elapsed hold
-    /// against [`crate::settings::Settings::status_bar_edit_hold_secs`].
-    pub status_bar_edit_arm: Option<std::time::Instant>,
+    /// A pending press on a metric cell `(config index, when it began)`: a quick
+    /// release opens that cell's drill-in, while a hold past
+    /// [`crate::settings::Settings::status_bar_edit_hold_secs`] (checked by the
+    /// tick) enters edit mode and starts dragging it. `None` when no press is down.
+    pub status_metric_press: Option<(usize, std::time::Instant)>,
+    /// The config index of the metric cell currently being dragged (edit mode),
+    /// and the drop-target config index where the insertion bar shows. The
+    /// reorder is committed on release. Both `None` when not dragging.
+    pub status_metric_drag: Option<usize>,
+    pub status_metric_drop: Option<usize>,
     /// The metric drill-in popovers currently open (a click on a status-bar
     /// sparkline opens one), each with its own layout. Empty when none are open.
     /// In the default one-at-a-time mode this holds 0 or 1; with
@@ -643,8 +647,9 @@ impl Tty {
             metrics: crate::metrics::Metrics::default(),
             status_bar_scroll: 0,
             status_bar_edit: false,
+            status_metric_press: None,
             status_metric_drag: None,
-            status_bar_edit_arm: None,
+            status_metric_drop: None,
         };
         tty.new_tab();
         tty
@@ -929,66 +934,81 @@ impl Tty {
         self.settings.save();
     }
 
-    /// Arm the long-press-to-edit gesture (a right-press landed on the bar).
-    /// No-op once already editing.
-    pub fn arm_status_bar_edit(&mut self) {
-        if !self.status_bar_edit {
-            self.status_bar_edit_arm = Some(std::time::Instant::now());
+    /// A metric cell was pressed (config index `idx`). Already editing → begin
+    /// dragging it at once; otherwise arm a pending press that either opens the
+    /// cell's drill-in on a quick release or, held past the configured duration,
+    /// enters edit mode and starts a drag (see [`Self::check_status_metric_hold`]).
+    pub fn press_status_metric(&mut self, idx: usize) {
+        if self.status_bar_edit {
+            self.status_metric_drag = Some(idx);
+            self.status_metric_drop = Some(idx);
+        } else {
+            self.status_metric_press = Some((idx, std::time::Instant::now()));
         }
     }
 
-    /// Cancel an armed long-press (the right button was released before the hold
-    /// completed). Leaves an active edit session alone.
-    pub fn disarm_status_bar_edit(&mut self) {
-        self.status_bar_edit_arm = None;
-    }
-
-    /// If the long-press has been held for the configured duration, enter edit
-    /// mode. Called from the periodic tick while armed.
-    pub fn check_status_bar_edit_hold(&mut self) {
-        if let Some(started) = self.status_bar_edit_arm {
-            let hold = self.settings.status_bar_edit_hold_secs();
-            if started.elapsed().as_secs_f32() >= hold {
+    /// While a press is pending, enter edit mode + start dragging once it has been
+    /// held for the configured duration. Called from the periodic tick.
+    pub fn check_status_metric_hold(&mut self) {
+        if let Some((idx, started)) = self.status_metric_press {
+            if started.elapsed().as_secs_f32() >= self.settings.status_bar_edit_hold_secs() {
                 self.status_bar_edit = true;
-                self.status_bar_edit_arm = None;
+                self.status_metric_drag = Some(idx);
+                self.status_metric_drop = Some(idx);
+                self.status_metric_press = None;
             }
         }
     }
 
-    /// Leave drag-to-reorder edit mode (Escape or a click on empty bar space).
+    /// While dragging, the pointer entered the cell at config index `target`:
+    /// mark it the drop position (where the insertion bar shows). The reorder is
+    /// committed on release, not live.
+    pub fn drag_status_metric_over(&mut self, target: usize) {
+        if self.status_metric_drag.is_some() {
+            self.status_metric_drop = Some(target);
+        }
+    }
+
+    /// Pointer release: commit a metric drag's reorder, or — if it was a quick tap
+    /// rather than a hold — return the config index whose drill-in should open.
+    pub fn release_status_metric(&mut self) -> Option<usize> {
+        if let Some(from) = self.status_metric_drag.take() {
+            let target = self.status_metric_drop.take().unwrap_or(from);
+            let list = &mut self.settings.status_bar_metrics;
+            if from != target && from < list.len() && target < list.len() {
+                let item = list.remove(from);
+                list.insert(target, item);
+                self.settings.save();
+            }
+            None
+        } else {
+            self.status_metric_press.take().map(|(idx, _)| idx)
+        }
+    }
+
+    /// Leave drag-to-reorder edit mode (Escape or a press on empty bar space).
     pub fn exit_status_bar_edit(&mut self) {
         self.status_bar_edit = false;
-        self.status_bar_edit_arm = None;
+        self.status_metric_press = None;
         self.status_metric_drag = None;
+        self.status_metric_drop = None;
     }
 
-    /// Begin dragging the status-bar metric at config index `idx` (edit mode).
-    pub fn start_status_metric_drag(&mut self, idx: usize) {
-        if self.status_bar_edit {
-            self.status_metric_drag = Some((idx, self.pointer));
-        }
-    }
-
-    /// While a metric drag is armed, moving the pointer over the cell at config
-    /// index `target` live-reorders the dragged metric to that slot (persisted),
-    /// mirroring [`Self::reorder_dragged_tab`]. No-op when not dragging.
-    pub fn reorder_dragged_metric(&mut self, target: usize) {
-        let Some((from, start)) = self.status_metric_drag else {
+    /// Open the drill-in popover for the metric named `metric` (a `MetricKind`
+    /// setting string). Pinned mode accumulates open popovers (deduped by kind);
+    /// otherwise it replaces whatever was open. Called on a status-bar cell tap.
+    pub fn open_metric_detail(&mut self, metric: &str) {
+        let Some(kind) = crate::settings::MetricKind::from_setting_str(metric) else {
             return;
         };
-        let len = self.settings.status_bar_metrics.len();
-        if from == target || from >= len || target >= len {
-            return;
+        let pop = MetricPopover::new(kind);
+        if self.settings.status_bar_metrics_pinned() {
+            if !self.metric_details.iter().any(|p| p.kind == kind) {
+                self.metric_details.push(pop);
+            }
+        } else {
+            self.metric_details = vec![pop];
         }
-        let item = self.settings.status_bar_metrics.remove(from);
-        self.settings.status_bar_metrics.insert(target, item);
-        self.status_metric_drag = Some((target, start));
-        self.settings.save();
-    }
-
-    /// End a metric drag on pointer release (the reorder already happened live).
-    pub fn finish_status_metric_drag(&mut self) {
-        self.status_metric_drag = None;
     }
 
     /// Whether the floating (auto-hide) status bar should show right now: the

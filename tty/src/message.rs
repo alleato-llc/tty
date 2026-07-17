@@ -211,18 +211,16 @@ pub enum Message {
     /// Wheel-scroll over the status bar (the vertical delta): slides the visible
     /// window of metric cells left/right when the bar is too narrow for them all.
     StatusBarScroll(f32),
-    /// A right-press landed on the status bar: arm the long-press-to-edit gesture.
-    StatusBarArmEdit,
-    /// The right button was released: cancel an armed (not-yet-entered) long-press.
-    StatusBarDisarmEdit,
-    /// Periodic tick while armed: enter edit mode once the hold completes.
+    /// A metric cell (this config index) was pressed: a quick release opens its
+    /// drill-in; a hold enters drag-to-reorder edit mode and starts dragging it.
+    StatusMetricPress(usize),
+    /// Periodic tick while a press is pending: enter edit mode once it's held.
     StatusBarEditTick,
-    /// Leave drag-to-reorder edit mode (Escape or a click on empty bar space).
-    ExitStatusBarEdit,
-    /// Begin dragging the status-bar metric at this config index (edit mode).
-    StatusMetricDragStart(usize),
-    /// The pointer entered the cell at this config index while dragging: reorder.
+    /// The pointer entered the cell at this config index while dragging: mark it
+    /// the drop position (the reorder commits on release).
     StatusMetricDragOver(usize),
+    /// Leave drag-to-reorder edit mode (Escape or a press on empty bar space).
+    ExitStatusBarEdit,
     /// Nudge the edit-mode long-press hold duration by a seconds delta.
     SetStatusBarEditHold(f32),
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
@@ -248,9 +246,6 @@ pub enum Message {
     StatusBarMetricStyle(usize, String),
     /// The periodic machine-stats sample tick (only fires while stats are on).
     SampleMetrics,
-    /// Open the detail popover for a status-bar metric (clicked its sparkline),
-    /// by metric key (`"cpu"`, `"disk_io"`, …).
-    OpenMetricDetail(String),
     /// Close all open metric popovers (a click on the background in the default
     /// one-at-a-time mode, or Escape in any mode).
     CloseMetricDetail,

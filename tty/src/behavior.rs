@@ -96,8 +96,9 @@ pub(crate) fn headless(n: usize) -> Tty {
         metrics: Default::default(),
         status_bar_scroll: 0,
         status_bar_edit: false,
+        status_metric_press: None,
         status_metric_drag: None,
-        status_bar_edit_arm: None,
+        status_metric_drop: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -165,14 +166,7 @@ fn metric_popover_drags_to_move_and_resizes_in_both_states() {
     let mut tty = headless(1);
     tty.window_width = 1000.0;
     tty.window_height = 700.0;
-    let _ = update(
-        &mut tty,
-        Message::OpenMetricDetail(
-            crate::settings::MetricKind::Cpu
-                .as_setting_str()
-                .to_string(),
-        ),
-    );
+    tty.open_metric_detail(crate::settings::MetricKind::Cpu.as_setting_str());
     assert_eq!(tty.metric_details.len(), 1, "one popover opens");
 
     // Move: press popover 0's body at (500,500), drag to (530,450), release.
@@ -233,11 +227,8 @@ fn pinned_mode_keeps_multiple_popovers_until_closed() {
     tty.window_width = 1000.0;
     tty.window_height = 700.0;
     tty.settings.status_bar_metrics_pinned = Some(true);
-    let open = |tty: &mut _, k: crate::settings::MetricKind| {
-        let _ = update(
-            tty,
-            Message::OpenMetricDetail(k.as_setting_str().to_string()),
-        );
+    let open = |tty: &mut Tty, k: crate::settings::MetricKind| {
+        tty.open_metric_detail(k.as_setting_str());
     };
 
     // Pinned: each distinct metric accumulates; re-opening one is a no-op.
@@ -319,28 +310,41 @@ fn metric_cfg(kind: &str) -> crate::settings::MetricConfig {
 }
 
 #[test]
-fn status_bar_edit_mode_drags_reorders_and_exits() {
+fn status_bar_hold_enters_edit_and_drag_reorders_and_exits() {
     let mut tty = headless(1);
     tty.settings.status_bar_metrics =
         vec![metric_cfg("cpu"), metric_cfg("mem"), metric_cfg("net_io")];
 
-    // A held right-press enters edit mode: arm, then a hold past the threshold.
-    let _ = update(&mut tty, Message::StatusBarArmEdit);
-    assert!(tty.status_bar_edit_arm.is_some());
-    // Simulate the hold completing by backdating the arm past the max duration.
-    tty.status_bar_edit_arm = Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
+    // Press-hold CPU (index 0): held past the threshold, it enters edit mode and
+    // starts dragging that cell.
+    let _ = update(&mut tty, Message::StatusMetricPress(0));
+    assert!(tty.status_metric_press.is_some());
+    assert!(
+        !tty.status_bar_edit,
+        "not editing yet — just a pending press"
+    );
+    // Simulate the hold completing by backdating the press past the max duration.
+    tty.status_metric_press = Some((
+        0,
+        std::time::Instant::now() - std::time::Duration::from_secs(10),
+    ));
     let _ = update(&mut tty, Message::StatusBarEditTick);
     assert!(tty.status_bar_edit, "hold entered edit mode");
-    assert!(tty.status_bar_edit_arm.is_none());
+    assert_eq!(tty.status_metric_drag, Some(0), "and started dragging CPU");
+    assert!(tty.status_metric_press.is_none());
 
-    // Drag CPU (index 0) over Net I/O (index 2): CPU moves to the last slot.
-    let _ = update(&mut tty, Message::StatusMetricDragStart(0));
-    assert!(tty.status_metric_drag.is_some());
+    // Drag over Net I/O (index 2) marks the drop; the reorder commits on release.
     let _ = update(&mut tty, Message::StatusMetricDragOver(2));
+    assert_eq!(tty.status_metric_drop, Some(2));
+    assert_eq!(
+        tty.settings.status_bar_metrics[0].metric, "cpu",
+        "not reordered until release"
+    );
+    let _ = update(&mut tty, Message::PointerReleased);
     assert_eq!(tty.settings.status_bar_metrics[2].metric, "cpu");
     assert_eq!(tty.settings.status_bar_metrics[0].metric, "mem");
-    let _ = update(&mut tty, Message::PointerReleased);
     assert!(tty.status_metric_drag.is_none(), "release ends the drag");
+    assert!(tty.status_bar_edit, "stays in edit mode for more drags");
 
     // Escape leaves edit mode.
     let esc = Key::Named(iced::keyboard::key::Named::Escape);
@@ -349,16 +353,18 @@ fn status_bar_edit_mode_drags_reorders_and_exits() {
 }
 
 #[test]
-fn status_bar_edit_arm_cancels_on_early_release() {
+fn status_bar_quick_tap_opens_popover_not_edit() {
     let mut tty = headless(1);
-    // Right-press arms; releasing before the hold completes cancels it.
-    let _ = update(&mut tty, Message::StatusBarArmEdit);
-    assert!(tty.status_bar_edit_arm.is_some());
-    let _ = update(&mut tty, Message::StatusBarDisarmEdit);
-    assert!(tty.status_bar_edit_arm.is_none());
-    // A tick with no arm does nothing.
-    let _ = update(&mut tty, Message::StatusBarEditTick);
-    assert!(!tty.status_bar_edit);
+    tty.settings.status_bar_metrics = vec![metric_cfg("cpu"), metric_cfg("mem")];
+    // A press that is released before the hold completes is a tap: it opens the
+    // cell's drill-in and never enters edit mode.
+    let _ = update(&mut tty, Message::StatusMetricPress(1));
+    assert!(tty.status_metric_press.is_some());
+    let _ = update(&mut tty, Message::PointerReleased);
+    assert!(!tty.status_bar_edit, "a quick tap does not enter edit mode");
+    assert!(tty.status_metric_press.is_none());
+    assert_eq!(tty.metric_details.len(), 1, "the tap opened a popover");
+    assert_eq!(tty.metric_details[0].kind, crate::settings::MetricKind::Mem);
 }
 
 #[test]

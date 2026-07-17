@@ -120,9 +120,11 @@ right rather than wrapping; **scroll over the bar** to page a sliding window
 through the shed cells (chevrons show when there's more off each edge). The graded
 cells (CPU, memory, battery) recolor by load with **configurable caution/alarm
 thresholds** per cell — past a threshold the whole cell, label included, recolors
-so it catches the eye. **Right-press and hold** the bar (~3s, configurable
-1.5–5s) to enter a live **drag-to-reorder** edit mode; drag the outlined widgets
-to rearrange them, then click empty space or press `Esc` to finish. Click any
+so it catches the eye. A quick **click** on a cell opens its drill-in; **press and
+hold** one (~3s, configurable 1.5–5s) to enter a live **drag-to-reorder** edit
+mode — the widgets outline, the held one lifts, and an insertion bar shows where
+it'll drop. Rearrange freely, then press `Esc` or click empty bar space to
+finish. Click any
 sparkline to **drill in** — a small popover shows that
 metric's full-size line chart over its retained history, with the current
 readout; hover a point to read its value, hit **+** for a large centered chart,

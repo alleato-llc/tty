@@ -269,14 +269,17 @@ that metric's full-size chart, rather than a whole system panel.
    - **Direct manipulation in the bar.** When the cells overflow, the bar still
      sheds from the right, but a **wheel scroll** over it slides a window through
      the full list (`Tty::status_bar_scroll`, clamped by `view::status_bar_scroll_max`;
-     `‹`/`›` chevrons flag more off each edge) so the shed cells stay reachable. A
-     **long right-press** (`status_bar_edit_hold_secs`, default 3s / 1.5–5s, armed
-     via `mouse_area::on_right_press` and completed by a poll tick) enters a
-     drag-to-reorder **edit mode** (`Tty::status_bar_edit`): cells outline and
-     drag-reorder the config list live (`status_metric_drag` + per-cell
-     `on_enter`, mirroring the tab drag), keyed by raw config index
-     (`Settings::status_bar_metrics_indexed`). Escape or a click on empty bar
-     space leaves it.
+     `‹`/`›` chevrons flag more off each edge) so the shed cells stay reachable.
+     A cell **press** arms `status_metric_press`: a quick release opens its
+     drill-in (`Tty::open_metric_detail`, from `PointerReleased`), while a **hold**
+     past `status_bar_edit_hold_secs` (default 3s / 1.5–5s, completed by a poll
+     tick) enters drag-to-reorder **edit mode** (`Tty::status_bar_edit`) and starts
+     dragging that cell. In edit mode cells outline, the dragged one lifts, and an
+     accent **insertion bar** marks the drop slot (`status_metric_drag` /
+     `status_metric_drop`, keyed by raw config index via
+     `Settings::status_bar_metrics_indexed`); the reorder commits on release.
+     Escape or a press on empty bar space leaves it. (Press-hold rather than
+     right-click so it works on a trackpad and the hold never opens the popover.)
 6. **System overlay** (mini-fdtop) on click.
 
 ## Cell backlog
