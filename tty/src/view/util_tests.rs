@@ -34,7 +34,10 @@ fn truncate_name_appends_ellipsis_only_when_cut() {
     // Exactly at the budget is left alone.
     assert_eq!(truncate_name("abcdef", 6), "abcdef");
     // Over budget: keep `max - 1` chars + the ellipsis (total `max` glyphs).
-    assert_eq!(truncate_name("com.apple.WebKit.WebContent", 10), "com.apple…");
+    assert_eq!(
+        truncate_name("com.apple.WebKit.WebContent", 10),
+        "com.apple…"
+    );
     assert_eq!(truncate_name("abcdefg", 4).chars().count(), 4);
     // Multi-byte is counted by char, not byte.
     assert_eq!(truncate_name("héllo wörld", 4), "hél…");
