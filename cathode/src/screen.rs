@@ -152,6 +152,56 @@ pub struct CommandCompletion {
     pub duration: Duration,
 }
 
+/// The OSC 133 command currently being delimited. Positions are stored as global
+/// line ids (`lines_scrolled + cursor_row` at mark time); see [`CommandMark`].
+#[derive(Debug, Clone, Copy, Default)]
+struct PendingMark {
+    /// Prompt line (`133;A`, or `133;B` if the shell skips A).
+    prompt_line: Option<u64>,
+    /// Output region start (`133;C`).
+    output_start: Option<u64>,
+    /// Start instant (`133;C`), for the completion notification's duration.
+    started_at: Option<Instant>,
+}
+
+/// One finished OSC 133 command's positions, as stable global line ids (see
+/// [`TerminalScreen::lines_scrolled`]). Internal; the host reads the resolved,
+/// current-buffer form via [`TerminalScreen::command_regions`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CommandMark {
+    prompt_line: u64,
+    /// `(start, end)` global line ids of the command's output, when `C` and `D` were
+    /// both seen.
+    output: Option<(u64, u64)>,
+    exit_code: Option<i32>,
+}
+
+/// A finished OSC 133 command resolved to **current** buffer positions — the host's
+/// view for prompt-jump navigation, failed-command gutter marks, and copying a
+/// command's output. `prompt_row` and `output` are absolute line indices into the
+/// scrollback-plus-live-grid buffer, the same coordinate space as [`Terminal`]'s
+/// `scroll_to`. Only commands whose prompt line is still in the buffer appear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandRegion {
+    /// Absolute line of the prompt (for scroll-to and the gutter marker).
+    pub prompt_row: usize,
+    /// `(start, end)` absolute lines of the command's output, inclusive, when it
+    /// produced any (i.e. `C` and `D` were both seen and the start hasn't evicted).
+    pub output: Option<(usize, usize)>,
+    pub exit_code: Option<i32>,
+}
+
+impl CommandRegion {
+    /// Whether the command reported a non-zero exit code.
+    pub fn failed(&self) -> bool {
+        matches!(self.exit_code, Some(code) if code != 0)
+    }
+}
+
+/// How many [`CommandMark`]s a screen retains before evicting the oldest — a bound on
+/// the ephemeral OSC 133 nav data, independent of the persisted `command_log`.
+const MAX_COMMAND_MARKS: usize = 512;
+
 /// How many commands [`TerminalScreen::mark_command_boundary`] remembers before
 /// evicting the oldest — not user-configurable (unlike the per-command output cap),
 /// just a generous backstop. `pub` so a host loading persisted history back in (see
@@ -263,9 +313,16 @@ pub struct TerminalScreen {
     pub cwd: Option<String>,
     bell: bool,
     clipboard: Option<String>,
-    /// When the current command started running (`OSC 133;C`), for measuring its
-    /// duration at the `D` mark. `None` between commands / with no shell integration.
-    command_started_at: Option<Instant>,
+    /// Monotonic count of lines ever pushed into scrollback — the basis for the
+    /// stable "global line id" that OSC 133 marks are stored against, so a recorded
+    /// position survives eviction without renumbering (see [`Self::command_regions`]).
+    lines_scrolled: u64,
+    /// The OSC 133 command currently being delimited, built up across the `A`/`B`/`C`
+    /// marks and finalized at `D`. `None` between commands / with no shell integration.
+    pending_mark: Option<PendingMark>,
+    /// Finalized OSC 133 command marks (positions + exit code), oldest first — pruned
+    /// as their prompt line evicts from scrollback and capped at [`MAX_COMMAND_MARKS`].
+    command_marks: Vec<CommandMark>,
     /// Finished commands (OSC 133) queued for the host — see [`CommandCompletion`]
     /// and [`Self::take_command_completions`].
     pending_command_completions: Vec<CommandCompletion>,
@@ -296,7 +353,9 @@ impl TerminalScreen {
             untracked: false,
             next_command_id: 0,
             pending_history_events: Vec::new(),
-            command_started_at: None,
+            lines_scrolled: 0,
+            pending_mark: None,
+            command_marks: Vec::new(),
             pending_command_completions: Vec::new(),
             dirty_rows: BTreeSet::new(),
             fg: TermColor::Default,
@@ -341,6 +400,81 @@ impl TerminalScreen {
     /// Read-and-clear the shell commands that finished (OSC 133) since the last call.
     pub fn take_command_completions(&mut self) -> Vec<CommandCompletion> {
         std::mem::take(&mut self.pending_command_completions)
+    }
+
+    /// The global line id of the row the cursor is on right now — how an OSC 133 mark
+    /// captures a position it can find again after the line scrolls (see
+    /// [`Self::lines_scrolled`]).
+    fn current_line_id(&self) -> u64 {
+        self.lines_scrolled + self.cursor_row as u64
+    }
+
+    /// The global line id of the oldest line still in the buffer (front of scrollback).
+    /// A mark below this has evicted.
+    fn buffer_base_line(&self) -> u64 {
+        self.lines_scrolled - self.scrollback.len() as u64
+    }
+
+    /// Finalize the pending OSC 133 command at its `D` mark: record a [`CommandMark`]
+    /// (positions + exit) for the host's nav/flag/copy features, and — when we saw the
+    /// command actually start (`C`) — queue a completion for the notification. A `D`
+    /// with no prior mark (e.g. an empty Enter, which emits `D` alone) records nothing.
+    fn finish_command_mark(&mut self, end_line: u64, exit_code: Option<i32>) {
+        let Some(pending) = self.pending_mark.take() else {
+            return;
+        };
+        // Fall back to the output start as the "prompt" when a shell emits only C/D.
+        if let Some(prompt_line) = pending.prompt_line.or(pending.output_start) {
+            self.command_marks.push(CommandMark {
+                prompt_line,
+                output: pending.output_start.map(|start| (start, end_line)),
+                exit_code,
+            });
+            self.prune_command_marks();
+        }
+        if let Some(started) = pending.started_at {
+            let command = self
+                .command_log
+                .back()
+                .map(|e| e.command.clone())
+                .unwrap_or_default();
+            self.pending_command_completions.push(CommandCompletion {
+                command,
+                exit_code,
+                duration: started.elapsed(),
+            });
+        }
+    }
+
+    /// Drop marks whose prompt line has evicted from the buffer, then cap the list.
+    fn prune_command_marks(&mut self) {
+        let base = self.buffer_base_line();
+        self.command_marks.retain(|m| m.prompt_line >= base);
+        let overflow = self.command_marks.len().saturating_sub(MAX_COMMAND_MARKS);
+        if overflow > 0 {
+            self.command_marks.drain(0..overflow);
+        }
+    }
+
+    /// The finished OSC 133 commands still visible in the buffer, oldest first,
+    /// resolved to current absolute line positions (the same coordinate as
+    /// [`crate::terminal`]'s `scroll_to`). Drives prompt-jump, failed-command marks,
+    /// and output copy on the host. Empty without shell integration.
+    pub fn command_regions(&self) -> Vec<CommandRegion> {
+        let base = self.buffer_base_line();
+        self.command_marks
+            .iter()
+            .filter(|m| m.prompt_line >= base)
+            .map(|m| CommandRegion {
+                prompt_row: (m.prompt_line - base) as usize,
+                // Keep the output span only while its end is still in the buffer;
+                // clamp a partially-evicted start up to the buffer's first line.
+                output: m.output.and_then(|(start, end)| {
+                    (end >= base).then(|| ((start.max(base) - base) as usize, (end - base) as usize))
+                }),
+                exit_code: m.exit_code,
+            })
+            .collect()
     }
 
     /// Set which pane this screen belongs to, for [`CommandEntry::pane_tag`] on
@@ -454,6 +588,9 @@ impl TerminalScreen {
         }
         self.command_log.clear();
         self.pending_boundaries.clear();
+        // Scrollback is gone, so any OSC 133 mark that lived there has evicted; only a
+        // mark still on the live grid (a current prompt) survives.
+        self.prune_command_marks();
     }
 
     /// Blank one recorded command's own text *and* its captured output in place
@@ -735,6 +872,9 @@ impl TerminalScreen {
                 }
                 self.scrollback.push_back(top);
                 self.scrollback_times.push_back(Instant::now());
+                // One more line has entered scrollback: advance the global line id so
+                // OSC 133 marks stay pinned to their line as the buffer scrolls/evicts.
+                self.lines_scrolled += 1;
             }
             for r in self.scroll_top..self.scroll_bot {
                 for c in 0..self.cols {
@@ -1268,33 +1408,34 @@ impl vte::Perform for TerminalScreen {
                 }
             }
             b"133" => {
-                // Semantic-prompt marks (FinalTerm / iTerm2 shell integration). We only
-                // act on `C` (command started running) and `D[;code]` (finished): the pair
-                // measures duration + carries the exit code for completion notifications.
-                // `A`/`B` (prompt boundaries) are consumed but unused — command capture
-                // is the Enter heuristic's job.
+                // Semantic-prompt marks (FinalTerm / iTerm2 shell integration). The four
+                // marks delimit regions: `A` prompt start, `B` command-input start, `C`
+                // output start, `D[;code]` finished. We pin each to a global line id (so
+                // the position survives scrollback) to drive prompt-jump navigation,
+                // failed-command flagging, and output copy; `C`/`D` also feed the
+                // completion notification (duration + exit). Command *text* capture stays
+                // the Enter heuristic's job (`record_output_line`).
                 if let Some(sub) = params.get(1) {
+                    let line = self.current_line_id();
                     match *sub {
-                        b"C" => self.command_started_at = Some(Instant::now()),
+                        // Prompt boundary: the first of A/B seen pins the prompt line.
+                        b"A" | b"B" => {
+                            self.pending_mark
+                                .get_or_insert_with(PendingMark::default)
+                                .prompt_line
+                                .get_or_insert(line);
+                        }
+                        b"C" => {
+                            let m = self.pending_mark.get_or_insert_with(PendingMark::default);
+                            m.output_start = Some(line);
+                            m.started_at = Some(Instant::now());
+                        }
                         b"D" => {
-                            // Only report a real command (one we saw start), so an empty
-                            // Enter — which emits `D` with no preceding `C` — is ignored.
-                            if let Some(started) = self.command_started_at.take() {
-                                let exit_code = params
-                                    .get(2)
-                                    .and_then(|b| std::str::from_utf8(b).ok())
-                                    .and_then(|s| s.trim().parse().ok());
-                                let command = self
-                                    .command_log
-                                    .back()
-                                    .map(|e| e.command.clone())
-                                    .unwrap_or_default();
-                                self.pending_command_completions.push(CommandCompletion {
-                                    command,
-                                    exit_code,
-                                    duration: started.elapsed(),
-                                });
-                            }
+                            let exit_code = params
+                                .get(2)
+                                .and_then(|b| std::str::from_utf8(b).ok())
+                                .and_then(|s| s.trim().parse().ok());
+                            self.finish_command_mark(line, exit_code);
                         }
                         _ => {}
                     }

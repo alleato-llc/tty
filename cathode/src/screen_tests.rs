@@ -329,6 +329,94 @@ fn osc133_d_without_code_reports_none() {
 }
 
 #[test]
+fn osc133_records_a_command_region_with_positions_and_exit() {
+    // A (prompt) → command line → C (output start) → two output lines → D;0.
+    let mut s = TerminalScreen::new(20, 4);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;A\x07", &mut s); // prompt at row 0
+    p.process(b"$ ls\r\n", &mut s); // command echoes on row 0, cursor -> row 1
+    p.process(b"\x1b]133;C\x07", &mut s); // output starts at row 1
+    p.process(b"a\r\nb\r\n", &mut s); // rows 1,2; cursor -> row 3
+    p.process(b"\x1b]133;D\x07", &mut s); // finished at row 3, no code
+    let regions = s.command_regions();
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].prompt_row, 0);
+    assert_eq!(regions[0].output, Some((1, 3)));
+    assert_eq!(regions[0].exit_code, None);
+    assert!(!regions[0].failed());
+}
+
+#[test]
+fn osc133_region_flags_a_nonzero_exit_as_failed() {
+    let mut s = TerminalScreen::new(20, 3);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;A\x07", &mut s);
+    p.process(b"$ false\r\n", &mut s);
+    p.process(b"\x1b]133;C\x07\x1b]133;D;1\x07", &mut s);
+    let regions = s.command_regions();
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].exit_code, Some(1));
+    assert!(regions[0].failed(), "non-zero exit is a failure");
+}
+
+#[test]
+fn osc133_region_falls_back_to_output_start_without_a_prompt_mark() {
+    // A shell that emits only C/D still gets a navigable region at the output start.
+    let mut s = TerminalScreen::new(20, 3);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;C\x07", &mut s); // no A/B first
+    p.process(b"out\r\n", &mut s);
+    p.process(b"\x1b]133;D;0\x07", &mut s);
+    let regions = s.command_regions();
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].prompt_row, 0, "output start stands in for the prompt");
+}
+
+#[test]
+fn osc133_d_without_a_mark_records_no_region() {
+    let s = run(20, 2, b"\x1b]133;D\x07");
+    assert!(s.command_regions().is_empty());
+}
+
+#[test]
+fn osc133_prompt_row_tracks_the_line_into_scrollback() {
+    // A 3-row screen: the prompt scrolls up into scrollback as output arrives, and
+    // its recorded position follows it.
+    let mut s = TerminalScreen::new(20, 3);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;A\x07", &mut s);
+    p.process(b"$ ls\r\n", &mut s); // "$ ls" on row 0
+    p.process(b"\x1b]133;C\x07", &mut s);
+    p.process(b"file1\r\nfile2\r\n", &mut s); // scrolls "$ ls" into scrollback
+    p.process(b"\x1b]133;D;0\x07", &mut s);
+    let regions = s.command_regions();
+    assert_eq!(regions.len(), 1);
+    let transcript = s.transcript_lines();
+    assert_eq!(
+        transcript[regions[0].prompt_row], "$ ls",
+        "prompt_row still points at the prompt line after it scrolled"
+    );
+}
+
+#[test]
+fn osc133_region_evicts_when_its_prompt_scrolls_off() {
+    // Scrollback capped at 2: enough output pushes the prompt out of the buffer, and
+    // the region disappears with it.
+    let mut s = TerminalScreen::with_scrollback(20, 2, 2);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;A\x07", &mut s);
+    p.process(b"$ seq\r\n\x1b]133;C\x07", &mut s);
+    for _ in 0..10 {
+        p.process(b"line\r\n", &mut s);
+    }
+    p.process(b"\x1b]133;D;0\x07", &mut s);
+    assert!(
+        s.command_regions().is_empty(),
+        "the prompt line evicted, so its region is gone"
+    );
+}
+
+#[test]
 fn bell_flag_reads_and_clears() {
     let mut s = run(10, 2, b"\x07");
     assert!(s.take_bell());
