@@ -1160,6 +1160,64 @@ fn metric_detail_load_view() {
     );
 }
 
+/// Seed a deterministic charging battery for the battery snapshots.
+fn seed_battery(tty: &mut Tty) {
+    tty.metrics.battery = Some(prexp_core::system::BatteryInfo {
+        percent: 82.0,
+        charging: true,
+        time_to_empty_min: -1,
+        time_to_full_min: 45,
+    });
+    tty.metrics.battery_history = [70.0, 72.0, 74.0, 77.0, 79.0, 80.0, 81.0, 82.0]
+        .into_iter()
+        .collect();
+}
+
+#[test]
+fn status_bar_battery_view() {
+    // The battery cell: a 0..100% gauge sparkline beside `bat 82% ↑` (charging).
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("battery", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_battery(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-battery.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-battery` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_battery_view() {
+    // The battery drill-in: the charge gauge over the charging state + estimate.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("battery", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_battery(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Battery,
+    )];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-battery.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-battery` changed — delete its PNG to re-baseline"
+    );
+}
+
 #[test]
 fn metric_detail_cpu_all_view() {
     // The "CPU (all)" drill-in: the aggregate line chart *and* the per-core grid

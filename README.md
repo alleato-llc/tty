@@ -112,9 +112,11 @@ directions can share a single sparkline (**Net I/O**, **Disk I/O**). **Uptime**
 (since the machine booted) and **Session** (since this terminal launched) are text
 cells that show a compact `up 3d 4h` and drill into the full breakdown, a
 **Clock** cell shows the current time with configurable formatting (12/24-hour,
-seconds, date), and a **Load** cell sparklines the 1-minute load average and
-drills into the 1/5/15-minute triple. When the window is too narrow to hold every
-cell the bar sheds them from the right rather than wrapping. Click any sparkline to **drill in** — a small popover shows that
+seconds, date), a **Load** cell sparklines the 1-minute load average and drills
+into the 1/5/15-minute triple, and a **Battery** cell shows charge on a gauge
+(colored by level) with the charging state and time estimate in its drill-in.
+When the window is too narrow to hold every cell the bar sheds them from the
+right rather than wrapping. Click any sparkline to **drill in** — a small popover shows that
 metric's full-size line chart over its retained history, with the current
 readout; hover a point to read its value, hit **+** for a large centered chart,
 drag any **border** to resize, and click away or press `Esc` to close it. CPU is

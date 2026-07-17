@@ -208,3 +208,31 @@ fn clock_formats_per_options() {
         "got: {dated}"
     );
 }
+
+#[test]
+fn battery_labels_and_detail() {
+    use prexp_core::system::BatteryInfo;
+    let discharging = BatteryInfo {
+        percent: 82.0,
+        charging: false,
+        time_to_empty_min: 200,
+        time_to_full_min: -1,
+    };
+    assert_eq!(battery_label(&discharging), "bat 82%");
+    assert_eq!(battery_detail(&discharging), "3h 20m remaining");
+    let charging = BatteryInfo {
+        percent: 45.0,
+        charging: true,
+        time_to_empty_min: -1,
+        time_to_full_min: 45,
+    };
+    assert_eq!(battery_label(&charging), "bat 45% ↑");
+    assert_eq!(battery_detail(&charging), "Charging — 45m to full");
+    let full = BatteryInfo {
+        percent: 100.0,
+        charging: false,
+        time_to_empty_min: -1,
+        time_to_full_min: -1,
+    };
+    assert_eq!(battery_detail(&full), "On AC power");
+}

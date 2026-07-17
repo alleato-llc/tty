@@ -1974,6 +1974,16 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
                 max: hist_max(&m.load1_history),
             }
         }
+        // Battery: a fixed 0..100% gauge, colored by charge (low = alarm). Skip
+        // on a machine with no battery.
+        K::Battery => {
+            let b = m.battery?;
+            MetricRender {
+                label: mx::battery_label(&b),
+                series: vec![(m.battery_history.clone(), battery_color(b.percent as f32))],
+                max: 100.0,
+            }
+        }
         K::Clock => unreachable!("clock is handled before the stats read"),
     };
     Some(render)
@@ -2103,7 +2113,7 @@ fn metric_popover_card<'a>(
         // line reads as a fraction of full capacity); load auto-scales to its peak
         // with a plain numeric label; the rate metrics auto-scale and label the
         // axis with the peak throughput.
-        let bounded = kind.is_cpu() || kind == K::Mem;
+        let bounded = kind.is_cpu() || kind == K::Mem || kind == K::Battery;
         let peak = || {
             r.series
                 .iter()
@@ -2147,6 +2157,15 @@ fn metric_popover_card<'a>(
                 let triple =
                     crate::metrics::load_triple(state.metrics.load_avg.unwrap_or_default());
                 card = card.push(text(triple).size(12).color(t.muted));
+            }
+            K::Battery => {
+                if let Some(b) = state.metrics.battery {
+                    card = card.push(
+                        text(crate::metrics::battery_detail(&b))
+                            .size(12)
+                            .color(t.muted),
+                    );
+                }
             }
             _ => {}
         }
@@ -2714,6 +2733,19 @@ fn load_color(percent: f32) -> iced::Color {
     if percent >= 85.0 {
         t.danger
     } else if percent >= 60.0 {
+        t.warn
+    } else {
+        t.success
+    }
+}
+
+/// Grade a battery charge into calm / caution / alarm — inverted from load, since
+/// *low* charge is the concern.
+fn battery_color(percent: f32) -> iced::Color {
+    let t = theme::tokens();
+    if percent <= 20.0 {
+        t.danger
+    } else if percent <= 40.0 {
         t.warn
     } else {
         t.success

@@ -97,6 +97,11 @@ pub struct Metrics {
     pub load_avg: Option<[f32; 3]>,
     /// Recent 1-minute load (oldest first), for the load cell's sparkline.
     pub load1_history: std::collections::VecDeque<f32>,
+    /// The primary battery's state, refreshed each sample; `None` on a machine
+    /// with no battery (or where unreadable). Drives the battery cell.
+    pub battery: Option<prexp_core::system::BatteryInfo>,
+    /// Recent battery charge percentage (oldest first), for its sparkline.
+    pub battery_history: std::collections::VecDeque<f32>,
 }
 
 impl Metrics {
@@ -243,6 +248,12 @@ impl Metrics {
             self.load_avg = Some(load);
             push_capped(&mut self.load1_history, load[0]);
         }
+
+        // Battery (laptops only). The charge % feeds a 0..100 gauge sparkline.
+        if let Ok(bat) = source.system_battery() {
+            self.battery = Some(bat);
+            push_capped(&mut self.battery_history, bat.percent as f32);
+        }
     }
 }
 
@@ -358,6 +369,38 @@ pub fn disk_io_label(stats: &MachineStats) -> String {
 /// The load cell's label from the 1-minute load, e.g. `load 1.23`.
 pub fn load_label(load1: f32) -> String {
     format!("load {load1:.2}")
+}
+
+/// The battery cell's label, e.g. `bat 82%` (a trailing `↑` while charging).
+pub fn battery_label(bat: &prexp_core::system::BatteryInfo) -> String {
+    let arrow = if bat.charging { " ↑" } else { "" };
+    format!("bat {}%{arrow}", bat.percent.round() as i32)
+}
+
+/// The battery drill-in's state line: charging + time-to-full, discharging +
+/// time-remaining, or on-AC when neither estimate applies.
+pub fn battery_detail(bat: &prexp_core::system::BatteryInfo) -> String {
+    if bat.charging {
+        if bat.time_to_full_min > 0 {
+            format!("Charging — {} to full", hm_from_mins(bat.time_to_full_min))
+        } else {
+            "Charging".to_string()
+        }
+    } else if bat.time_to_empty_min > 0 {
+        format!("{} remaining", hm_from_mins(bat.time_to_empty_min))
+    } else {
+        "On AC power".to_string()
+    }
+}
+
+/// A minute count as `3h 20m` / `45m`.
+fn hm_from_mins(mins: i32) -> String {
+    let (h, m) = (mins / 60, mins % 60);
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
 }
 
 /// The full load triple for the drill-in, e.g. `1.23 · 0.95 · 0.80  (1 / 5 / 15 min)`.
