@@ -63,9 +63,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   opt-in zsh auto-install (generated `ZDOTDIR`) in Appearance → Terminal.
 - **OSC 133 semantic prompts** — on a cathode command-regions layer (mark positions
   pinned to stable line ids, surviving scrollback): **prompt-to-prompt navigation**
-  (`⌘↑`/`⌘↓`), **failed-command flagging** (a red prompt marker on non-zero exit), and
-  **copy last command output** (`⌘⇧O` / pane menu). The command-finished notification
-  above rides the same marks.
+  (`⌘↑`/`⌘↓`, `⌘⇧↑`/`⌘⇧↓` for failures only), **failed-command flagging** (a red prompt
+  marker on non-zero exit), **copy last command output** (`⌘⇧O` / pane menu), and an
+  opt-in **prompt gutter** (a dot per prompt, red on failure). The command-finished
+  notification above rides the same marks.
 - **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
   clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
@@ -135,9 +136,10 @@ tier is complete.
 ## Backlog — proposed, not committed (review & prune)
 
 ### High-leverage next
-- **OSC 133 follow-ups** — ✦ — the semantics layer shipped (see above); still open: a
-  persistent prompt gutter (mark every prompt, not just failures) and a
-  jump-to-next-*failed*-command that filters the region list by exit code.
+- **OSC 133** — ✦ — **fully shipped** (see the Shipped section): notifications,
+  prompt-jump, failed-command flagging, output copy, a **jump-to-next-*failed*-command**
+  (`⌘⇧↑`/`⌘⇧↓`), and an opt-in **persistent prompt gutter** (a dot per prompt, red on
+  failure).
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.

@@ -171,6 +171,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             let search = state.search.clone();
             let search_match = state.search_match;
             let scroll_target = state.scroll_target;
+            let prompt_gutter = state.settings.prompt_gutter();
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
@@ -207,7 +208,8 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     Message::OpenFile,
                 )
                 .find(search.clone())
-                .scroll_to(scroll_to);
+                .scroll_to(scroll_to)
+                .prompt_gutter(prompt_gutter);
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes (unless the highlight is off); the others get a hairline.
                 let border_color = if is_focused && highlight {
@@ -683,7 +685,8 @@ fn detached_view<'a>(
             Message::OpenLink,
             Message::OpenFile,
         )
-        .find(None);
+        .find(None)
+        .prompt_gutter(state.settings.prompt_gutter());
         let border_color = if is_focused && highlight {
             accent
         } else {

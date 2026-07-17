@@ -422,6 +422,11 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
         )
         .size(12)
         .color(t.muted),
+        toggle(
+            "Mark command prompts in a left gutter (failed = red)",
+            state.settings.prompt_gutter(),
+            Message::SetPromptGutter(!state.settings.prompt_gutter()),
+        ),
         caption("COMMAND-FINISHED NOTIFICATIONS"),
         toggle(
             "Notify when a command finishes while unfocused",

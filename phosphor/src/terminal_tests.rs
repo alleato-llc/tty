@@ -300,3 +300,19 @@ fn resolve_path_absolute_relative_and_home() {
     // No cwd known → left relative for the host to resolve however it opens files.
     assert_eq!(resolve_path("src/main.rs", None), "src/main.rs");
 }
+
+#[test]
+fn prompt_gutter_insets_the_content_frame() {
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 240.0));
+    // Off by default: the content frame is the full bounds.
+    let plain = term(TerminalScreen::new(80, 24));
+    assert_eq!(plain.gutter(10.0), 0.0);
+    assert_eq!(plain.content(bounds, 10.0).x, bounds.x);
+    assert_eq!(plain.content(bounds, 10.0).width, bounds.width);
+    // On: one cell reserved on the left, one fewer cell of width.
+    let gutter = term(TerminalScreen::new(80, 24)).prompt_gutter(true);
+    assert_eq!(gutter.gutter(10.0), 10.0);
+    let c = gutter.content(bounds, 10.0);
+    assert_eq!(c.x, 10.0, "shifted right one cell");
+    assert_eq!(c.width, 790.0, "one cell narrower");
+}

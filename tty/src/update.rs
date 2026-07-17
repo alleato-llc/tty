@@ -239,6 +239,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetNotifyOnCommandFinish(on) => state.set_notify_on_command_finish(on),
         Message::NotifyMinSecondsStep(delta) => state.step_notify_min_seconds(delta),
         Message::SetShellIntegrationAutoinstall(on) => state.set_shell_integration_autoinstall(on),
+        Message::SetPromptGutter(on) => {
+            state.settings.prompt_gutter = Some(on);
+            state.settings.save();
+        }
         Message::CopyShellSnippet => {
             return iced::clipboard::write(crate::shell_integration::ZSH_SNIPPET.to_string());
         }

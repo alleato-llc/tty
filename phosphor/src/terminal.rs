@@ -151,6 +151,9 @@ pub struct Terminal<Message> {
     /// An absolute line the host wants brought into view right now (e.g. the current
     /// `⌘F` match) — see [`Terminal::scroll_to`].
     scroll_to: Option<usize>,
+    /// Reserve a one-cell left gutter and mark every OSC 133 command prompt in it (a
+    /// dot, red for a failed command). Off by default — see [`Terminal::prompt_gutter`].
+    show_gutter: bool,
 }
 
 impl<Message> Terminal<Message> {
@@ -158,6 +161,34 @@ impl<Message> Terminal<Message> {
     pub fn find(mut self, query: Option<String>) -> Self {
         self.find = query.filter(|q| !q.is_empty());
         self
+    }
+
+    /// Reserve a one-cell left gutter marking each OSC 133 command prompt (a dot per
+    /// prompt, red on a non-zero exit). Shifts the grid right by one cell, so the shell
+    /// sees one fewer column. Off by default.
+    pub fn prompt_gutter(mut self, on: bool) -> Self {
+        self.show_gutter = on;
+        self
+    }
+
+    /// The reserved left-gutter width in pixels (one cell when enabled, else zero).
+    fn gutter(&self, cell_w: f32) -> f32 {
+        if self.show_gutter {
+            cell_w
+        } else {
+            0.0
+        }
+    }
+
+    /// `bounds` inset by the gutter — the region the text grid actually occupies, and
+    /// the coordinate frame every pixel↔cell mapping uses.
+    fn content(&self, bounds: Rectangle, cell_w: f32) -> Rectangle {
+        let g = self.gutter(cell_w);
+        Rectangle {
+            x: bounds.x + g,
+            width: (bounds.width - g).max(0.0),
+            ..bounds
+        }
     }
 
     /// Scroll to bring absolute line `target` into view, once — set this to the
@@ -207,6 +238,7 @@ pub fn terminal<Message>(
         on_open_file: Box::new(on_open_file),
         find: None,
         scroll_to: None,
+        show_gutter: false,
     }
 }
 
@@ -299,6 +331,7 @@ impl<Message> Terminal<Message> {
         scroll: usize,
         pos: Point,
     ) -> Option<(usize, usize, usize)> {
+        let bounds = self.content(bounds, cell_w);
         let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
         let (line, col) = hit(bounds, cell_w, line_h, pos, total, rows, cols, scroll);
         let screen = self.screen.lock();
@@ -567,12 +600,15 @@ where
         let bounds = layout.bounds();
         let cell_w = cell_width(renderer, self.font, self.font_size);
         let line_h = self.line_height();
+        // The text grid occupies `content` (bounds minus the gutter); every pixel↔cell
+        // mapping below works in that frame, and the shell is sized to its columns.
+        let content = self.content(bounds, cell_w);
         let state = tree.state.downcast_mut::<State>();
 
         // Resize the PTY whenever the grid that fits changes (window resize, zoom).
         {
             let screen = self.screen.lock();
-            let cols = (bounds.width / cell_w).floor().max(1.0) as usize;
+            let cols = (content.width / cell_w).floor().max(1.0) as usize;
             let rows = (bounds.height / line_h).floor().max(1.0) as usize;
             if (cols, rows) != (screen.cols, screen.rows) {
                 shell.publish((self.on_resize)(cols, rows));
@@ -599,7 +635,7 @@ where
                 };
                 if to_app {
                     // Report wheel as button 64/65 at the pointer cell.
-                    let (col, row) = cell_pos(bounds, cell_w, line_h, pos);
+                    let (col, row) = cell_pos(content, cell_w, line_h, pos);
                     let ev = if notches > 0.0 {
                         MouseEvent::WheelUp
                     } else {
@@ -631,7 +667,7 @@ where
                 };
                 if to_app {
                     if let Some(b) = mouse_button(*button) {
-                        let (col, row) = cell_pos(bounds, cell_w, line_h, pos);
+                        let (col, row) = cell_pos(content, cell_w, line_h, pos);
                         if let Some(bytes) = input::mouse_report(
                             mouse_state,
                             MouseEvent::Press(b),
@@ -646,8 +682,17 @@ where
                         shell.capture_event();
                     }
                 } else if *button == mouse::Button::Left {
-                    let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
-                    let p = hit(bounds, cell_w, line_h, pos, total, rows, cols, state.scroll);
+                    let (total, rows, cols) = self.dims(cell_w, line_h, content);
+                    let p = hit(
+                        content,
+                        cell_w,
+                        line_h,
+                        pos,
+                        total,
+                        rows,
+                        cols,
+                        state.scroll,
+                    );
                     let (line, col) = p;
 
                     // ⌘-click a URL opens it directly — no selection, no menu.
@@ -702,9 +747,17 @@ where
                     // A right-press over a detected URL opens the host's link menu
                     // (captured); otherwise leave it uncaptured so it bubbles up to
                     // the host's own pane/tab context menu, unchanged.
-                    let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
-                    let (line, col) =
-                        hit(bounds, cell_w, line_h, pos, total, rows, cols, state.scroll);
+                    let (total, rows, cols) = self.dims(cell_w, line_h, content);
+                    let (line, col) = hit(
+                        content,
+                        cell_w,
+                        line_h,
+                        pos,
+                        total,
+                        rows,
+                        cols,
+                        state.scroll,
+                    );
                     let screen = self.screen.lock();
                     let history = screen.scrollback.len();
                     let row = row_chars(&screen, history, cols, line);
@@ -723,7 +776,7 @@ where
                         pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
                         pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
                     );
-                    let (col, row) = cell_pos(bounds, cell_w, line_h, clamped);
+                    let (col, row) = cell_pos(content, cell_w, line_h, clamped);
                     // Dedupe motion within the same cell to avoid flooding the PTY.
                     if state.last_report != Some((col, row)) {
                         let ev = if state.dragging {
@@ -739,14 +792,14 @@ where
                         }
                     }
                 } else if state.dragging {
-                    let (total, rows, cols) = self.dims(cell_w, line_h, bounds);
+                    let (total, rows, cols) = self.dims(cell_w, line_h, content);
                     // Clamp into bounds so a drag past the edge still selects the edge.
                     let clamped = Point::new(
                         pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
                         pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
                     );
                     let p = hit(
-                        bounds,
+                        content,
                         cell_w,
                         line_h,
                         clamped,
@@ -771,7 +824,7 @@ where
                             pos.x.clamp(bounds.x, bounds.x + bounds.width - 1.0),
                             pos.y.clamp(bounds.y, bounds.y + bounds.height - 1.0),
                         );
-                        let (col, row) = cell_pos(bounds, cell_w, line_h, clamped);
+                        let (col, row) = cell_pos(content, cell_w, line_h, clamped);
                         if let Some(bytes) = input::mouse_report(
                             mouse_state,
                             MouseEvent::Release(b),
@@ -813,6 +866,9 @@ where
         let bounds = layout.bounds();
         let cell_w = cell_width(renderer, self.font, self.font_size);
         let line_h = self.line_height();
+        // The grid draws in `content` (bounds minus the gutter); prompt markers, when
+        // the gutter is on, go in the reserved strip to its left.
+        let content = self.content(bounds, cell_w);
         let state = tree.state.downcast_ref::<State>();
         let screen = self.screen.lock();
         let history = screen.scrollback.len();
@@ -828,13 +884,13 @@ where
             .as_deref()
             .map(|q| find_matches(&screen, cols, q))
             .unwrap_or_default();
-        // Absolute rows whose command exited non-zero (OSC 133) — their prompt line
-        // gets a faint red wash so a failure reads at a glance while scrolling back.
-        let failed_rows: Vec<usize> = screen
+        // OSC 133 command prompts by absolute row + whether they failed: the prompt
+        // line of a failed command gets a faint red wash, and (with the gutter on)
+        // every prompt gets a dot to its left, red for a failure.
+        let prompts: Vec<(usize, bool)> = screen
             .command_regions()
             .iter()
-            .filter(|r| r.failed())
-            .map(|r| r.prompt_row)
+            .map(|r| (r.prompt_row, r.failed()))
             .collect();
 
         renderer.with_layer(bounds, |renderer| {
@@ -861,7 +917,7 @@ where
                     }
                     fill_rect(
                         renderer,
-                        bounds.x + c as f32 * cell_w,
+                        content.x + c as f32 * cell_w,
                         y,
                         (end - c) as f32 * cell_w,
                         line_h,
@@ -870,20 +926,48 @@ where
                     c = end;
                 }
 
-                // Failed-command marker: a faint red wash across the prompt line of a
-                // command that exited non-zero (OSC 133), plus a solid bar at the left
-                // edge so it's visible even on a dark or busy row.
-                if failed_rows.contains(&line) {
-                    let red = self.style.ansi[1];
+                // OSC 133 prompt markers. A failed command's prompt line gets a faint
+                // red wash across the content. The prompt indicator itself goes in the
+                // gutter when it's on (a dot per prompt, red for a failure); with no
+                // gutter, a failed prompt still gets a solid left bar so it reads.
+                let prompt = prompts
+                    .iter()
+                    .find(|&&(row, _)| row == line)
+                    .map(|&(_, f)| f);
+                let red = self.style.ansi[1];
+                if prompt == Some(true) {
                     fill_rect(
                         renderer,
-                        bounds.x,
+                        content.x,
                         y,
                         cols as f32 * cell_w,
                         line_h,
                         Color { a: 0.16, ..red },
                     );
-                    fill_rect(renderer, bounds.x, y, 2.0, line_h, red);
+                }
+                if let Some(failed) = prompt {
+                    if self.show_gutter {
+                        // A centered dot in the gutter strip [bounds.x, content.x).
+                        let size = (cell_w * 0.42).max(3.0);
+                        let color = if failed {
+                            red
+                        } else {
+                            Color {
+                                a: 0.5,
+                                ..self.style.fg
+                            }
+                        };
+                        fill_rect(
+                            renderer,
+                            bounds.x + (cell_w - size) / 2.0,
+                            y + (line_h - size) / 2.0,
+                            size,
+                            size,
+                            color,
+                        );
+                    } else if failed {
+                        fill_rect(renderer, content.x, y, 2.0, line_h, red);
+                    }
                 }
 
                 // Selection tint.
@@ -898,7 +982,7 @@ where
                         let e = e.min(cols.saturating_sub(1));
                         fill_rect(
                             renderer,
-                            bounds.x + s as f32 * cell_w,
+                            content.x + s as f32 * cell_w,
                             y,
                             (e + 1 - s) as f32 * cell_w,
                             line_h,
@@ -918,7 +1002,7 @@ where
                     for &(_, start, end) in matches.iter().filter(|m| m.0 == line) {
                         fill_rect(
                             renderer,
-                            bounds.x + start as f32 * cell_w,
+                            content.x + start as f32 * cell_w,
                             y,
                             (end - start) as f32 * cell_w,
                             line_h,
@@ -936,7 +1020,7 @@ where
                         if e >= s {
                             fill_rect(
                                 renderer,
-                                bounds.x + s as f32 * cell_w,
+                                content.x + s as f32 * cell_w,
                                 y + line_h - 2.0,
                                 (e + 1 - s) as f32 * cell_w,
                                 1.0,
@@ -961,7 +1045,7 @@ where
                     let key = (fg, cell.bold, cell.italic, cell.underline);
                     // (column, char) pairs sharing this style run — rendered one glyph
                     // per `fill_text` call, each explicitly anchored to its own cell
-                    // (`bounds.x + col * cell_w`), rather than shaping the whole run as
+                    // (`content.x + col * cell_w`), rather than shaping the whole run as
                     // one string and letting the text shaper's own per-glyph advance
                     // (even under Shaping::Basic) drift from the monospace grid over a
                     // long run — the drift is invisible for a couple of characters but
@@ -984,12 +1068,12 @@ where
                             break;
                         }
                     }
-                    let x = bounds.x + c as f32 * cell_w;
+                    let x = content.x + c as f32 * cell_w;
                     for &(col, ch) in &run {
                         if ch == ' ' {
                             continue;
                         }
-                        let gx = bounds.x + col as f32 * cell_w;
+                        let gx = content.x + col as f32 * cell_w;
                         renderer.fill_text(
                             text::Text {
                                 content: ch.to_string(),
@@ -1032,7 +1116,7 @@ where
                 if cvr < rows {
                     let under = screen.cell(screen.cursor_row, screen.cursor_col);
                     let span = (under.width.max(1) as f32) * cell_w;
-                    let cx = bounds.x + screen.cursor_col as f32 * cell_w;
+                    let cx = content.x + screen.cursor_col as f32 * cell_w;
                     let cy = bounds.y + cvr as f32 * line_h;
                     let bar = (self.font_size * 0.12).clamp(1.5, 3.0);
                     match screen.cursor_shape {

@@ -119,7 +119,11 @@ the read loop):
   never matches, and URL runs are excluded). `⌘`-hover underlines those too; `⌘`-click
   resolves the path against the shell's cwd (OSC 7) and fires `on_open_file(path,
   line, col)`, which the host opens via the configured
-  `settings::resolve_open_file_command` template (default: the OS opener).
+  `settings::resolve_open_file_command` template (default: the OS opener). A failed
+  command's prompt line (from `command_regions().failed()`) gets a faint red wash, and
+  the opt-in **prompt gutter** (`.prompt_gutter(true)`) reserves a one-cell left strip —
+  `content()` insets every pixel↔cell mapping by it — with a dot per prompt, red on
+  failure.
 
 ## tty — the app
 

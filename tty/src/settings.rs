@@ -453,6 +453,11 @@ pub struct Settings {
     /// Absent = [`DEFAULT_NOTIFY_MIN_SECONDS`].
     #[serde(default)]
     pub notify_command_min_seconds: Option<u32>,
+    /// Reserve a one-cell left gutter that marks every OSC 133 command prompt (a dot,
+    /// red for a failed command). Off (absent) by default — opt-in, since it shifts the
+    /// grid right one column. Needs shell integration to show anything.
+    #[serde(default)]
+    pub prompt_gutter: Option<bool>,
     /// Whether to auto-install the OSC 133 shell-integration hooks into new shells
     /// (zsh only for now). Off (absent) by default — opt-in, since it wraps the
     /// shell's startup. When off, enable notifications by adding the hooks to your
@@ -924,6 +929,11 @@ impl Settings {
     /// `false` — opt-in).
     pub fn shell_integration_autoinstall(&self) -> bool {
         self.shell_integration_autoinstall.unwrap_or(false)
+    }
+
+    /// Whether to show the OSC 133 prompt gutter (default `false` — opt-in).
+    pub fn prompt_gutter(&self) -> bool {
+        self.prompt_gutter.unwrap_or(false)
     }
 
     /// The configured status-bar metrics resolved to typed metric + style, in

@@ -108,6 +108,8 @@ pub enum Message {
     NotifyMinSecondsStep(i64),
     /// Toggle auto-installing the OSC 133 shell hooks into new shells.
     SetShellIntegrationAutoinstall(bool),
+    /// Toggle the OSC 133 prompt gutter.
+    SetPromptGutter(bool),
     /// Copy the manual shell-integration snippet to the clipboard.
     CopyShellSnippet,
     /// The "Copy Link" menu item was chosen — write the URL to the clipboard.

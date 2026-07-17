@@ -181,6 +181,36 @@ fn failed_command_marker_view() {
 }
 
 #[test]
+fn prompt_gutter_view() {
+    // Same commands as the failed-marker test, but with the prompt gutter on: every
+    // prompt gets a dot to its left (red for the failed one), and the grid shifts right.
+    let mut tty = populated();
+    tty.settings.prompt_gutter = Some(true);
+    let term = painted_term(
+        "zsh",
+        56,
+        8,
+        b"\x1b]133;A\x07$ ls\r\n\x1b]133;C\x07README.md  src\r\n\x1b]133;D;0\x07\
+          \x1b]133;A\x07$ cargo test\r\n\x1b]133;C\x07error: test failed\r\n\x1b]133;D;1\x07\
+          \x1b]133;A\x07$ ",
+    );
+    tty.tabs[0] = Tab::new(term);
+    tty.active = 0;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-prompt-gutter.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-prompt-gutter` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn split_pane_view() {
     use iced::widget::pane_grid::Direction;
     // Split the active tab into two side-by-side panes (the new one, on the right, takes
