@@ -153,3 +153,23 @@ fn labels_read_cleanly() {
     assert_eq!(net_io_label(&stats), "Net ↓ 1.5M/s ↑ 40K/s");
     assert_eq!(disk_io_label(&stats), "Disk R 0B/s W 5.0M/s");
 }
+
+#[test]
+fn uptime_formats_abbreviated_and_full() {
+    // Abbreviated: the two most-significant non-zero units, prefixed "up".
+    assert_eq!(uptime_abbrev(0), "up 0s");
+    assert_eq!(uptime_abbrev(45), "up 45s");
+    assert_eq!(uptime_abbrev(12 * 60 + 30), "up 12m");
+    assert_eq!(uptime_abbrev(4 * 3600 + 12 * 60), "up 4h 12m");
+    assert_eq!(uptime_abbrev(3 * 86_400 + 4 * 3600 + 12 * 60), "up 3d 4h");
+
+    // Full: every non-zero unit spelled out and pluralized.
+    assert_eq!(uptime_full(0), "less than a minute");
+    assert_eq!(uptime_full(1), "1 second");
+    assert_eq!(uptime_full(90), "1 minute");
+    assert_eq!(uptime_full(3600 + 60), "1 hour, 1 minute");
+    assert_eq!(
+        uptime_full(3 * 86_400 + 4 * 3600 + 12 * 60),
+        "3 days, 4 hours, 12 minutes"
+    );
+}

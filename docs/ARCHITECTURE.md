@@ -160,11 +160,16 @@ Thin glue, mirroring `fed`'s module shape:
   deltas over the `Instant`-measured interval, and keeps a bounded per-metric history
   for the sparklines. It also keeps **per-core** CPU% history (`core_history`) for the
   CPU drill-in's per-core grid, plus each core's cached P/E `perf_levels` (static, read
-  once from `prexp-core`'s `cpu_perf_levels()`). Network / disk have macOS samplers only for now (via
-  `prexp-ffi` — `sysctl NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other
-  platforms those reads error and are dropped, so the metric simply shows no rate. A
-  failed CPU/memory read is warned and skipped — a stats hiccup never disturbs the
-  terminal.
+  once from `prexp-core`'s `cpu_perf_levels()`). It also tracks two uptimes
+  (`system_uptime_secs` / `session_uptime_secs`): the system boot time is read once
+  via `prexp-core`'s `system_boot_time_secs()` (`sysctl(KERN_BOOTTIME)` on macOS,
+  `/proc/uptime` on Linux) and the session start is stamped on the first sample; the
+  `Uptime` / `Session` metric kinds render as text cells (abbreviated `up 3d 4h`,
+  drilling into a full breakdown) rather than sparklines. Network / disk have macOS
+  samplers only for now (via `prexp-ffi` — `sysctl NET_RT_IFLIST2` + IOKit
+  `IOBlockStorageDriver`); on other platforms those reads error and are dropped, so
+  the metric simply shows no rate. A failed CPU/memory read is warned and skipped —
+  a stats hiccup never disturbs the terminal.
 - **`subscription`** — key events + per-window geometry (`Focused`/`Resized`/`Moved` via
   `listen_with`'s window id) + `window::close_events` + **one always-on output stream** fed
   by `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).

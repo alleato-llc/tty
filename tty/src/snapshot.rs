@@ -1027,6 +1027,57 @@ fn seed_cpu_cores(tty: &mut Tty) {
 }
 
 #[test]
+fn status_bar_uptime_cells_view() {
+    // Uptime and Session as status-bar cells: text (not sparklines), showing the
+    // abbreviated form ("up 3d 4h" / "up 2h 15m").
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![
+        metric("uptime", "sparkline"),
+        metric("session", "sparkline"),
+    ];
+    seed_metric_sample(&mut tty);
+    tty.metrics.system_uptime_secs = Some(3 * 86_400 + 4 * 3600 + 12 * 60);
+    tty.metrics.session_uptime_secs = Some(2 * 3600 + 15 * 60);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-uptime.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-uptime` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_uptime_view() {
+    // Clicking the uptime cell drills into the full breakdown ("3 days, 4 hours,
+    // 12 minutes") under the metric name and a note on what it counts from.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("uptime", "sparkline")];
+    seed_metric_sample(&mut tty);
+    tty.metrics.system_uptime_secs = Some(3 * 86_400 + 4 * 3600 + 12 * 60);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Uptime,
+    )];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-uptime.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-uptime` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn metric_detail_cpu_all_view() {
     // The "CPU (all)" drill-in: the aggregate line chart *and* the per-core grid
     // stacked — a sparkline per logical core (color-graded by load, current %

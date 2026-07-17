@@ -108,7 +108,9 @@ until you add one): CPU, memory, and network / disk throughput as compact canvas
 sparklines or plain numbers, in an order you set (add, remove, reorder, choose a
 per-metric style, and a sample interval). CPU and memory grade their color by
 load; the network and disk rates auto-scale to their own recent peak, and the two
-directions can share a single sparkline (**Net I/O**, **Disk I/O**). When the
+directions can share a single sparkline (**Net I/O**, **Disk I/O**). **Uptime**
+(since the machine booted) and **Session** (since this terminal launched) are text
+cells that show a compact `up 3d 4h` and drill into the full breakdown. When the
 window is too narrow to hold every cell the bar sheds them from the right rather
 than wrapping. Click any sparkline to **drill in** — a small popover shows that
 metric's full-size line chart over its retained history, with the current

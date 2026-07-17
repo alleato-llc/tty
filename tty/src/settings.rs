@@ -62,12 +62,18 @@ pub enum MetricKind {
     NetIo,
     /// Disk read + write on a single sparkline (two overlaid series).
     DiskIo,
+    /// System uptime (time since boot). A text cell, not a sparkline; drills into
+    /// the full breakdown.
+    Uptime,
+    /// This terminal session's uptime (time since it launched). A text cell;
+    /// drills into the full breakdown.
+    Session,
 }
 
 impl MetricKind {
     /// Every metric that has a sampler today, in a stable order (used to offer
     /// the not-yet-added metrics in the settings editor).
-    pub const ALL: [MetricKind; 10] = [
+    pub const ALL: [MetricKind; 12] = [
         MetricKind::Cpu,
         MetricKind::CpuCores,
         MetricKind::CpuAll,
@@ -78,7 +84,15 @@ impl MetricKind {
         MetricKind::DiskW,
         MetricKind::NetIo,
         MetricKind::DiskIo,
+        MetricKind::Uptime,
+        MetricKind::Session,
     ];
+
+    /// Whether this kind is a text uptime cell (system or session) rather than a
+    /// sampled sparkline — it renders as text and drills into a full breakdown.
+    pub fn is_uptime(self) -> bool {
+        matches!(self, MetricKind::Uptime | MetricKind::Session)
+    }
 
     /// Whether this kind is one of the CPU drill-ins (they share the aggregate
     /// status-bar cell and sampler; only their popover body differs).
@@ -102,6 +116,8 @@ impl MetricKind {
             MetricKind::DiskW => "disk_w",
             MetricKind::NetIo => "net_io",
             MetricKind::DiskIo => "disk_io",
+            MetricKind::Uptime => "uptime",
+            MetricKind::Session => "session",
         }
     }
 
@@ -119,6 +135,8 @@ impl MetricKind {
             "disk_w" => Some(MetricKind::DiskW),
             "net_io" => Some(MetricKind::NetIo),
             "disk_io" => Some(MetricKind::DiskIo),
+            "uptime" => Some(MetricKind::Uptime),
+            "session" => Some(MetricKind::Session),
             _ => None,
         }
     }
@@ -137,6 +155,8 @@ impl std::fmt::Display for MetricKind {
             MetricKind::DiskW => "Disk W",
             MetricKind::NetIo => "Net I/O",
             MetricKind::DiskIo => "Disk I/O",
+            MetricKind::Uptime => "Uptime",
+            MetricKind::Session => "Session",
         })
     }
 }

@@ -85,8 +85,14 @@ right before anything wraps, so a narrow window degrades gracefully.
 
 Implemented today (phases 2-3): the ordered list,
 `status_bar_metrics_interval_ms`, and width-shedding are live. `metric` accepts
-`cpu`, `mem`, `net_rx`, `net_tx`, `disk_r`, `disk_w`, `net_io`, and `disk_io`
-(net/disk on macOS only for now). `net_io` / `disk_io` overlay the two directions
+`cpu`, `mem`, `net_rx`, `net_tx`, `disk_r`, `disk_w`, `net_io`, `disk_io`,
+`uptime`, and `session` (net/disk on macOS only for now). `uptime` (system, since
+boot) and `session` (this terminal, since launch) are **text** cells rather than
+sparklines: the bar shows an abbreviated form (`up 3d 4h`) and the drill-in
+popover the full breakdown (`3 days, 4 hours, 12 minutes`). System uptime reads
+the boot time once from `prexp-core`'s `system_boot_time_secs()`
+(`sysctl(KERN_BOOTTIME)` on macOS, `/proc/uptime` on Linux); session uptime is
+elapsed since the first sample. `net_io` / `disk_io` overlay the two directions
 (rx+tx, read+write) on a single sparkline — two series on a shared scale, the
 first in the accent and the second in `warn`, via rime's multi-series
 `Sparkline` — with both rates in the label. `style` accepts `sparkline` and `number` and applies to any metric; the

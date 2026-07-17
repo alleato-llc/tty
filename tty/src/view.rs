@@ -1908,6 +1908,18 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             ],
             max: hist_max(&m.disk_r_history).max(hist_max(&m.disk_w_history)),
         },
+        // Uptimes are text, not sparklines: no series (so `metric_cell` renders
+        // the label alone). Skip the cell until a reading exists.
+        K::Uptime => MetricRender {
+            label: mx::uptime_abbrev(m.system_uptime_secs?),
+            series: vec![],
+            max: 1.0,
+        },
+        K::Session => MetricRender {
+            label: mx::uptime_abbrev(m.session_uptime_secs?),
+            series: vec![],
+            max: 1.0,
+        },
     };
     Some(render)
 }
@@ -1924,7 +1936,11 @@ fn metric_cell<'a>(style: crate::settings::MetricStyle, r: MetricRender) -> Elem
     let label = text(r.label)
         .size(STATUS_BAR_TEXT_SIZE)
         .color(theme::tokens().muted);
+    // Text-only when there is no plottable data (a text metric like uptime, or a
+    // rate metric whose history hasn't landed yet), regardless of style.
+    let has_data = r.series.iter().any(|(v, _)| !v.is_empty());
     match style {
+        _ if !has_data => label.into(),
         crate::settings::MetricStyle::Number => label.into(),
         crate::settings::MetricStyle::Sparkline => {
             let series: Vec<SparkSeries> = r
@@ -1994,7 +2010,9 @@ fn metric_popover_card<'a>(
     // where the platform reports no per-core history.
     let has_cores = kind.is_cpu() && has_per_core_cpu(state);
 
-    let body: Element<'a, Message> = if kind == K::CpuAll && has_cores {
+    let body: Element<'a, Message> = if kind.is_uptime() {
+        uptime_body(state, kind)
+    } else if kind == K::CpuAll && has_cores {
         combined_cpu_body(state, expanded, card_w, chart_h)
     } else if kind == K::CpuCores && has_cores {
         core_grid_body(state, expanded, card_w)
@@ -2205,6 +2223,37 @@ fn core_color(kind: prexp_core::system::CpuKind, cur: f32) -> iced::Color {
         prexp_core::system::CpuKind::Efficiency => theme::tokens().accent,
         _ => load_color(cur),
     }
+}
+
+/// The uptime drill-in's body: the full duration breakdown (the "full view" to
+/// the cell's abbreviated one), under the metric name and over a note saying what
+/// it counts from.
+fn uptime_body(state: &Tty, kind: crate::settings::MetricKind) -> Element<'_, Message> {
+    use crate::settings::MetricKind as K;
+    let t = theme::tokens();
+    let secs = if kind == K::Uptime {
+        state.metrics.system_uptime_secs
+    } else {
+        state.metrics.session_uptime_secs
+    };
+    let (full, note) = match secs {
+        Some(s) => (
+            crate::metrics::uptime_full(s),
+            if kind == K::Uptime {
+                "since the system booted"
+            } else {
+                "since this terminal opened"
+            },
+        ),
+        None => ("Unavailable".to_string(), "no reading yet"),
+    };
+    column![
+        text(kind.to_string()).size(14).color(t.ink),
+        text(full).size(20).color(t.ink),
+        text(note).size(12).color(t.muted),
+    ]
+    .spacing(8)
+    .into()
 }
 
 /// The aggregate CPU line chart: overall CPU% over its retained history on a

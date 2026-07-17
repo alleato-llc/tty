@@ -79,6 +79,19 @@ pub struct Metrics {
     /// cached (the topology is static). `None` where unavailable, so the grid
     /// falls back to a single ungrouped section.
     pub perf_levels: Option<Vec<prexp_core::system::CpuKind>>,
+    /// The system boot time (Unix-epoch seconds), read once from `prexp-core`;
+    /// `None` until read (or where the platform can't report it). Drives the
+    /// system-uptime cell.
+    boot_time_secs: Option<u64>,
+    /// When this terminal's sampler first ran (Unix-epoch seconds), set on the
+    /// first `sample()`. Drives the session-uptime cell.
+    session_start_secs: Option<u64>,
+    /// System uptime in whole seconds (now − boot), refreshed each sample.
+    /// `None` where the boot time is unavailable.
+    pub system_uptime_secs: Option<u64>,
+    /// This terminal session's uptime in whole seconds (now − first sample),
+    /// refreshed each sample.
+    pub session_uptime_secs: Option<u64>,
 }
 
 impl Metrics {
@@ -201,6 +214,23 @@ impl Metrics {
             push_capped(&mut self.disk_r_history, disk_r_bps);
             push_capped(&mut self.disk_w_history, disk_w_bps);
         }
+
+        // Uptimes: wall-clock seconds since boot (system) and since the first
+        // sample (this terminal session). Read the boot time once (it only moves
+        // across reboots); a platform that can't report it leaves system uptime
+        // `None`. Both are recomputed here so the cells refresh each tick.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if self.boot_time_secs.is_none() {
+            self.boot_time_secs = source.system_boot_time_secs().ok();
+        }
+        self.system_uptime_secs = self
+            .boot_time_secs
+            .map(|boot| now_secs.saturating_sub(boot));
+        let start = *self.session_start_secs.get_or_insert(now_secs);
+        self.session_uptime_secs = Some(now_secs.saturating_sub(start));
     }
 }
 
@@ -311,6 +341,55 @@ pub fn disk_io_label(stats: &MachineStats) -> String {
         format_rate(stats.disk_r_bps),
         format_rate(stats.disk_w_bps),
     )
+}
+
+/// Break a duration in seconds into `(days, hours, minutes, seconds)`.
+fn dhms(secs: u64) -> (u64, u64, u64, u64) {
+    (
+        secs / 86_400,
+        (secs % 86_400) / 3600,
+        (secs % 3600) / 60,
+        secs % 60,
+    )
+}
+
+/// Compact uptime for a status-bar cell: the two most-significant non-zero
+/// units, prefixed `up`. e.g. `up 3d 4h`, `up 4h 12m`, `up 12m`, `up 45s`.
+pub fn uptime_abbrev(secs: u64) -> String {
+    let (d, h, m, s) = dhms(secs);
+    let body = if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else if m > 0 {
+        format!("{m}m")
+    } else {
+        format!("{s}s")
+    };
+    format!("up {body}")
+}
+
+/// The full uptime breakdown for the drill-in popover: every non-zero unit
+/// spelled out, e.g. `3 days, 4 hours, 12 minutes`. Seconds appear only under a
+/// minute (otherwise they just churn). Zero reads as `less than a minute`.
+pub fn uptime_full(secs: u64) -> String {
+    let (d, h, m, s) = dhms(secs);
+    let unit = |n: u64, name: &str| {
+        (n > 0).then(|| format!("{n} {name}{}", if n == 1 { "" } else { "s" }))
+    };
+    let parts: Vec<String> = [unit(d, "day"), unit(h, "hour"), unit(m, "minute")]
+        .into_iter()
+        .flatten()
+        .collect();
+    if parts.is_empty() {
+        // Under a minute: show seconds so it isn't blank.
+        return if s > 0 {
+            format!("{s} second{}", if s == 1 { "" } else { "s" })
+        } else {
+            "less than a minute".to_string()
+        };
+    }
+    parts.join(", ")
 }
 
 /// Compact throughput for the status bar: `0B/s`, `40K/s`, `1.2M/s`. Whole

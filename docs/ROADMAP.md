@@ -152,8 +152,10 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
   drag-to-move. Since extended: three separately configurable CPU drill-ins (total
   / per-core grid / both), a per-core P/E cluster grid (each core's `cluster-type`
   read once via `prexp-core`'s `cpu_perf_levels()`), an optional pinned mode that
-  keeps several popovers open at once, and a fixed 0..100% gauge for the bounded
-  metrics. Remaining: the Linux net/disk samplers, the peek line, the full
+  keeps several popovers open at once, a fixed 0..100% gauge for the bounded
+  metrics, and text **Uptime** / **Session** cells (system + this terminal; boot
+  time via `prexp-core`'s `system_boot_time_secs()`) that drill into a full
+  breakdown. Remaining: the Linux net/disk samplers, the peek line, the full
   mini-fdtop overlay. Design sketch:
   [`ideas/status-bar-metrics.md`](ideas/status-bar-metrics.md).
 - **Profiles** — § — named tab presets (shell + command + cwd + theme). Keep it light.
