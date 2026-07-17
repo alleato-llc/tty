@@ -473,7 +473,6 @@ impl Tty {
         let cap = self.settings.resolve_output_cap(&command);
         screen.mark_command_boundary(cap);
     }
-
 }
 
 impl Default for Tty {

@@ -369,7 +369,6 @@ pub(super) fn metric_body<'a>(
     }
 }
 
-
 /// Whether the per-core CPU grid has enough history to draw (a baseline plus at
 /// least one interval for any core).
 fn has_per_core_cpu(state: &Tty) -> bool {
@@ -887,7 +886,6 @@ fn core_cell<'a>(
     .align_x(iced::Alignment::Center)
     .into()
 }
-
 
 /// A row of colored-dot + label legend entries for a multi-series drill-in.
 fn legend_row<'a>(items: &[(&str, iced::Color)]) -> Element<'a, Message> {
