@@ -663,16 +663,17 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                     return iced::Task::none();
                 }
             }
-            // Plain ⌘↑ / ⌘↓ jumps to the previous / next command prompt (OSC 133).
+            // ⌘↑ / ⌘↓ jump to the previous / next command prompt (OSC 133); add ⇧ to
+            // jump only between *failed* commands.
             use iced::keyboard::key::Named;
             if !mods.alt() && !mods.control() {
                 match named {
                     Named::ArrowUp => {
-                        state.jump_to_prompt(win, true);
+                        state.jump_to_prompt(win, true, mods.shift());
                         return iced::Task::none();
                     }
                     Named::ArrowDown => {
-                        state.jump_to_prompt(win, false);
+                        state.jump_to_prompt(win, false, mods.shift());
                         return iced::Task::none();
                     }
                     _ => {}

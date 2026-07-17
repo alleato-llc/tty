@@ -490,12 +490,13 @@ impl Tty {
         self.apply_settings();
     }
 
-    /// OSC 133 **prompt-jump** (`⌘↑`/`⌘↓`): move the focused pane's [`Self::scroll_target`]
-    /// to the previous (`back`) or next command prompt. Positions come from the pane's
+    /// OSC 133 **prompt-jump**: move the focused pane's [`Self::scroll_target`] to the
+    /// previous (`back`) or next command prompt — every prompt (`⌘↑`/`⌘↓`), or only the
+    /// **failed** ones when `failed_only` (`⌘⇧↑`/`⌘⇧↓`). Positions come from the pane's
     /// recorded [`command regions`](cathode::screen::TerminalScreen::command_regions), so
     /// it's a no-op when the shell has no integration (no marks). The view feeds the
     /// resulting target to the pane's `scroll_to`.
-    pub fn jump_to_prompt(&mut self, window: iced::window::Id, back: bool) {
+    pub fn jump_to_prompt(&mut self, window: iced::window::Id, back: bool, failed_only: bool) {
         let Some(term) = self.tab_for(window).and_then(Tab::focused) else {
             return;
         };
@@ -504,6 +505,7 @@ impl Tty {
             .lock()
             .command_regions()
             .iter()
+            .filter(|r| !failed_only || r.failed())
             .map(|r| r.prompt_row)
             .collect();
         prompts.sort_unstable();

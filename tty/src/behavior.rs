@@ -189,26 +189,80 @@ fn prompt_jump_walks_command_prompts_both_ways() {
     assert_eq!(prompts.len(), 3, "three prompts recorded");
 
     // ⌘↑ walks newest → oldest from the live bottom, then stays at the oldest.
-    tty.jump_to_prompt(win, true);
+    tty.jump_to_prompt(win, true, false);
     assert_eq!(tty.scroll_target, Some(prompts[2]));
-    tty.jump_to_prompt(win, true);
+    tty.jump_to_prompt(win, true, false);
     assert_eq!(tty.scroll_target, Some(prompts[1]));
-    tty.jump_to_prompt(win, true);
+    tty.jump_to_prompt(win, true, false);
     assert_eq!(tty.scroll_target, Some(prompts[0]));
-    tty.jump_to_prompt(win, true);
+    tty.jump_to_prompt(win, true, false);
     assert_eq!(tty.scroll_target, Some(prompts[0]), "stays at the oldest");
 
     // ⌘↓ walks back toward the newest, then stays.
-    tty.jump_to_prompt(win, false);
+    tty.jump_to_prompt(win, false, false);
     assert_eq!(tty.scroll_target, Some(prompts[1]));
-    tty.jump_to_prompt(win, false);
+    tty.jump_to_prompt(win, false, false);
     assert_eq!(tty.scroll_target, Some(prompts[2]));
-    tty.jump_to_prompt(win, false);
+    tty.jump_to_prompt(win, false, false);
     assert_eq!(tty.scroll_target, Some(prompts[2]), "stays at the newest");
 
     // Typing at the shell returns to the live bottom.
     tty.clear_prompt_jump();
     assert_eq!(tty.scroll_target, None);
+}
+
+#[test]
+fn failed_prompt_jump_visits_only_failed_commands() {
+    use cathode::parser::TermParser;
+    let mut tty = headless(1);
+    let win = tty.main_window.unwrap();
+    // ok, fail(1), ok, fail(2).
+    {
+        let term = tty.tabs[0].focused().unwrap();
+        let mut s = term.screen.lock();
+        let mut p = TermParser::new();
+        p.process(
+            b"\x1b]133;A\x07$ ok1\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07",
+            &mut s,
+        );
+        p.process(
+            b"\x1b]133;A\x07$ bad1\r\n\x1b]133;C\x07e\r\n\x1b]133;D;1\x07",
+            &mut s,
+        );
+        p.process(
+            b"\x1b]133;A\x07$ ok2\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07",
+            &mut s,
+        );
+        p.process(
+            b"\x1b]133;A\x07$ bad2\r\n\x1b]133;C\x07e\r\n\x1b]133;D;2\x07",
+            &mut s,
+        );
+    }
+    let failed: Vec<usize> = {
+        let s = tty.tabs[0].focused().unwrap().screen.lock();
+        let mut v: Vec<usize> = s
+            .command_regions()
+            .iter()
+            .filter(|r| r.failed())
+            .map(|r| r.prompt_row)
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    assert_eq!(failed.len(), 2, "two failed commands");
+    // ⌘⇧↑ walks only the failures: newest failure, then the earlier one, then stays —
+    // the successful commands in between are skipped.
+    tty.jump_to_prompt(win, true, true);
+    assert_eq!(tty.scroll_target, Some(failed[1]));
+    tty.jump_to_prompt(win, true, true);
+    assert_eq!(tty.scroll_target, Some(failed[0]));
+    tty.jump_to_prompt(win, true, true);
+    assert_eq!(
+        tty.scroll_target,
+        Some(failed[0]),
+        "stays at the oldest failure"
+    );
 }
 
 #[test]
@@ -251,7 +305,7 @@ fn copy_last_command_output_is_none_without_marks() {
 fn prompt_jump_is_a_no_op_without_recorded_prompts() {
     let mut tty = headless(1);
     let win = tty.main_window.unwrap();
-    tty.jump_to_prompt(win, true);
+    tty.jump_to_prompt(win, true, false);
     assert_eq!(tty.scroll_target, None, "no marks, nothing to jump to");
 }
 

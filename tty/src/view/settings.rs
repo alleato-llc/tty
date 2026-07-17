@@ -67,6 +67,7 @@ fn keys_section<'a>() -> Element<'a, Message> {
                 ("⌘0", "Reset zoom"),
                 ("⌘F", "Find in scrollback"),
                 ("⌘↑ / ⌘↓", "Jump to previous / next command prompt"),
+                ("⌘⇧↑ / ⌘⇧↓", "Jump between failed commands only"),
                 ("⌘⇧O", "Copy the last command's output"),
                 ("⌘K", "Clear the focused pane's scrollback"),
                 ("⌘⇧H", "Scrollback History (commands + output)"),
