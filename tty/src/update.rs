@@ -305,6 +305,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetProcSort(col) => state.set_proc_sort(col),
         Message::ProcTableScroll(offset) => state.set_proc_scroll(offset),
         Message::OpenProcDetail(pid) => {
+            // Reached from the process row's context menu — dismiss it, else its
+            // full-window backdrop keeps swallowing clicks (e.g. right-clicks on
+            // the detail's fd rows).
+            state.close_menu();
             state.open_proc_detail(pid);
             // Sample once now so the detail has data before the next tick.
             state.metrics.sample_proc_detail(pid);

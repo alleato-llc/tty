@@ -2464,21 +2464,24 @@ fn metric_popover_card<'a>(
 /// collapse "−" toggle, plus a close "×" when popovers are pinned (in the
 /// one-at-a-time mode a click away closes it, so no per-card button is needed).
 fn popover_controls<'a>(index: usize, expanded: bool, pinned: bool) -> Element<'a, Message> {
-    let mut controls = row![button::ghost(
+    let mut controls = row![button::ghost_compact(
         if expanded { "−" } else { "+" },
         Message::ToggleMetricDetailExpanded(index),
     )]
-    .spacing(4)
+    .spacing(0)
     .align_y(iced::Alignment::Center);
     if pinned {
-        controls = controls.push(button::ghost("×", Message::CloseMetricPopover(index)));
+        controls = controls.push(button::ghost_compact(
+            "×",
+            Message::CloseMetricPopover(index),
+        ));
     }
     container(controls)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Top)
-        .padding([2, 4])
+        .padding([4, 6])
         .into()
 }
 
@@ -2906,14 +2909,19 @@ fn proc_detail_body(state: &Tty, chart_h: f32) -> Element<'_, Message> {
         for r in &d.resources {
             let kind = resource_kind_label(&r.kind);
             let path = r.path.as_deref().unwrap_or("—");
-            let line = text(format!("{:>3}  {:<6} {}", r.descriptor, kind, path))
-                .size(11)
-                .color(t.muted)
-                .font(iced::Font::MONOSPACE);
-            // Right-click a descriptor with a path to copy it.
+            let line = container(
+                text(format!("{:>3}  {:<6} {}", r.descriptor, kind, path))
+                    .size(11)
+                    .color(t.muted)
+                    .font(iced::Font::MONOSPACE),
+            )
+            .width(Length::Fill);
+            // Right-click a descriptor with a path to copy it — the whole row is
+            // the hit target (not just the glyphs).
             list = list.push(match &r.path {
                 Some(p) => mouse_area(line)
                     .on_right_press(Message::FdRowRightClick(p.clone()))
+                    .interaction(iced::mouse::Interaction::Pointer)
                     .into(),
                 None => Element::from(line),
             });
