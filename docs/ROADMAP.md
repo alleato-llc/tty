@@ -61,6 +61,8 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   drives a system notification (✓/✗ + command + duration) when a command finishes
   while the window is unfocused and ran past a threshold. Manual snippet by default;
   opt-in zsh auto-install (generated `ZDOTDIR`) in Appearance → Terminal.
+- **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
+  clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
 - **Output-driven repaint** — redraw on shell output, idle-silent (no polling tick).
 - **Theme catalog** — 8 named themes (Dracula, Nord, Gruvbox Dark, Solarized
@@ -73,28 +75,29 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 
 ---
 
-## In progress (this milestone)
+## Foundations & customization (shipped)
 
 ### Tier 0 — table stakes (be a real daily driver)
 
 Correctness on `vim`, `tmux`, `ssh`, `htop`, `fzf`, `less`, `git` matters more than any
-feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one**.
+feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one**. This
+tier is complete.
 
-- [ ] **Paste (`⌘V`) + bracketed paste (mode 2004)** — ⚡§ — read clipboard → PTY; wrap
+- [x] **Paste (`⌘V`) + bracketed paste (mode 2004)** — ⚡§ — read clipboard → PTY; wrap
       in `ESC[200~…ESC[201~` when the app enabled bracketed paste, so multi-line paste
       can't auto-execute.
-- [ ] **Alternate screen buffer (1049/47/1047, 1048 save-cursor)** — § — full-screen
+- [x] **Alternate screen buffer (1049/47/1047, 1048 save-cursor)** — § — full-screen
       apps stop corrupting scrollback.
-- [ ] **Mouse reporting (1000/1002/1003 + 1006 SGR)** — forward click/drag/scroll to
+- [x] **Mouse reporting (1000/1002/1003 + 1006 SGR)** — forward click/drag/scroll to
       TUI apps; hold `⌥` to force-select instead.
-- [ ] **Cursor shape + blink (DECSCUSR `CSI Ps SP q`) + visibility (25)** — bar /
+- [x] **Cursor shape + blink (DECSCUSR `CSI Ps SP q`) + visibility (25)** — bar /
       underline / block as the shell/vim request.
-- [ ] **Window/tab title (OSC 0/2) + working dir (OSC 7)** — tab labels reflect the
+- [x] **Window/tab title (OSC 0/2) + working dir (OSC 7)** — tab labels reflect the
       running program; OSC 7 enables **new-tab-in-same-directory**. — §
-- [ ] **Unicode width** — wide (CJK/emoji) cells occupy two columns with a spacer, so
+- [x] **Unicode width** — wide (CJK/emoji) cells occupy two columns with a spacer, so
       alignment stops drifting. (Full grapheme clustering: see backlog.)
-- [ ] **Bell / activity** — subtle visual bell + a per-tab activity dot.
-- [ ] **Engine robustness** (rides along): tab stops, `S`/`T` scroll, `L`/`M` ins/del
+- [x] **Bell / activity** — subtle visual bell + a per-tab activity dot.
+- [x] **Engine robustness** (rides along): tab stops, `S`/`T` scroll, `L`/`M` ins/del
       line, `@`/`P`/`X` ins/del/erase char, `G`/`d` absolute moves, DECSC/DECRC,
       DECCKM (app cursor keys) — what `vim`/`less`/`htop` actually emit.
 
@@ -122,13 +125,13 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
 ## Backlog — proposed, not committed (review & prune)
 
 ### High-leverage next
-- **Shell integration (OSC 133 semantic prompts)** — ✦ — mark prompt / command / output
-  regions: jump prompt-to-prompt, flag failed commands, "copy last command's output."
-  The modern-terminal killer feature (kitty/iTerm/WezTerm/Ghostty). Pairs with OSC 7.
-  Deliberately **not** how Scrollback History's command/output separation works today
-  (see below) — reconsider only if OSC 133's other benefits (prompt-jump, failed-command
-  flagging) become the priority; recording is already solved without it.
-- **OSC 52 clipboard** — copy from inside `tmux`/`ssh`/`vim` to the system clipboard.
+- **More from OSC 133 semantic prompts** — ✦ — the `C`/`D` marks are parsed and drive
+  **command-finished notifications** (shipped, see above). The rest of the protocol's
+  wins are still open: jump prompt-to-prompt, flag/underline failed commands inline, and
+  "copy last command's output." The modern-terminal killer feature
+  (kitty/iTerm/WezTerm/Ghostty). Deliberately **not** how Scrollback History's
+  command/output separation works today (that stays the Enter heuristic); this is the
+  prompt-navigation layer on top.
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.
