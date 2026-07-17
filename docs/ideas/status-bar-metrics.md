@@ -259,6 +259,56 @@ that metric's full-size chart, rather than a whole system panel.
      stack back to one.
 6. **System overlay** (mini-fdtop) on click.
 
+## Cell backlog
+
+More configurable cells to add, roughly in priority order. Each is a
+`MetricKind` plus a render (a sparkline for a bounded/rate series, or text for a
+readout) and, where it helps, a drill-in popover. Data reads live in
+`prexp-core` (add a `ProcessSource` method + per-platform backends) so the same
+source serves fdtop; tty consumes it in `metrics.rs`.
+
+**Current batch**
+
+- [ ] **Load average** — 1 / 5 / 15-minute run-queue load. The 1-minute value as
+  an auto-scaled sparkline (like the byte-rate cells, since load is unbounded);
+  the drill-in charts the 1-minute history and shows the full 1/5/15 triple.
+  Source: `getloadavg(3)` / `sysctl(KERN_LOADAVG)` on macOS, `/proc/loadavg` on
+  Linux.
+- [ ] **Battery** — charge %, charging state, time remaining. A bounded 0..100%
+  gauge (fixed-scale sparkline like CPU/memory); the drill-in adds the charging
+  state and a time-to-full/empty estimate. Source: IOKit power sources on macOS
+  (`IOPSCopyPowerSourcesInfo`), `/sys/class/power_supply` on Linux. A machine
+  with no battery hides the cell.
+- [ ] **Clock** — the current time, with configurable formatting (12/24-hour,
+  seconds on/off, date on/off). A text cell, refreshed every second (its own
+  timer); no sampler. Formatting is timezone/locale-dependent, so it's unit-
+  tested on the pure formatter rather than pixel-snapshotted.
+
+**Later**
+
+- [ ] **Swap** — folded into the memory drill-in (see decision below), not a
+  separate always-on cell by default.
+- [ ] **Memory detail** — used/free/wired/compressed breakdown in the memory
+  popover, beside the swap line.
+- [ ] **Per-cell thresholds + alerting** — recolor / flash a cell when a metric
+  crosses a configured limit (reuses the load-grade colors).
+- [ ] **Ambient peek line** — a 1px load bar along the bottom edge for the
+  auto-hidden bar (overlaps the auto-hide feature; see open questions).
+- [ ] **Git branch / dirty state** for the active pane's cwd.
+- [ ] **Number-format options** — bits vs bytes, binary vs decimal units.
+- [ ] **Mini-fdtop overlay** — the click-through system monitor (north star).
+- [ ] **Linux net/disk samplers** — light up those cells cross-platform.
+
+### Memory vs swap
+
+Keep the **memory cell as RAM** (the value you watch moment-to-moment) and fold
+**swap into the memory drill-in** popover (a `Swap 1.2G/8.0G` line, or a small
+secondary series) rather than a separate always-on swap cell. On a healthy
+machine swap sits near zero, so a dedicated cell mostly shows a flat line and
+eats bar width; it earns its place on the drill-in, where you look when memory is
+tight. A separate `swap` cell can still be added later for anyone who wants it
+pinned — the mechanism (a text/gauge `MetricKind`) is already there.
+
 ## Open questions
 
 - Sparkline window: fixed 2 minutes, or a setting? Fixed width in px, or grow
