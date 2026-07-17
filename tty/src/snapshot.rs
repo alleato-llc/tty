@@ -831,6 +831,29 @@ fn settings_appearance_clock_format_view() {
 }
 
 #[test]
+fn settings_appearance_terminal_pane_view() {
+    // The "Terminal" sub-tab: scrollback depth, per-command output caps, and the
+    // ⌘-click "open file" command (shown here with a VS Code template set).
+    let mut tty = populated();
+    tty.settings.open_file_command = Some("code -g {file}:{line}:{col}".into());
+    tty.show_settings = true;
+    tty.settings_section = 0;
+    tty.appearance_tab = 3;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-appearance-terminal.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-appearance-terminal` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn settings_appearance_window_pane_view() {
     // The "Window" sub-tab: keep-on-top toggle plus the two transparency
     // sliders — "When Active" (0–50%) and "On Blur" (0–95%).

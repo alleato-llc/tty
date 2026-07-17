@@ -57,6 +57,7 @@ fn term(s: TerminalScreen) -> Terminal<()> {
         |_| (),
         |_| (),
         |_| (),
+        |_, _, _| (),
     )
 }
 
@@ -285,4 +286,17 @@ fn selection_text_reads_the_ordered_selection() {
         ..State::default()
     };
     assert_eq!(t.selection_text(&state), "world");
+}
+
+#[test]
+fn resolve_path_absolute_relative_and_home() {
+    // Absolute paths pass through untouched.
+    assert_eq!(resolve_path("/etc/hosts", Some("/tmp")), "/etc/hosts");
+    // Relative paths join onto the cwd (trailing slash normalized).
+    assert_eq!(
+        resolve_path("src/main.rs", Some("/work/tty/")),
+        "/work/tty/src/main.rs"
+    );
+    // No cwd known → left relative for the host to resolve however it opens files.
+    assert_eq!(resolve_path("src/main.rs", None), "src/main.rs");
 }

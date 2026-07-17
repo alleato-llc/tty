@@ -86,6 +86,11 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   password on macOS) · `⌘,` settings · wheel to scroll back through history
 - `⌘`-hover underlines a URL in the output; `⌘`-click opens it directly, or right-click
   it for an **Open Link** / **Copy Link** menu
+- `⌘`-hover also underlines a `path:line[:col]` reference (compiler / linter / grep
+  output); `⌘`-click opens it in your editor. The path is resolved against the
+  shell's working directory (from OSC 7). By default the file goes to the system
+  opener; set an **open-file command** in Appearance → Terminal (e.g.
+  `code -g {file}:{line}:{col}` or `vim +{line} {file}`) to jump to the exact line
 
 ## Customize
 

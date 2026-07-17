@@ -53,6 +53,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 - **Clickable links (URL autodetection)** — `⌘`-hover underlines a detected URL,
   `⌘`-click opens it directly, and a plain right-click offers **Open Link** / **Copy
   Link**.
+- **Clickable `path:line[:col]`** — the same autodetection over compiler / linter /
+  grep output: `⌘`-hover underlines a file reference, `⌘`-click resolves it against
+  the shell's cwd (OSC 7) and opens it via a configurable editor command (Appearance
+  → Terminal), defaulting to the system opener.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
 - **Output-driven repaint** — redraw on shell output, idle-silent (no polling tick).
 - **Theme catalog** — 8 named themes (Dracula, Nord, Gruvbox Dark, Solarized

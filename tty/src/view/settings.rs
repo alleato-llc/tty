@@ -403,6 +403,22 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
         ),
         caption("PER-COMMAND OVERRIDES"),
         text(overrides_text).size(12).color(t.muted),
+        caption("OPEN FILE ON ⌘-CLICK"),
+        labeled(
+            "Command",
+            text_field(
+                "Default: open in the system app",
+                state.settings.open_file_command.as_deref().unwrap_or(""),
+                Message::OpenFileCommandChanged,
+            ),
+        ),
+        text(
+            "⌘-click a path:line[:col] in output to open it. Blank uses the system \
+             opener (no line). Set a template with {file}/{line}/{col}, e.g. \
+             \"code -g {file}:{line}:{col}\" or \"vim +{line} {file}\"."
+        )
+        .size(12)
+        .color(t.muted),
     ]
     .spacing(14)
     .into()

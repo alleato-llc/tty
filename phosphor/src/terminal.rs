@@ -120,6 +120,9 @@ struct State {
     last_scroll_to: Option<usize>,
 }
 
+/// Host callback for a ⌘-clicked `path:line[:col]`: `(resolved_path, line, col)`.
+type OpenFileFn<Message> = Box<dyn Fn(String, Option<u32>, Option<u32>) -> Message>;
+
 pub struct Terminal<Message> {
     screen: Arc<Mutex<TerminalScreen>>,
     style: TerminalStyle,
@@ -139,6 +142,10 @@ pub struct Terminal<Message> {
     on_link: Box<dyn Fn(String) -> Message>,
     /// Fires with the URL on a ⌘-click, opening it directly (no menu).
     on_open_link: Box<dyn Fn(String) -> Message>,
+    /// Fires with `(resolved_path, line, col)` on a ⌘-click on a detected
+    /// `path:line[:col]` reference (see [`link::FileLink`]). The path is already
+    /// resolved against the shell's cwd; the host opens it in an editor.
+    on_open_file: OpenFileFn<Message>,
     /// Case-insensitive scrollback search: matching runs are highlighted.
     find: Option<String>,
     /// An absolute line the host wants brought into view right now (e.g. the current
@@ -169,7 +176,9 @@ impl<Message> Terminal<Message> {
 /// a double-click-to-select-word/URL); `on_mouse` carries PTY bytes when the app
 /// grabbed the mouse (DEC modes 1000/1002/1003/1006); `on_link(url)` fires when a
 /// right-click lands on a detected URL (opens a menu); `on_open_link(url)` fires on a
-/// ⌘-click on one (opens it directly, no menu).
+/// ⌘-click on one (opens it directly, no menu); `on_open_file(path, line, col)` fires
+/// on a ⌘-click on a detected `path:line[:col]` reference (path resolved against the
+/// shell's cwd).
 #[allow(clippy::too_many_arguments)]
 pub fn terminal<Message>(
     screen: Arc<Mutex<TerminalScreen>>,
@@ -182,6 +191,7 @@ pub fn terminal<Message>(
     on_mouse: impl Fn(Vec<u8>) -> Message + 'static,
     on_link: impl Fn(String) -> Message + 'static,
     on_open_link: impl Fn(String) -> Message + 'static,
+    on_open_file: impl Fn(String, Option<u32>, Option<u32>) -> Message + 'static,
 ) -> Terminal<Message> {
     Terminal {
         screen,
@@ -194,8 +204,27 @@ pub fn terminal<Message>(
         on_mouse: Box::new(on_mouse),
         on_link: Box::new(on_link),
         on_open_link: Box::new(on_open_link),
+        on_open_file: Box::new(on_open_file),
         find: None,
         scroll_to: None,
+    }
+}
+
+/// Resolve a `path` token from terminal output to something openable: `~` expands to
+/// `$HOME`, an absolute path is kept verbatim, and a relative path is joined onto the
+/// shell's `cwd` (from OSC 7) when known, else left relative.
+fn resolve_path(path: &str, cwd: Option<&str>) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!("{}/{rest}", home.trim_end_matches('/'));
+        }
+    }
+    if path.starts_with('/') {
+        return path.to_string();
+    }
+    match cwd {
+        Some(dir) => format!("{}/{path}", dir.trim_end_matches('/')),
+        None => path.to_string(),
     }
 }
 
@@ -276,7 +305,10 @@ impl<Message> Terminal<Message> {
         let history = screen.scrollback.len();
         let row = row_chars(&screen, history, cols, line);
         drop(screen);
-        link::link_span_at(&row, col).map(|(start, end)| (line, start, end))
+        // Underline URLs and `path:line` references alike; ⌘-click routes each.
+        link::link_span_at(&row, col)
+            .or_else(|| link::file_link_span_at(&row, col))
+            .map(|(start, end)| (line, start, end))
     }
 
     /// Recompute the ⌘-hover link span from the current cursor + modifiers — lights up
@@ -623,9 +655,16 @@ where
                         let screen = self.screen.lock();
                         let history = screen.scrollback.len();
                         let row = row_chars(&screen, history, cols, line);
+                        let cwd = screen.cwd.clone();
                         drop(screen);
                         if let Some(url) = link::link_at(&row, col) {
                             shell.publish((self.on_open_link)(url));
+                            shell.capture_event();
+                            return;
+                        }
+                        if let Some(f) = link::file_link_at(&row, col) {
+                            let path = resolve_path(&f.path, cwd.as_deref());
+                            shell.publish((self.on_open_file)(path, f.line, f.col));
                             shell.capture_event();
                             return;
                         }

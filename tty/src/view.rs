@@ -200,6 +200,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     move |b| Message::PtyBytes(win, pane, b),
                     Message::LinkClick,
                     Message::OpenLink,
+                    Message::OpenFile,
                 )
                 .find(search.clone())
                 .scroll_to(scroll_to);
@@ -671,6 +672,7 @@ fn detached_view<'a>(
             move |b| Message::PtyBytes(window, pane, b),
             Message::LinkClick,
             Message::OpenLink,
+            Message::OpenFile,
         )
         .find(None);
         let border_color = if is_focused && highlight {

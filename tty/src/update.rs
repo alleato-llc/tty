@@ -70,6 +70,19 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             }
             state.close_menu();
         }
+        Message::OpenFile(path, line, col) => {
+            let argv = crate::settings::resolve_open_file_command(
+                state.settings.open_file_command.as_deref(),
+                &path,
+                line,
+                col,
+            );
+            if let Some((cmd, args)) = argv.split_first() {
+                if let Err(e) = std::process::Command::new(cmd).args(args).spawn() {
+                    tracing::warn!("Failed to open file {path:?} via {argv:?}: {e}");
+                }
+            }
+        }
         Message::CopyLink(url) => {
             state.close_menu();
             return iced::clipboard::write(url);
@@ -214,6 +227,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::ScrollbackPageOlder => state.page_scrollback_older(),
         Message::ScrollbackPageNewer => state.page_scrollback_newer(),
         Message::ScrollbackScrolled(offset) => state.scrollback_scroll = offset,
+        Message::OpenFileCommandChanged(s) => state.set_open_file_command(s),
         Message::MaxScrollbackStep(delta) => state.step_max_scrollback(delta),
         Message::DefaultOutputLinesStep(delta) => state.step_default_output_lines(delta),
         Message::NewTab => {

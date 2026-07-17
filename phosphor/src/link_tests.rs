@@ -114,3 +114,50 @@ fn single_quote_also_ends_the_url() {
     let text: String = cells[start..end].iter().collect();
     assert_eq!(text, "http://www.google.com");
 }
+
+#[test]
+fn file_link_matches_path_line_col() {
+    let cells = chars("error at src/main.rs:42:10 here");
+    let links = find_file_links(&cells);
+    assert_eq!(links.len(), 1);
+    let (start, end, link) = &links[0];
+    assert_eq!(
+        cells[*start..*end].iter().collect::<String>(),
+        "src/main.rs:42:10"
+    );
+    assert_eq!(link.path, "src/main.rs");
+    assert_eq!(link.line, Some(42));
+    assert_eq!(link.col, Some(10));
+}
+
+#[test]
+fn file_link_line_only_and_absolute() {
+    // Line without a column.
+    let l = file_link_at(&chars("./build.rs:7 warning"), 3).unwrap();
+    assert_eq!(l.path, "./build.rs");
+    assert_eq!((l.line, l.col), (Some(7), None));
+    // Absolute path.
+    let l = file_link_at(&chars("/Users/me/x.py:99:2"), 0).unwrap();
+    assert_eq!(l.path, "/Users/me/x.py");
+    assert_eq!((l.line, l.col), (Some(99), Some(2)));
+}
+
+#[test]
+fn file_link_rejects_non_paths_and_urls() {
+    // Bare word:number (no `/` or `.`) — e.g. a timestamp — is not a file link.
+    assert!(find_file_links(&chars("took 12:34 minutes")).is_empty());
+    assert!(find_file_links(&chars("foo:42")).is_empty());
+    // A URL with a port is left to the URL matcher, not linkified as a file.
+    assert!(find_file_links(&chars("https://x.com:8080/a")).is_empty());
+    // A path with no line number isn't a link (too many false positives).
+    assert!(find_file_links(&chars("edit src/main.rs now")).is_empty());
+}
+
+#[test]
+fn file_link_span_covers_the_reference() {
+    let cells = chars("  src/lib.rs:3:5");
+    let (s, e) = file_link_span_at(&cells, 5).unwrap();
+    assert_eq!(cells[s..e].iter().collect::<String>(), "src/lib.rs:3:5");
+    // Outside the span → nothing.
+    assert!(file_link_span_at(&cells, 0).is_none());
+}

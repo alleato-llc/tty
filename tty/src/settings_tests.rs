@@ -147,3 +147,29 @@ fn is_graded_agrees_with_default_thresholds() {
         assert_eq!(k.is_graded(), k.default_thresholds().is_some(), "{k:?}");
     }
 }
+
+#[test]
+fn open_file_command_template_substitutes_placeholders() {
+    let argv = resolve_open_file_command(
+        Some("code -g {file}:{line}:{col}"),
+        "/w/src/main.rs",
+        Some(42),
+        Some(7),
+    );
+    assert_eq!(argv, ["code", "-g", "/w/src/main.rs:42:7"]);
+    // Missing line/col in the reference default to 1.
+    let argv = resolve_open_file_command(Some("vim +{line} {file}"), "a.rs", None, None);
+    assert_eq!(argv, ["vim", "+1", "a.rs"]);
+}
+
+#[test]
+fn open_file_command_default_hands_file_to_os_opener() {
+    let argv = resolve_open_file_command(None, "/w/x.rs", Some(9), None);
+    assert_eq!(argv.len(), 2);
+    assert_eq!(argv[1], "/w/x.rs");
+    // A blank/whitespace template falls back to the default, not an empty argv.
+    assert_eq!(
+        resolve_open_file_command(Some("   "), "y.rs", None, None),
+        resolve_open_file_command(None, "y.rs", None, None),
+    );
+}

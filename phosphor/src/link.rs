@@ -115,6 +115,100 @@ pub fn select_at(cells: &[char], col: usize) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
+/// A detected `path:line[:col]` reference in terminal output (compiler / linter /
+/// grep style). `path` is verbatim from the row (relative to the shell's cwd, or
+/// absolute); the caller resolves and opens it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileLink {
+    pub path: String,
+    pub line: Option<u32>,
+    pub col: Option<u32>,
+}
+
+/// A char that can appear in an unquoted file path (no whitespace, no `:` — that's
+/// the line separator).
+fn is_path_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '~' | '+' | '@' | '$')
+}
+
+/// Every `path:line[:col]` reference in `cells`, as `(start, end, link)` where the
+/// range covers `path:line[:col]` (`end` exclusive). To keep precision high (this
+/// is heuristic, not shell-integrated) the path must contain a `/` or `.` and be
+/// followed by `:` and a line number; a bare word or a plain `12:34` never matches,
+/// and `http(s)://` runs are left to [`find_urls`].
+pub fn find_file_links(cells: &[char]) -> Vec<(usize, usize, FileLink)> {
+    let mut out = Vec::new();
+    let n = cells.len();
+    // A URL's `host:port` / `://` looks path-ish once its scheme splits the run, so
+    // drop any file match that overlaps a URL — the URL matcher owns those.
+    let urls = find_urls(cells);
+    let in_url = |s: usize, e: usize| urls.iter().any(|&(us, ue)| s < ue && us < e);
+    let mut i = 0;
+    while i < n {
+        if !is_path_char(cells[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut path_end = i;
+        while path_end < n && is_path_char(cells[path_end]) {
+            path_end += 1;
+        }
+        // Needs `:<line>` right after the path.
+        let digits = |from: usize| -> Option<usize> {
+            let mut k = from;
+            while k < n && cells[k].is_ascii_digit() {
+                k += 1;
+            }
+            (k > from).then_some(k)
+        };
+        if let Some(line_end) = (path_end < n && cells[path_end] == ':')
+            .then(|| digits(path_end + 1))
+            .flatten()
+        {
+            let line = parse_num(cells, path_end + 1, line_end);
+            // Optional `:<col>`.
+            let (mut end, mut col) = (line_end, None);
+            if line_end < n && cells[line_end] == ':' {
+                if let Some(col_end) = digits(line_end + 1) {
+                    col = parse_num(cells, line_end + 1, col_end);
+                    end = col_end;
+                }
+            }
+            let path: String = cells[start..path_end].iter().collect();
+            let path_like = path.contains('/') || path.contains('.');
+            if path_like && !in_url(start, end) {
+                out.push((start, end, FileLink { path, line, col }));
+                i = end;
+                continue;
+            }
+        }
+        i = path_end.max(start + 1);
+    }
+    out
+}
+
+fn parse_num(cells: &[char], start: usize, end: usize) -> Option<u32> {
+    cells[start..end].iter().collect::<String>().parse().ok()
+}
+
+/// The `path:line[:col]` reference under column `col`, if any.
+pub fn file_link_at(cells: &[char], col: usize) -> Option<FileLink> {
+    find_file_links(cells)
+        .into_iter()
+        .find(|(start, end, _)| (*start..*end).contains(&col))
+        .map(|(_, _, link)| link)
+}
+
+/// The `(start, end)` column range of the file reference under `col`, for the
+/// hover underline.
+pub fn file_link_span_at(cells: &[char], col: usize) -> Option<(usize, usize)> {
+    find_file_links(cells)
+        .into_iter()
+        .find(|(start, end, _)| (*start..*end).contains(&col))
+        .map(|(start, end, _)| (start, end))
+}
+
 /// Open `url` in the OS default handler (browser, for `http(s)://`).
 pub fn open(url: &str) -> std::io::Result<()> {
     open::that(url)

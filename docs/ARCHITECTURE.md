@@ -98,7 +98,13 @@ the read loop):
   closing punctuation/quote so it isn't captured as part of the link. `⌘`-hover
   underlines the URL under the pointer as an affordance; `⌘`-click opens it directly
   (`on_open_link`, no menu); a plain right-click over a link opens an **Open Link** /
-  **Copy Link** menu instead (`on_link`).
+  **Copy Link** menu instead (`on_link`). `find_file_links(row)` / `file_link_at`
+  additionally detect a `path:line[:col]` reference (the path must contain a `/` or
+  `.` and be followed by `:` and a line number, so a bare word or a `12:34` timestamp
+  never matches, and URL runs are excluded). `⌘`-hover underlines those too; `⌘`-click
+  resolves the path against the shell's cwd (OSC 7) and fires `on_open_file(path,
+  line, col)`, which the host opens via the configured
+  `settings::resolve_open_file_command` template (default: the OS opener).
 
 ## tty — the app
 

@@ -286,6 +286,15 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Set the ⌘-click open-file command template (persisted). A blank value clears
+    /// it, restoring the OS-opener default (see
+    /// [`crate::settings::resolve_open_file_command`]).
+    pub fn set_open_file_command(&mut self, template: String) {
+        let trimmed = template.trim();
+        self.settings.open_file_command = (!trimmed.is_empty()).then(|| trimmed.to_string());
+        self.settings.save();
+    }
+
     /// Toggle the auto-hiding status bar (persisted).
     pub fn set_status_bar_autohide(&mut self, on: bool) {
         self.settings.status_bar_autohide = Some(on);

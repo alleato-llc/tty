@@ -97,6 +97,11 @@ pub enum Message {
     LinkClick(String),
     /// The "Open Link" menu item was chosen — open the URL in the default browser.
     OpenLink(String),
+    /// A ⌘-click landed on a detected `path:line[:col]` reference — open it in the
+    /// configured editor. Carries the cwd-resolved path plus optional line/column.
+    OpenFile(String, Option<u32>, Option<u32>),
+    /// The Appearance → Terminal "open file command" field changed (persisted).
+    OpenFileCommandChanged(String),
     /// The "Copy Link" menu item was chosen — write the URL to the clipboard.
     CopyLink(String),
     /// A "Split <dir>" context-menu item was chosen.

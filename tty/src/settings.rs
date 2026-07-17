@@ -441,6 +441,53 @@ pub struct Settings {
     /// overrides all three for one launch.
     #[serde(default)]
     pub history_session_start: Option<String>,
+    /// Command template for ⌘-clicking a `path:line[:col]` reference in terminal
+    /// output. `{file}`/`{line}`/`{col}` are substituted (line/col default to `1`
+    /// when the reference omits them). Absent = the smart default: `$VISUAL` or
+    /// `$EDITOR` if set (with a `+{line}` argument), else the OS opener (`open` on
+    /// macOS). See [`resolve_open_file_command`].
+    #[serde(default)]
+    pub open_file_command: Option<String>,
+}
+
+/// The OS "open this in its default app" command, for the [`Settings::open_file_command`]
+/// smart default.
+fn default_opener() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    }
+}
+
+/// Build the argv for ⌘-opening `path` (optionally at `line`/`col`), from the
+/// configured `template` or the smart default.
+///
+/// A template is whitespace-split into an argv with `{file}`/`{line}`/`{col}`
+/// substituted (line/col default to `1` when the reference omits them), so
+/// `code -g {file}:{line}:{col}` or `vim +{line} {file}` both work. With no template,
+/// the file is handed to the OS opener ([`default_opener`]), which routes it to the
+/// user's default app — line/column are ignored there, since only an editor that
+/// understands them can honor them.
+pub fn resolve_open_file_command(
+    template: Option<&str>,
+    path: &str,
+    line: Option<u32>,
+    col: Option<u32>,
+) -> Vec<String> {
+    if let Some(tmpl) = template.map(str::trim).filter(|t| !t.is_empty()) {
+        let line = line.unwrap_or(1).to_string();
+        let col = col.unwrap_or(1).to_string();
+        return tmpl
+            .split_whitespace()
+            .map(|tok| {
+                tok.replace("{file}", path)
+                    .replace("{line}", &line)
+                    .replace("{col}", &col)
+            })
+            .collect();
+    }
+    vec![default_opener().to_string(), path.to_string()]
 }
 
 /// [`Settings::max_scrollback`]'s default and clamp range — matches `cathode`'s
