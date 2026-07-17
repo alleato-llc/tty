@@ -842,6 +842,20 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Clock cell format toggles (persisted).
+    pub fn set_clock_24h(&mut self, on: bool) {
+        self.settings.clock_24h = Some(on);
+        self.settings.save();
+    }
+    pub fn set_clock_seconds(&mut self, on: bool) {
+        self.settings.clock_seconds = Some(on);
+        self.settings.save();
+    }
+    pub fn set_clock_date(&mut self, on: bool) {
+        self.settings.clock_date = Some(on);
+        self.settings.save();
+    }
+
     /// Add a metric to the status bar's ordered list (persisted). The first
     /// metric added takes a sample immediately so numbers appear without waiting
     /// for the next tick (that sample is the CPU% baseline; a real percentage

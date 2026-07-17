@@ -173,3 +173,38 @@ fn uptime_formats_abbreviated_and_full() {
         "3 days, 4 hours, 12 minutes"
     );
 }
+
+#[test]
+fn clock_formats_per_options() {
+    use chrono::NaiveDate;
+    let dt = NaiveDate::from_ymd_opt(2026, 7, 17)
+        .unwrap()
+        .and_hms_opt(14, 31, 5)
+        .unwrap();
+    let fmt = |hour24, seconds, date| {
+        format_clock(
+            dt,
+            ClockFormat {
+                hour24,
+                seconds,
+                date,
+            },
+        )
+    };
+    assert_eq!(fmt(false, false, false), "2:31 PM");
+    assert_eq!(fmt(false, true, false), "2:31:05 PM");
+    assert_eq!(fmt(true, false, false), "14:31");
+    assert_eq!(fmt(true, true, false), "14:31:05");
+    // Midnight / noon read as 12, not 0, in 12-hour.
+    let midnight = NaiveDate::from_ymd_opt(2026, 7, 17)
+        .unwrap()
+        .and_hms_opt(0, 5, 0)
+        .unwrap();
+    assert_eq!(format_clock(midnight, ClockFormat::default()), "12:05 AM");
+    // With the date prefix, the weekday + month/day lead the time.
+    let dated = fmt(true, false, true);
+    assert!(
+        dated.contains("Jul 17") && dated.ends_with("14:31"),
+        "got: {dated}"
+    );
+}

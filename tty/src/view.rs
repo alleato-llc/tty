@@ -1603,8 +1603,42 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
                 Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
             ))
             .push(status_bar_metrics_editor(state));
+        // Clock format options, only when a clock cell is configured.
+        if state
+            .settings
+            .status_bar_metrics()
+            .iter()
+            .any(|m| m.kind == crate::settings::MetricKind::Clock)
+        {
+            col = col.push(clock_format_editor(state));
+        }
     }
     col.into()
+}
+
+/// The clock cell's format toggles (24-hour, seconds, date), shown under the
+/// metrics editor when a clock cell is present.
+fn clock_format_editor(state: &Tty) -> Element<'_, Message> {
+    column![
+        caption("CLOCK FORMAT"),
+        toggle(
+            "24-hour time",
+            state.settings.clock_24h.unwrap_or(false),
+            Message::SetClock24h(!state.settings.clock_24h.unwrap_or(false)),
+        ),
+        toggle(
+            "Show seconds",
+            state.settings.clock_seconds.unwrap_or(false),
+            Message::SetClockSeconds(!state.settings.clock_seconds.unwrap_or(false)),
+        ),
+        toggle(
+            "Show date",
+            state.settings.clock_date.unwrap_or(false),
+            Message::SetClockDate(!state.settings.clock_date.unwrap_or(false)),
+        ),
+    ]
+    .spacing(14)
+    .into()
 }
 
 /// Appearance → Terminal: scrollback depth and per-command output caps.
@@ -1835,6 +1869,16 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
     use crate::metrics as mx;
     use crate::settings::MetricKind as K;
 
+    // The clock is the wall time, independent of the sampler — render it without
+    // waiting for a machine-stats reading.
+    if cfg.kind == K::Clock {
+        return Some(MetricRender {
+            label: clock_label(state),
+            series: vec![],
+            max: 1.0,
+        });
+    }
+
     let stats = state.metrics.latest.as_ref()?;
     let m = &state.metrics;
     let t = theme::tokens();
@@ -1920,8 +1964,19 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             series: vec![],
             max: 1.0,
         },
+        K::Clock => unreachable!("clock is handled before the stats read"),
     };
     Some(render)
+}
+
+/// The clock cell's label: the current local time, formatted per the user's clock
+/// options. Reads the live clock, so it is never pixel-snapshotted (the pure
+/// formatter `metrics::format_clock` is unit-tested instead).
+fn clock_label(state: &Tty) -> String {
+    crate::metrics::format_clock(
+        chrono::Local::now().naive_local(),
+        state.settings.clock_format(),
+    )
 }
 
 /// The sparkline scale for a rate series: its recent peak, floored at 1 so an
@@ -2010,7 +2065,9 @@ fn metric_popover_card<'a>(
     // where the platform reports no per-core history.
     let has_cores = kind.is_cpu() && has_per_core_cpu(state);
 
-    let body: Element<'a, Message> = if kind.is_uptime() {
+    let body: Element<'a, Message> = if kind == K::Clock {
+        clock_body(state)
+    } else if kind.is_uptime() {
         uptime_body(state, kind)
     } else if kind == K::CpuAll && has_cores {
         combined_cpu_body(state, expanded, card_w, chart_h)
@@ -2251,6 +2308,33 @@ fn uptime_body(state: &Tty, kind: crate::settings::MetricKind) -> Element<'_, Me
         text(kind.to_string()).size(14).color(t.ink),
         text(full).size(20).color(t.ink),
         text(note).size(12).color(t.muted),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// The clock drill-in's body: the current time (honoring the 12/24-hour and
+/// seconds options) over the full weekday + date. Live, so never snapshotted.
+fn clock_body(state: &Tty) -> Element<'_, Message> {
+    let t = theme::tokens();
+    let now = chrono::Local::now();
+    let fmt = state.settings.clock_format();
+    // The drill-in always shows seconds and the date (the "full" view), but keeps
+    // the 12/24-hour choice.
+    let time = crate::metrics::format_clock(
+        now.naive_local(),
+        crate::metrics::ClockFormat {
+            hour24: fmt.hour24,
+            seconds: true,
+            date: false,
+        },
+    );
+    column![
+        text("Clock").size(14).color(t.ink),
+        text(time).size(20).color(t.ink),
+        text(now.format("%A, %B %-d, %Y").to_string())
+            .size(12)
+            .color(t.muted),
     ]
     .spacing(8)
     .into()

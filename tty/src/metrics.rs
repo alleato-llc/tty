@@ -392,6 +392,53 @@ pub fn uptime_full(secs: u64) -> String {
     parts.join(", ")
 }
 
+/// The clock cell's display options (see `Settings::clock_format`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClockFormat {
+    /// 24-hour time vs 12-hour with AM/PM.
+    pub hour24: bool,
+    /// Include seconds.
+    pub seconds: bool,
+    /// Prefix the weekday + month/day.
+    pub date: bool,
+}
+
+/// Format a time for the clock cell per `fmt`: e.g. `2:31 PM`, `14:31:05`,
+/// `Fri Jul 17  2:31 PM`. Pure (takes the time in), so it's unit-testable without
+/// a clock or a timezone.
+pub fn format_clock(dt: chrono::NaiveDateTime, fmt: ClockFormat) -> String {
+    use chrono::Timelike;
+    // 12-hour hour with no leading zero (chrono's `%-I` isn't portable on every
+    // libc, so compute it directly).
+    let mut out = String::new();
+    if fmt.date {
+        out.push_str(&dt.format("%a %b %-d  ").to_string());
+    }
+    if fmt.hour24 {
+        out.push_str(
+            &dt.format(if fmt.seconds { "%H:%M:%S" } else { "%H:%M" })
+                .to_string(),
+        );
+    } else {
+        let h24 = dt.hour();
+        let h12 = match h24 % 12 {
+            0 => 12,
+            h => h,
+        };
+        let ampm = if h24 < 12 { "AM" } else { "PM" };
+        if fmt.seconds {
+            out.push_str(&format!(
+                "{h12}:{:02}:{:02} {ampm}",
+                dt.minute(),
+                dt.second()
+            ));
+        } else {
+            out.push_str(&format!("{h12}:{:02} {ampm}", dt.minute()));
+        }
+    }
+    out
+}
+
 /// Compact throughput for the status bar: `0B/s`, `40K/s`, `1.2M/s`. Whole
 /// bytes/KiB, one decimal for MiB/GiB where it reads cleanly.
 pub fn format_rate(bps: f32) -> String {

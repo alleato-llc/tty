@@ -208,6 +208,13 @@ pub enum Message {
     SetStatusBarDisabled(bool),
     /// Toggle pinning metric popovers open on a click away (several at once).
     SetStatusBarMetricsPinned(bool),
+    /// Clock cell format toggles: 24-hour, show-seconds, show-date.
+    SetClock24h(bool),
+    SetClockSeconds(bool),
+    SetClockDate(bool),
+    /// A 1-second tick that just forces a repaint so the clock cell stays live
+    /// (only subscribed while a clock cell is shown).
+    ClockTick,
     /// Append a machine-stat cell to the status bar's ordered list, by metric
     /// key (`"cpu"`, `"mem"`).
     StatusBarMetricAdd(String),

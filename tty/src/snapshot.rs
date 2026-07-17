@@ -671,6 +671,35 @@ fn settings_appearance_statusbar_pane_view() {
 }
 
 #[test]
+fn settings_appearance_clock_format_view() {
+    // With a clock cell configured, the Status bar pane grows a "Clock format"
+    // section (24-hour / seconds / date). Snapshots the settings, not the live
+    // time, so it stays deterministic.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("clock", "sparkline")];
+    tty.settings.clock_24h = Some(true);
+    // Hide the bar (auto-hide on, pointer at top) so the live clock cell doesn't
+    // render into the snapshot — only the deterministic settings panel does.
+    tty.settings.status_bar_autohide = Some(true);
+    tty.pointer = iced::Point::new(300.0, 40.0);
+    tty.show_settings = true;
+    tty.settings_section = 0;
+    tty.appearance_tab = 2;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-clock-format.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-clock-format` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn settings_appearance_window_pane_view() {
     // The "Window" sub-tab: keep-on-top toggle plus the two transparency
     // sliders — "When Active" (0–50%) and "On Blur" (0–95%).

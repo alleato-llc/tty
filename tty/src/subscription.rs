@@ -74,10 +74,19 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
     }
     // Machine stats: sample at the configured interval, but only while at least
     // one metric is shown, so idle cost stays zero by default.
-    if !state.settings.status_bar_metrics().is_empty() {
+    let metrics = state.settings.status_bar_metrics();
+    if !metrics.is_empty() {
         let interval =
             std::time::Duration::from_millis(state.settings.status_bar_metrics_interval_ms());
         subs.push(iced::time::every(interval).map(|_| Message::SampleMetrics));
+    }
+    // A clock cell wants second-level freshness the sample cadence can't give, so
+    // tick it once a second (only while one is shown).
+    if metrics
+        .iter()
+        .any(|m| m.kind == crate::settings::MetricKind::Clock)
+    {
+        subs.push(iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::ClockTick));
     }
     Subscription::batch(subs)
 }

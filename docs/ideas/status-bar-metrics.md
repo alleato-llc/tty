@@ -86,13 +86,16 @@ right before anything wraps, so a narrow window degrades gracefully.
 Implemented today (phases 2-3): the ordered list,
 `status_bar_metrics_interval_ms`, and width-shedding are live. `metric` accepts
 `cpu`, `mem`, `net_rx`, `net_tx`, `disk_r`, `disk_w`, `net_io`, `disk_io`,
-`uptime`, and `session` (net/disk on macOS only for now). `uptime` (system, since
-boot) and `session` (this terminal, since launch) are **text** cells rather than
-sparklines: the bar shows an abbreviated form (`up 3d 4h`) and the drill-in
-popover the full breakdown (`3 days, 4 hours, 12 minutes`). System uptime reads
-the boot time once from `prexp-core`'s `system_boot_time_secs()`
+`uptime`, `session`, and `clock` (net/disk on macOS only for now). `uptime`
+(system, since boot) and `session` (this terminal, since launch) are **text**
+cells rather than sparklines: the bar shows an abbreviated form (`up 3d 4h`) and
+the drill-in popover the full breakdown (`3 days, 4 hours, 12 minutes`). System
+uptime reads the boot time once from `prexp-core`'s `system_boot_time_secs()`
 (`sysctl(KERN_BOOTTIME)` on macOS, `/proc/uptime` on Linux); session uptime is
-elapsed since the first sample. `net_io` / `disk_io` overlay the two directions
+elapsed since the first sample. `clock` is the live wall time, formatted per the
+`clock_24h` / `clock_seconds` / `clock_date` settings and refreshed by its own
+1-second timer (not the sampler); the pure `metrics::format_clock` is unit-tested
+in lieu of a timezone-dependent pixel snapshot. `net_io` / `disk_io` overlay the two directions
 (rx+tx, read+write) on a single sparkline — two series on a shared scale, the
 first in the accent and the second in `warn`, via rime's multi-series
 `Sparkline` — with both rates in the label. `style` accepts `sparkline` and `number` and applies to any metric; the
@@ -279,10 +282,10 @@ source serves fdtop; tty consumes it in `metrics.rs`.
   state and a time-to-full/empty estimate. Source: IOKit power sources on macOS
   (`IOPSCopyPowerSourcesInfo`), `/sys/class/power_supply` on Linux. A machine
   with no battery hides the cell.
-- [ ] **Clock** — the current time, with configurable formatting (12/24-hour,
+- [x] **Clock** — the current time, with configurable formatting (12/24-hour,
   seconds on/off, date on/off). A text cell, refreshed every second (its own
   timer); no sampler. Formatting is timezone/locale-dependent, so it's unit-
-  tested on the pure formatter rather than pixel-snapshotted.
+  tested on the pure formatter rather than pixel-snapshotted. *Shipped.*
 
 **Later**
 

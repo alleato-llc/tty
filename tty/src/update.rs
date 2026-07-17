@@ -288,6 +288,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
         Message::SetStatusBarDisabled(on) => state.set_status_bar_disabled(on),
         Message::SetStatusBarMetricsPinned(on) => state.set_status_bar_metrics_pinned(on),
+        Message::SetClock24h(on) => state.set_clock_24h(on),
+        Message::SetClockSeconds(on) => state.set_clock_seconds(on),
+        Message::SetClockDate(on) => state.set_clock_date(on),
+        // The tick exists only to trigger a repaint; the clock reads the live
+        // time at render.
+        Message::ClockTick => {}
         Message::StatusBarMetricAdd(metric) => state.add_status_bar_metric(&metric),
         Message::StatusBarMetricRemove(idx) => state.remove_status_bar_metric(idx),
         Message::StatusBarMetricMove(idx, delta) => state.move_status_bar_metric(idx, delta),

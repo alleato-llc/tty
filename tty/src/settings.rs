@@ -68,12 +68,15 @@ pub enum MetricKind {
     /// This terminal session's uptime (time since it launched). A text cell;
     /// drills into the full breakdown.
     Session,
+    /// The current wall-clock time. A text cell (configurable format); drills
+    /// into the full date. Refreshed by its own 1s timer, not the sampler.
+    Clock,
 }
 
 impl MetricKind {
     /// Every metric that has a sampler today, in a stable order (used to offer
     /// the not-yet-added metrics in the settings editor).
-    pub const ALL: [MetricKind; 12] = [
+    pub const ALL: [MetricKind; 13] = [
         MetricKind::Cpu,
         MetricKind::CpuCores,
         MetricKind::CpuAll,
@@ -86,6 +89,7 @@ impl MetricKind {
         MetricKind::DiskIo,
         MetricKind::Uptime,
         MetricKind::Session,
+        MetricKind::Clock,
     ];
 
     /// Whether this kind is a text uptime cell (system or session) rather than a
@@ -118,6 +122,7 @@ impl MetricKind {
             MetricKind::DiskIo => "disk_io",
             MetricKind::Uptime => "uptime",
             MetricKind::Session => "session",
+            MetricKind::Clock => "clock",
         }
     }
 
@@ -137,6 +142,7 @@ impl MetricKind {
             "disk_io" => Some(MetricKind::DiskIo),
             "uptime" => Some(MetricKind::Uptime),
             "session" => Some(MetricKind::Session),
+            "clock" => Some(MetricKind::Clock),
             _ => None,
         }
     }
@@ -157,6 +163,7 @@ impl std::fmt::Display for MetricKind {
             MetricKind::DiskIo => "Disk I/O",
             MetricKind::Uptime => "Uptime",
             MetricKind::Session => "Session",
+            MetricKind::Clock => "Clock",
         })
     }
 }
@@ -249,6 +256,16 @@ pub struct Settings {
     /// (`false`/absent, the default).
     #[serde(default)]
     pub window_always_on_top: Option<bool>,
+    /// Clock cell: 24-hour time (`true`) vs 12-hour with AM/PM (`false`/absent).
+    #[serde(default)]
+    pub clock_24h: Option<bool>,
+    /// Clock cell: show seconds (`true`) vs minute precision (`false`/absent).
+    #[serde(default)]
+    pub clock_seconds: Option<bool>,
+    /// Clock cell: prefix the weekday + date (`true`) vs time only
+    /// (`false`/absent).
+    #[serde(default)]
+    pub clock_date: Option<bool>,
     /// Ink the active tab with the accent color (`true`/absent) or with a subtler
     /// normal-ink emphasis (`false`). Either way the active tab reads as active versus
     /// the muted inactive tabs; this just dials the loudness.
@@ -641,6 +658,15 @@ impl Settings {
     /// Whether the window should stay above other windows (default `false`).
     pub fn window_always_on_top(&self) -> bool {
         self.window_always_on_top.unwrap_or(false)
+    }
+
+    /// The clock cell's format, resolved from the individual toggles.
+    pub fn clock_format(&self) -> crate::metrics::ClockFormat {
+        crate::metrics::ClockFormat {
+            hour24: self.clock_24h.unwrap_or(false),
+            seconds: self.clock_seconds.unwrap_or(false),
+            date: self.clock_date.unwrap_or(false),
+        }
     }
 
     /// Whether to ink the active tab with the accent (default `true`).
