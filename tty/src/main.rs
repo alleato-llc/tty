@@ -55,6 +55,8 @@ fn main() -> anyhow::Result<()> {
                 size,
                 transparent: true,
                 icon: app_icon::window_icon(APP_ICON),
+                // Honor the persisted always-on-top setting from launch.
+                level: tty.window_level(),
                 ..Default::default()
             });
             tty.main_window = Some(id);

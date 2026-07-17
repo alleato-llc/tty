@@ -275,6 +275,37 @@ fn pinned_mode_keeps_multiple_popovers_until_closed() {
 }
 
 #[test]
+fn window_opacity_and_level_track_their_settings() {
+    let mut tty = headless(1);
+
+    // Focused opacity: floored at 50% (a fully-transparent focused window would
+    // be unusable), and it drives window_opacity() while focused.
+    tty.focused = true;
+    let _ = update(&mut tty, Message::SetFocusedOpacity(0.2));
+    assert_eq!(
+        tty.settings.focused_opacity(),
+        crate::settings::MIN_FOCUSED_OPACITY,
+        "focused opacity is floored"
+    );
+    let _ = update(&mut tty, Message::SetFocusedOpacity(0.8));
+    assert_eq!(tty.settings.focused_opacity(), 0.8);
+    assert_eq!(tty.window_opacity(), 0.8, "focused uses focused opacity");
+
+    // Unfocused still uses the (lower-floored) unfocused opacity.
+    tty.focused = false;
+    let _ = update(&mut tty, Message::SetUnfocusedOpacity(0.3));
+    assert_eq!(tty.window_opacity(), 0.3);
+
+    // Always-on-top flips the window level and persists.
+    assert_eq!(tty.window_level(), iced::window::Level::Normal);
+    let _ = update(&mut tty, Message::SetWindowAlwaysOnTop(true));
+    assert!(tty.settings.window_always_on_top());
+    assert_eq!(tty.window_level(), iced::window::Level::AlwaysOnTop);
+    let _ = update(&mut tty, Message::SetWindowAlwaysOnTop(false));
+    assert_eq!(tty.window_level(), iced::window::Level::Normal);
+}
+
+#[test]
 fn disabling_status_bar_closes_popovers() {
     let mut tty = headless(1);
     tty.metric_details = vec![crate::state::MetricPopover::new(

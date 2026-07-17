@@ -95,10 +95,11 @@ themes (the same catalog fed-ide ships, shared via rime) or import any
 size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and the
 **auto-hiding status bar** (on by default — it floats back in when the pointer
 nears the bottom edge so the grid gets the full height; turn it off to pin it, or
-**Disable status bar** to drop it entirely), and set
-**Transparency On Blur** to fade the whole window (up to 95%) when it loses focus. A
-**Keys** section lists every keyboard shortcut for reference. Settings persist to
-`tty.settings.json`.
+**Disable status bar** to drop it entirely). The **Window** tab keeps the window
+**on top** of other windows and fades it with two transparency amounts —
+**When Active** (up to 50%, so an in-use window stays readable) and **On Blur**
+(up to 95%, when it loses focus). A **Keys** section lists every keyboard shortcut
+for reference. Settings persist to `tty.settings.json`.
 
 The Appearance section also configures **machine stats in the status bar** (off
 until you add one): CPU, memory, and network / disk throughput as compact canvas

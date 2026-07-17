@@ -17,6 +17,11 @@ use crate::history::crypto::Cipher;
 /// window from fading to fully invisible and unrecoverable.
 pub const MIN_OPACITY: f32 = 0.05;
 
+/// The lowest *focused* opacity we allow (50% → 50% transparency). A higher floor
+/// than [`MIN_OPACITY`]: a window you're actively using should stay clearly
+/// readable, so active transparency tops out at 50%.
+pub const MIN_FOCUSED_OPACITY: f32 = 0.5;
+
 /// A custom terminal palette as hex strings (so it round-trips through JSON cleanly).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
@@ -212,9 +217,18 @@ pub struct Settings {
     #[serde(default)]
     pub palette: Option<Palette>,
     /// Terminal-background opacity when the window is **unfocused** (`1.0` = opaque =
-    /// the feature off; lower = more see-through). Focused is always opaque.
+    /// the feature off; lower = more see-through). Down to [`MIN_OPACITY`].
     #[serde(default)]
     pub unfocused_opacity: Option<f32>,
+    /// Terminal-background opacity when the window **is focused** (`1.0`/absent =
+    /// opaque = the feature off; lower = more see-through). Floored at
+    /// [`MIN_FOCUSED_OPACITY`] so an in-use window stays readable.
+    #[serde(default)]
+    pub focused_opacity: Option<f32>,
+    /// Keep the window above other windows (`true`), or let it order normally
+    /// (`false`/absent, the default).
+    #[serde(default)]
+    pub window_always_on_top: Option<bool>,
     /// Ink the active tab with the accent color (`true`/absent) or with a subtler
     /// normal-ink emphasis (`false`). Either way the active tab reads as active versus
     /// the muted inactive tabs; this just dials the loudness.
@@ -594,6 +608,19 @@ impl Settings {
         self.unfocused_opacity
             .unwrap_or(1.0)
             .clamp(MIN_OPACITY, 1.0)
+    }
+
+    /// The focused-window opacity (`1.0` = opaque/off), clamped to at least
+    /// [`MIN_FOCUSED_OPACITY`] (50%) so an in-use window stays readable.
+    pub fn focused_opacity(&self) -> f32 {
+        self.focused_opacity
+            .unwrap_or(1.0)
+            .clamp(MIN_FOCUSED_OPACITY, 1.0)
+    }
+
+    /// Whether the window should stay above other windows (default `false`).
+    pub fn window_always_on_top(&self) -> bool {
+        self.window_always_on_top.unwrap_or(false)
     }
 
     /// Whether to ink the active tab with the accent (default `true`).

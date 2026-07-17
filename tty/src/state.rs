@@ -684,11 +684,12 @@ impl Tty {
         self.menu = None;
     }
 
-    /// The whole-window opacity to render with right now: opaque while focused, the
-    /// configured unfocused opacity otherwise. Applied to every surface + text color.
+    /// The whole-window opacity to render with right now: the configured focused
+    /// opacity while focused, the unfocused opacity otherwise. Both default to
+    /// `1.0` (opaque). Applied to every surface + text color.
     pub fn window_opacity(&self) -> f32 {
         if self.focused {
-            1.0
+            self.settings.focused_opacity()
         } else {
             self.settings.unfocused_opacity()
         }
@@ -697,6 +698,41 @@ impl Tty {
     /// Set the unfocused-window opacity (`1.0` = off). Persisted.
     pub fn set_unfocused_opacity(&mut self, opacity: f32) {
         self.settings.unfocused_opacity = Some(opacity.clamp(crate::settings::MIN_OPACITY, 1.0));
+        self.settings.save();
+    }
+
+    /// Set the focused-window opacity (`1.0` = off), floored at
+    /// [`crate::settings::MIN_FOCUSED_OPACITY`]. Persisted.
+    pub fn set_focused_opacity(&mut self, opacity: f32) {
+        self.settings.focused_opacity =
+            Some(opacity.clamp(crate::settings::MIN_FOCUSED_OPACITY, 1.0));
+        self.settings.save();
+    }
+
+    /// The window level for every window right now, from the always-on-top
+    /// setting: `AlwaysOnTop` when on, else `Normal`. Applied at window open and
+    /// whenever the setting toggles.
+    pub fn window_level(&self) -> iced::window::Level {
+        if self.settings.window_always_on_top() {
+            iced::window::Level::AlwaysOnTop
+        } else {
+            iced::window::Level::Normal
+        }
+    }
+
+    /// Every open window id: the main window (if any) and all detached ones. Used
+    /// to broadcast a window-level change to the whole app.
+    pub fn all_window_ids(&self) -> Vec<iced::window::Id> {
+        self.main_window
+            .into_iter()
+            .chain(self.detached.keys().copied())
+            .collect()
+    }
+
+    /// Toggle keeping the window above other windows. Persisted. The caller
+    /// applies the new [`Self::window_level`] to the live windows.
+    pub fn set_window_always_on_top(&mut self, on: bool) {
+        self.settings.window_always_on_top = Some(on);
         self.settings.save();
     }
 
@@ -1968,6 +2004,8 @@ impl Tty {
         let size = iced::Size::new(720.0, 600.0);
         let (id, open) = iced::window::open(iced::window::Settings {
             size,
+            // A detached window inherits the app's always-on-top setting.
+            level: self.window_level(),
             ..Default::default()
         });
         self.detached.insert(id, tab);

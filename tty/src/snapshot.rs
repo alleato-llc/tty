@@ -671,6 +671,28 @@ fn settings_appearance_statusbar_pane_view() {
 }
 
 #[test]
+fn settings_appearance_window_pane_view() {
+    // The "Window" sub-tab: keep-on-top toggle plus the two transparency
+    // sliders — "When Active" (0–50%) and "On Blur" (0–95%).
+    let mut tty = populated();
+    tty.show_settings = true;
+    tty.settings_section = 0;
+    tty.appearance_tab = 4;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-appearance-window.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-appearance-window` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn tab_context_menu_view() {
     // Right-clicking a tab opens its menu (new tab / split / close tab).
     let mut tty = populated();

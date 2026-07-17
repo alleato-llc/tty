@@ -1646,28 +1646,53 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
     .into()
 }
 
-/// Appearance → Window: transparency that kicks in only when the window loses
-/// focus. Shown as a 0–95% transparency amount; stored as the resulting opacity
-/// (1 − amount).
+/// Appearance → Window: keep-on-top, and the two transparency amounts (active
+/// and on-blur). Each transparency is shown as a 0–max% amount and stored as the
+/// resulting opacity (1 − amount).
 fn appearance_window_pane(state: &Tty) -> Element<'_, Message> {
-    let transparency = 1.0 - state.settings.unfocused_opacity();
-    let max = 1.0 - crate::settings::MIN_OPACITY;
-    let control = slider(
-        "Transparency On Blur",
-        0.0..=max,
-        transparency,
-        format!("{}%", (transparency * 100.0).round() as i32),
-        |t| Message::SetUnfocusedOpacity(1.0 - t),
+    // Always on top: keep the window above other apps' windows.
+    let on_top = toggle(
+        "Keep window on top of other windows",
+        state.settings.window_always_on_top(),
+        Message::SetWindowAlwaysOnTop(!state.settings.window_always_on_top()),
     );
-    column![tooltip(
-        control,
-        "Fades the whole window when it loses focus, so what's behind it \
-         shows through. At 0% it stays opaque. The window is always solid \
-         while focused.",
+
+    // Active transparency: fades even while focused, capped at 50% so an in-use
+    // window stays readable.
+    let active = 1.0 - state.settings.focused_opacity();
+    let active_max = 1.0 - crate::settings::MIN_FOCUSED_OPACITY;
+    let active_control = tooltip(
+        slider(
+            "Transparency When Active",
+            0.0..=active_max,
+            active,
+            format!("{}%", (active * 100.0).round() as i32),
+            |t| Message::SetFocusedOpacity(1.0 - t),
+        ),
+        "Fades the window even while you're using it, so what's behind shows \
+         through. Capped at 50% so it stays readable. At 0% it stays opaque.",
         TooltipPosition::Top,
-    )]
-    .spacing(14)
-    .into()
+    );
+
+    // Blur transparency: fades further when the window loses focus (up to 95%).
+    let blur = 1.0 - state.settings.unfocused_opacity();
+    let blur_max = 1.0 - crate::settings::MIN_OPACITY;
+    let blur_control = tooltip(
+        slider(
+            "Transparency On Blur",
+            0.0..=blur_max,
+            blur,
+            format!("{}%", (blur * 100.0).round() as i32),
+            |t| Message::SetUnfocusedOpacity(1.0 - t),
+        ),
+        "Fades the whole window when it loses focus, so what's behind it \
+         shows through. At 0% it stays opaque.",
+        TooltipPosition::Top,
+    );
+
+    column![on_top, active_control, blur_control]
+        .spacing(14)
+        .into()
 }
 
 /// Palette: import a base16 scheme, or tweak the 16 ANSI colors + fg/bg/cursor directly.

@@ -196,6 +196,10 @@ pub enum Message {
     Focused(bool),
     /// Set the unfocused-window terminal opacity (`1.0` = off).
     SetUnfocusedOpacity(f32),
+    /// Set the focused-window terminal opacity (`1.0` = off).
+    SetFocusedOpacity(f32),
+    /// Toggle keeping the window above other windows (always on top).
+    SetWindowAlwaysOnTop(bool),
     /// Toggle inking the active tab with the accent color.
     SetTabHighlight(bool),
     /// Toggle the auto-hiding status bar (reveals on near-hover at the bottom).

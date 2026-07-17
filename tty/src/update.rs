@@ -272,6 +272,18 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::EditColor(idx, color) => state.edit_color(idx, color),
         Message::Focused(f) => state.focused = f,
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
+        Message::SetFocusedOpacity(o) => state.set_focused_opacity(o),
+        Message::SetWindowAlwaysOnTop(on) => {
+            state.set_window_always_on_top(on);
+            // Apply the new level to every live window (main + detached).
+            let level = state.window_level();
+            return iced::Task::batch(
+                state
+                    .all_window_ids()
+                    .into_iter()
+                    .map(|id| iced::window::set_level(id, level)),
+            );
+        }
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
         Message::SetStatusBarDisabled(on) => state.set_status_bar_disabled(on),
