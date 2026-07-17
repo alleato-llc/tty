@@ -1814,3 +1814,101 @@ fn enable_history_dialog_with_fanout_knob_view() {
         "snapshot `tty-enable-history-fanout` changed — delete its PNG to re-baseline"
     );
 }
+
+/// The History settings section, with the app's live status bar hidden so only
+/// the deterministic panel renders (no wall-clock cell etc.).
+fn history_section_tty() -> Tty {
+    let mut tty = populated();
+    tty.settings.status_bar_autohide = Some(true);
+    tty.pointer = iced::Point::new(300.0, 40.0);
+    tty.show_settings = true;
+    tty.settings_section = 4;
+    tty
+}
+
+#[test]
+fn settings_history_off_view() {
+    // The default off state: the fixed-at-enable choices show greyed out (key
+    // source, KDF for a passphrase source, cipher, fan-out) so the section reads
+    // as "configured on enable", not a set of dead controls.
+    let mut tty = history_section_tty();
+    tty.settings.encrypted_history_enabled = Some(false);
+    tty.settings.history_key_source = Some("passphrase".to_string());
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-off.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-off` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_history_on_keychain_view() {
+    // Enabled with the OS-keychain source: the live config stats (key source,
+    // cipher, fan-out) and the "At startup" picker.
+    let mut tty = history_section_tty();
+    tty.settings.encrypted_history_enabled = Some(true);
+    tty.settings.history_key_source = Some("keychain".to_string());
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-on-keychain.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-on-keychain` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_history_locked_view() {
+    // Enabled with a passphrase source but locked: the "locked — not recording ·
+    // Unlock…" banner over the config stats (incl. the passphrase-only KDF row).
+    let mut tty = history_section_tty();
+    tty.settings.encrypted_history_enabled = Some(true);
+    tty.settings.history_key_source = Some("passphrase".to_string());
+    tty.history_locked = true;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-locked.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-locked` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_history_start_failed_view() {
+    // The archive couldn't be read: the error banner, with the keychain-specific
+    // "switch to a passphrase" hint (since the source is the keychain).
+    let mut tty = history_section_tty();
+    tty.settings.encrypted_history_enabled = Some(false);
+    tty.settings.history_key_source = Some("keychain".to_string());
+    tty.history_start_failed = true;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-history-start-failed.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-history-start-failed` changed — delete its PNG to re-baseline"
+    );
+}
