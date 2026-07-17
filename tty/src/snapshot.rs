@@ -157,12 +157,12 @@ fn split_pane_view() {
     tty.split_with(
         win,
         Direction::Right,
-        painted_term(
+        crate::state::Pane::Term(painted_term(
             "zsh",
             28,
             6,
             b"$ cargo test\r\n\x1b[32m   Compiling\x1b[0m tty\r\n$ ",
-        ),
+        )),
     );
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
@@ -175,6 +175,35 @@ fn split_pane_view() {
     assert!(
         matches,
         "snapshot `tty-split` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_pane_view() {
+    use iced::widget::pane_grid::Direction;
+    // A Processes drill-in "graduated" into a real split pane beside the terminal:
+    // a header (name + maximize/close) over the live table, resizable like any pane.
+    let mut tty = populated();
+    let win = tty.main_window.unwrap();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Metric(crate::settings::MetricKind::Procs),
+    );
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-pane.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-pane` changed — delete its PNG to re-baseline"
     );
 }
 

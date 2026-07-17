@@ -105,12 +105,19 @@ the read loop):
 Thin glue, mirroring `fed`'s module shape:
 
 - **`state`** — `Tty { tabs: Vec<Tab>, active, theme, font, font_size, … }`. A `Tab` is
-  a `pane_grid::State<Term>` split tree plus its focused `Pane` (a single pane until the
-  user splits). A `Term` is a `screen` + an `Option<PtySession>` (`None` only in tests)
-  + an `alive` flag the read loop clears on shell exit. Methods target the active tab's
-  focused pane: `split_focused`/`focus_dir`/`close_focused_pane`, `write_focused`/
-  `write_pane`, `resize_pane`, `new_tab`/`close_tab`, `zoom`/`reset_zoom`. `reap_dead`
-  drops dead panes, then any tab with no live pane, then exits when none remain.
+  a `pane_grid::State<Pane>` split tree plus its focused `Pane`. `Pane` is the
+  per-pane content enum (the extension point): `Pane::Term(Term)` for a shell, or
+  `Pane::Metric(MetricKind)` for a metric drill-in "graduated" from a floating
+  popover into a real pane (via `promote_metric_to_pane`) — no PTY, reads the shared
+  `Metrics`, never reaps. A `Term` is a `screen` + an `Option<PtySession>` (`None`
+  only in tests) + an `alive` flag the read loop clears on shell exit. Terminal
+  operations filter to `Pane::as_term` (and `Tab::terms()/terms_mut()`), so a metric
+  pane is transparent to keystrokes/resize/reaping while sharing the generic
+  split/focus/resize/maximize machinery. Methods target the active tab's focused
+  pane: `split_focused`/`split_with`/`focus_dir`/`close_focused_pane`/`close_pane`,
+  `toggle_maximize_pane`, `write_focused`/`write_pane`, `resize_pane`,
+  `new_tab`/`close_tab`, `zoom`/`reset_zoom`. `reap_dead` drops dead terminal panes,
+  then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. `⌘F` opens the scrollback find bar (`Enter`/`⇧Enter`
@@ -121,9 +128,10 @@ Thin glue, mirroring `fed`'s module shape:
 - **`view`** — window-aware: `root_view(state, window)` routes a **detached** window to a
   lean `detached_view` (the tab's `pane_grid` + a Reattach button + a status bar) and every
   other window to `main_view` — the `rime` `tabs` strip (shown only with >1 tab, matching
-  fed / fed-ide), a `pane_grid` over the active tab's panes (each pane a `phosphor`
-  terminal; the focused one's border turns accent only when the tab has >1 pane), and a
-  `rime` `status_bar`. A right-click (or `⌃`-click, macOS's secondary-click) opens a `rime`
+  fed / fed-ide), a `pane_grid` over the active tab's panes (the closure matches the
+  `Pane`: a `phosphor` terminal, or `metric_pane_content` — a header with maximize/close
+  over `metric_body`, the same body a drill-in popover renders; the focused one's border
+  turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A right-click (or `⌃`-click, macOS's secondary-click) opens a `rime`
   `context_menu` at the tracked pointer — a pane menu (split + close pane), a tab menu
   (new tab + rename + **detach** + split + close tab), or — if the click landed on a
   detected URL — a **link** menu (Open Link / Copy Link), per `state.menu`. "Rename tab"

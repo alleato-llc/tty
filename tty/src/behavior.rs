@@ -449,6 +449,40 @@ fn proc_and_fd_right_click_open_context_menus() {
 }
 
 #[test]
+fn metric_pane_promote_maximize_close() {
+    use crate::settings::MetricKind;
+    use crate::state::Pane;
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let ti = tty.active;
+    assert_eq!(tty.tabs[ti].panes.len(), 1, "starts with one terminal pane");
+
+    // Promote a CPU metric into a pane split to the right; it takes focus.
+    tty.promote_metric_to_pane(win, Direction::Right, MetricKind::Cpu);
+    assert_eq!(tty.tabs[ti].panes.len(), 2);
+    let focus = tty.tabs[ti].focus;
+    assert!(matches!(
+        tty.tabs[ti].panes.get(focus),
+        Some(Pane::Metric(MetricKind::Cpu))
+    ));
+
+    // Maximize fills the grid; toggling again restores.
+    let _ = update(&mut tty, Message::ToggleMaximizePane(win));
+    assert!(tty.tabs[ti].panes.maximized().is_some());
+    let _ = update(&mut tty, Message::ToggleMaximizePane(win));
+    assert!(tty.tabs[ti].panes.maximized().is_none());
+
+    // The pane's × closes just that pane; the terminal remains.
+    let _ = update(&mut tty, Message::CloseMetricPane(win, focus));
+    assert_eq!(tty.tabs[ti].panes.len(), 1);
+    assert!(matches!(
+        tty.tabs[ti].panes.get(tty.tabs[ti].focus),
+        Some(Pane::Term(_))
+    ));
+}
+
+#[test]
 fn status_bar_scroll_offset_moves_and_saturates() {
     // With no cells fitting (window width 0 → everything "fits", max 0), scroll is
     // pinned at 0; the offset never goes negative.
@@ -1099,7 +1133,11 @@ fn splitting_adds_a_focused_pane_to_the_tab() {
     let win = main_win(&tty);
     assert_eq!(tty.tabs[0].panes.len(), 1);
     let first = tty.tabs[0].focus;
-    tty.split_with(win, Direction::Right, screen_term("split"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("split")),
+    );
     assert_eq!(tty.tabs[0].panes.len(), 2, "a split adds a pane");
     assert_eq!(tty.tabs.len(), 1, "splitting stays within one tab");
     assert_ne!(tty.tabs[0].focus, first, "focus moves to the new pane");
@@ -1112,7 +1150,11 @@ fn focus_dir_moves_between_neighbours() {
     let win = main_win(&tty);
     let left = tty.tabs[0].focus;
     // Split right; focus is now the right pane. ← returns to the left, → comes back.
-    tty.split_with(win, Direction::Right, screen_term("right"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("right")),
+    );
     let right = tty.tabs[0].focus;
     tty.focus_dir(win, Direction::Left);
     assert_eq!(tty.tabs[0].focus, left, "← moves to the left neighbour");
@@ -1129,7 +1171,11 @@ fn closing_a_pane_keeps_the_tab_until_the_last_pane() {
     let mut tty = headless(2);
     let win = main_win(&tty);
     // Split the active tab into two panes, then close one: the tab survives.
-    tty.split_with(win, Direction::Down, screen_term("lower"));
+    tty.split_with(
+        win,
+        Direction::Down,
+        crate::state::Pane::Term(screen_term("lower")),
+    );
     assert_eq!(tty.tabs[0].panes.len(), 2);
     assert!(
         tty.close_focused_pane(),
@@ -1151,7 +1197,11 @@ fn right_click_focuses_the_pane_and_opens_the_menu_at_the_pointer() {
     let mut tty = headless(1);
     let win = main_win(&tty);
     // Two panes; focus the left one, then right-click the right one.
-    tty.split_with(win, Direction::Right, screen_term("right"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("right")),
+    );
     let right = tty.tabs[0].focus;
     tty.focus_dir(win, Direction::Left);
     assert_ne!(tty.tabs[0].focus, right);
@@ -1272,7 +1322,11 @@ fn os_close_of_a_detached_window_reattaches_but_cmd_w_last_pane_does_not() {
     let mut tty = headless(2);
     let win = tty.main_window.unwrap();
     // Build a two-pane tab in the main strip, then move it into a detached window.
-    tty.split_with(win, Direction::Right, screen_term("b"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("b")),
+    );
     let tab = tty.tabs.remove(0);
     tty.active = 0;
     let dwin = detach_manually(&mut tty, tab, 0);
@@ -1486,7 +1540,11 @@ fn focus_pane_message_focuses_on_a_plain_click_opens_menu_on_ctrl_click() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(1);
     let win = main_win(&tty);
-    tty.split_with(win, Direction::Right, screen_term("right"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("right")),
+    );
     let (first, _) = tty.tabs[0].panes.iter().next().unwrap();
     let first = *first;
 
@@ -1507,7 +1565,11 @@ fn resize_split_message_adjusts_the_divider_ratio() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(1);
     let win = main_win(&tty);
-    tty.split_with(win, Direction::Right, screen_term("right"));
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(screen_term("right")),
+    );
     let split = *tty.tabs[0].panes.layout().splits().next().unwrap();
     let _ = update(
         &mut tty,
@@ -1561,7 +1623,11 @@ fn split_message_splits_the_main_tabs_focused_pane() {
 fn close_pane_message_closes_a_pane_or_exits_on_the_last() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(1);
-    tty.split_with(main_win(&tty), Direction::Down, screen_term("lower"));
+    tty.split_with(
+        main_win(&tty),
+        Direction::Down,
+        crate::state::Pane::Term(screen_term("lower")),
+    );
     tty.menu = Some((MenuKind::Pane, iced::Point::ORIGIN));
     let _ = update(&mut tty, Message::ClosePane);
     assert_eq!(tty.tabs[0].panes.len(), 1, "one of two panes closed");
@@ -2304,7 +2370,7 @@ mod history_integration {
         assert!(tty.session_untracked);
         for tab in &tty.tabs {
             assert!(tab.untracked, "every existing tab is marked");
-            for (_, term) in tab.panes.iter() {
+            for term in tab.terms() {
                 assert!(term.screen.lock().untracked(), "and every screen");
             }
         }
@@ -2339,7 +2405,7 @@ mod history_integration {
         tty.history_writer = Some(writer);
         tty.history_read = Some((Cipher::ChaCha20Poly1305, keys()));
         tty.tabs[1].untracked = true;
-        for (_, term) in tty.tabs[1].panes.iter_mut() {
+        for term in tty.tabs[1].terms_mut() {
             term.screen.lock().set_untracked(true);
         }
 
@@ -2378,7 +2444,7 @@ mod history_integration {
     #[test]
     fn untracked_flag_shows_on_live_rows_and_shifted_chord_is_distinct() {
         let mut tty = headless(1);
-        for (_, term) in tty.tabs[0].panes.iter_mut() {
+        for term in tty.tabs[0].terms_mut() {
             term.screen.lock().set_untracked(true);
         }
         command_log_fixture(&tty);

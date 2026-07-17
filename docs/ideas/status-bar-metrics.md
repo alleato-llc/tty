@@ -266,6 +266,14 @@ that metric's full-size chart, rather than a whole system panel.
      up-and-right from the anchor so a stack stays legible. Off (the default) keeps
      the single-card, click-away-closes behavior; turning it off truncates any
      stack back to one.
+   - **Graduate to a pane.** A popover's **⊞** control promotes the drill-in out
+     of the floating overlay into a real split pane: `PromotePopoverMenu` opens a
+     Left/Right/Up/Down menu, then `promote_metric_to_pane` does a `pane_grid`
+     split with a `Pane::Metric(kind)` (see `docs/ARCHITECTURE.md` — panes are a
+     `Pane` content enum, `Term` or `Metric`). The pane renders the same
+     `metric_body` a popover does, under a header with maximize (`pane_grid`
+     `maximize`/`restore`) and close; `⌘W` closes it like any pane. The metric pane
+     has no PTY and never reaps.
    - **Direct manipulation in the bar.** When the cells overflow, the bar still
      sheds from the right, but a **wheel scroll** over it slides a window through
      the full list (`Tty::status_bar_scroll`, clamped by `view::status_bar_scroll_max`;

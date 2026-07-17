@@ -108,7 +108,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 if tab.untracked {
                     title = format!("○ {title}");
                 }
-                let activity = tab.panes.iter().any(|(_, t)| t.activity);
+                let activity = tab.terms().any(|t| t.activity);
                 Tab::new(if activity {
                     format!("• {title}")
                 } else {
@@ -163,8 +163,18 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
-            pane_grid(&tab.panes, move |pane, term, _maximized| {
+            pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
+                let term = match content {
+                    crate::state::Pane::Term(term) => term,
+                    // A graduated metric view (CPU chart, process table, …).
+                    crate::state::Pane::Metric(kind) => {
+                        return metric_pane_content(
+                            state, *kind, win, pane, is_focused, maximized, multi, accent,
+                            hairline, bg,
+                        );
+                    }
+                };
                 let scroll_to = search
                     .as_deref()
                     .and_then(|q| current_match_line(term, q, search_match));
@@ -431,6 +441,28 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     Message::CopyText(path.clone()),
                 )]
             }
+            MenuKind::PromotePopover { kind } => {
+                use iced::widget::pane_grid::Direction;
+                let kind = *kind;
+                vec![
+                    MenuItem::action(
+                        "Move to pane · Left",
+                        Message::PromoteMetricToPane(kind, Direction::Left),
+                    ),
+                    MenuItem::action(
+                        "Move to pane · Right",
+                        Message::PromoteMetricToPane(kind, Direction::Right),
+                    ),
+                    MenuItem::action(
+                        "Move to pane · Up",
+                        Message::PromoteMetricToPane(kind, Direction::Up),
+                    ),
+                    MenuItem::action(
+                        "Move to pane · Down",
+                        Message::PromoteMetricToPane(kind, Direction::Down),
+                    ),
+                ]
+            }
         };
         base = context_menu(base, &items, at, Message::CloseMenu);
     }
@@ -524,8 +556,16 @@ fn detached_view<'a>(
     let size = state.font_size;
     let multi = tab.panes.len() > 1;
 
-    let body = pane_grid(&tab.panes, move |pane, term, _maximized| {
+    let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
+        let term = match content {
+            crate::state::Pane::Term(term) => term,
+            crate::state::Pane::Metric(kind) => {
+                return metric_pane_content(
+                    state, *kind, window, pane, is_focused, maximized, multi, accent, hairline, bg,
+                );
+            }
+        };
         let term_widget = phosphor::terminal(
             term.screen.clone(),
             style,
@@ -2285,18 +2325,20 @@ fn metric_cell<'a>(style: crate::settings::MetricStyle, r: MetricRender) -> Elem
 /// click-away/Escape have a target and the drill-in gives visible feedback. The
 /// chart reuses [`metric_render`], so it shows exactly the series and scale the
 /// clicked cell did, just larger.
-fn metric_popover_card<'a>(
+/// The rendered view for a metric `kind` — the chart / table / readout that fills
+/// a drill-in popover *or* a graduated metric pane. Pure content: no card frame,
+/// resize edges, or controls (those are the popover's / pane's own chrome).
+/// `card_w` / `chart_h` size the chart to its container.
+fn metric_body<'a>(
     state: &'a Tty,
-    pop: &crate::state::MetricPopover,
-    index: usize,
+    kind: crate::settings::MetricKind,
+    expanded: bool,
+    card_w: f32,
+    chart_h: f32,
 ) -> Element<'a, Message> {
     use crate::settings::{MetricKind as K, MetricStyle, ResolvedMetric};
-
-    let kind = pop.kind;
-    let expanded = pop.expanded;
-    let pinned = state.settings.status_bar_metrics_pinned();
     let t = theme::tokens();
-    // Render off the configured cell (so a graded popover picks up the user's
+    // Render off the configured cell (so a graded view picks up the user's
     // thresholds); fall back to defaults if somehow not in the list.
     let resolved = state
         .settings
@@ -2316,12 +2358,8 @@ fn metric_popover_card<'a>(
         });
     let render = metric_render(resolved, state);
 
-    // The current size: the user's dragged override, else the compact or
-    // expanded default (see `MetricPopover::effective_size`).
-    let (card_w, chart_h) = pop.effective_size(state.window_width, state.window_height);
-
     // The line chart needs at least a couple of points to draw a segment; below
-    // that (an empty or single-point history) the card shows a plain note.
+    // that (an empty or single-point history) it shows a plain note.
     let filled = render.as_ref().map_or(0, |r| {
         r.series.iter().map(|(v, _)| v.len()).max().unwrap_or(0)
     });
@@ -2331,7 +2369,7 @@ fn metric_popover_card<'a>(
     // where the platform reports no per-core history.
     let has_cores = kind.is_cpu() && has_per_core_cpu(state);
 
-    let body: Element<'a, Message> = if kind == K::Procs {
+    if kind == K::Procs {
         procs_body(state, card_w, chart_h)
     } else if kind == K::Clock {
         clock_body(state)
@@ -2438,7 +2476,85 @@ fn metric_popover_card<'a>(
         ]
         .spacing(8)
         .into()
-    };
+    }
+}
+
+/// One graduated metric **pane** (a metric drill-in promoted into the pane grid):
+/// a compact header (the metric's name + maximize/restore + close) over its
+/// [`metric_body`]. Focus/right-click-to-split come from the surrounding
+/// `pane_grid` like any pane.
+#[allow(clippy::too_many_arguments)]
+fn metric_pane_content<'a>(
+    state: &'a Tty,
+    kind: crate::settings::MetricKind,
+    win: iced::window::Id,
+    pane: pane_grid::Pane,
+    is_focused: bool,
+    maximized: bool,
+    multi: bool,
+    accent: iced::Color,
+    hairline: iced::Color,
+    bg: iced::Color,
+) -> pane_grid::Content<'a, Message> {
+    let t = theme::tokens();
+    // Size the body to the pane's rough share of the window (the closure isn't
+    // handed pixel bounds). Bias width toward a split's half so long names in a
+    // table truncate (an ellipsis) rather than wrap; the chart fills the height.
+    let card_w = (state.window_width * 0.45).max(240.0);
+    let chart_h = (state.window_height * 0.30).clamp(120.0, 360.0);
+
+    let header = row![
+        container(
+            text(kind.to_string())
+                .size(13)
+                .color(if is_focused { accent } else { t.ink }),
+        )
+        .width(Length::Fill),
+        button::ghost_compact(
+            if maximized { "▪" } else { "▫" },
+            Message::ToggleMaximizePane(win),
+        ),
+        button::ghost_compact("×", Message::CloseMetricPane(win, pane)),
+    ]
+    .align_y(iced::Alignment::Center)
+    .spacing(0);
+
+    let inner = column![header, metric_body(state, kind, false, card_w, chart_h)]
+        .spacing(6)
+        .padding(6);
+    let border_color = if is_focused { accent } else { hairline };
+    let bordered = container(inner).style(move |_| {
+        let border = if multi {
+            Border {
+                color: border_color,
+                width: 1.0,
+                radius: 0.0.into(),
+            }
+        } else {
+            Border::default()
+        };
+        container::Style {
+            border,
+            ..container::background(bg)
+        }
+    });
+    pane_grid::Content::new(mouse_area(bordered).on_right_press(Message::PaneRightClick(pane)))
+}
+
+fn metric_popover_card<'a>(
+    state: &'a Tty,
+    pop: &crate::state::MetricPopover,
+    index: usize,
+) -> Element<'a, Message> {
+    let kind = pop.kind;
+    let expanded = pop.expanded;
+    let pinned = state.settings.status_bar_metrics_pinned();
+    let t = theme::tokens();
+
+    // The current size: the user's dragged override, else the compact or
+    // expanded default (see `MetricPopover::effective_size`).
+    let (card_w, chart_h) = pop.effective_size(state.window_width, state.window_height);
+    let body = metric_body(state, kind, expanded, card_w, chart_h);
 
     let card = container(body)
         .width(Length::Fixed(card_w))
@@ -2455,19 +2571,28 @@ fn metric_popover_card<'a>(
     // when popovers are pinned) overlay the card.
     iced::widget::stack![
         with_resize_edges(index, card.into()),
-        popover_controls(index, expanded, pinned),
+        popover_controls(index, kind, expanded, pinned),
     ]
     .into()
 }
 
-/// The top-right control cluster overlaid on a popover card: the expand "+" /
-/// collapse "−" toggle, plus a close "×" when popovers are pinned (in the
-/// one-at-a-time mode a click away closes it, so no per-card button is needed).
-fn popover_controls<'a>(index: usize, expanded: bool, pinned: bool) -> Element<'a, Message> {
-    let mut controls = row![button::ghost_compact(
-        if expanded { "−" } else { "+" },
-        Message::ToggleMetricDetailExpanded(index),
-    )]
+/// The top-right control cluster overlaid on a popover card: a "move to pane" ⊞
+/// (graduate the drill-in into a real split pane), the expand "+" / collapse "−"
+/// toggle, plus a close "×" when popovers are pinned (in the one-at-a-time mode a
+/// click away closes it, so no per-card button is needed).
+fn popover_controls<'a>(
+    index: usize,
+    kind: crate::settings::MetricKind,
+    expanded: bool,
+    pinned: bool,
+) -> Element<'a, Message> {
+    let mut controls = row![
+        button::ghost_compact("⊞", Message::PromotePopoverMenu(kind)),
+        button::ghost_compact(
+            if expanded { "−" } else { "+" },
+            Message::ToggleMetricDetailExpanded(index),
+        ),
+    ]
     .spacing(0)
     .align_y(iced::Alignment::Center);
     if pinned {

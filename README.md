@@ -142,7 +142,11 @@ offered as three separate cells — **CPU** (the aggregate chart), **CPU Cores**
 (a per-core sparkline grid grouped into Performance and Efficiency cores), and
 **CPU (all)** (both) — so you pick the view you want. Turn on **Keep metric
 popovers open** to pin several side by side at once (each with its own **×**;
-`Esc` closes all). The samplers reuse the sibling `fdtop` project's `prexp-core`
+`Esc` closes all). To keep one permanently in view, **graduate it into a pane**:
+the popover's **⊞** control moves the drill-in out of the floating overlay and
+into a real split pane (Left / Right / Up / Down) beside the terminal, resizable
+by dragging the divider like any pane. A metric pane has its own maximize (fill
+the terminal area) and close controls, and `⌘W` closes it too. The samplers reuse the sibling `fdtop` project's `prexp-core`
 (network / disk and the per-core P/E split are macOS-only for now). Design sketch
 in `docs/ideas/status-bar-metrics.md`.
 

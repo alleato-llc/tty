@@ -67,11 +67,43 @@ pub struct Term {
     pub activity: bool,
 }
 
-/// One tab: a tree of terminal panes (a single pane until the user splits) plus which
-/// pane currently has focus. The split tree, drag-to-resize dividers, and cardinal
-/// navigation are owned by iced's `pane_grid::State`; we just hold a `Term` per pane.
+/// What a single pane holds. A pane is usually a terminal, but a metric drill-in
+/// can be "graduated" from a floating popover into a real pane (see
+/// [`Tty::promote_metric_to_pane`]). The enum is the extension point: new
+/// non-terminal pane kinds slot in here without touching the split/resize/focus
+/// machinery, which is generic over the pane content.
+pub enum Pane {
+    /// A shell terminal (the common case) — owns the PTY + screen.
+    Term(Term),
+    /// A live metric view (CPU chart, process table, …), keyed by its kind. It has
+    /// no PTY and never reaps; its data is read from the shared `Metrics`.
+    Metric(crate::settings::MetricKind),
+}
+
+impl Pane {
+    /// The terminal this pane holds, or `None` for a non-terminal pane. Terminal
+    /// operations (keystrokes, resize, reaping) filter through this.
+    pub fn as_term(&self) -> Option<&Term> {
+        match self {
+            Pane::Term(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn as_term_mut(&mut self) -> Option<&mut Term> {
+        match self {
+            Pane::Term(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
+/// One tab: a tree of panes (a single pane until the user splits) plus which pane
+/// currently has focus. The split tree, drag-to-resize dividers, and cardinal
+/// navigation are owned by iced's `pane_grid::State`; we hold a [`Pane`] per slot
+/// (a terminal, or a graduated metric view).
 pub struct Tab {
-    pub panes: pane_grid::State<Term>,
+    pub panes: pane_grid::State<Pane>,
     pub focus: pane_grid::Pane,
     /// A user-set name (via "Rename tab"). When `None`, the label comes from the focused
     /// pane's program title (OSC 0/2) or shell name.
@@ -87,7 +119,7 @@ pub struct Tab {
 impl Tab {
     /// A new tab wrapping a single shell pane.
     pub fn new(term: Term) -> Self {
-        let (panes, focus) = pane_grid::State::new(term);
+        let (panes, focus) = pane_grid::State::new(Pane::Term(term));
         Self {
             panes,
             focus,
@@ -96,33 +128,47 @@ impl Tab {
         }
     }
 
-    /// The focused pane's terminal.
+    /// The focused pane's terminal, or `None` when the focused pane is not a
+    /// terminal (e.g. a metric pane).
     pub fn focused(&self) -> Option<&Term> {
-        self.panes.get(self.focus)
+        self.panes.get(self.focus).and_then(Pane::as_term)
+    }
+
+    /// The terminals in this tab (skipping any non-terminal panes).
+    pub fn terms(&self) -> impl Iterator<Item = &Term> {
+        self.panes.iter().filter_map(|(_, p)| p.as_term())
+    }
+
+    /// The terminals in this tab, mutably (skipping any non-terminal panes).
+    pub fn terms_mut(&mut self) -> impl Iterator<Item = &mut Term> {
+        self.panes.iter_mut().filter_map(|(_, p)| p.as_term_mut())
     }
 
     /// The tab's display label: a user-set name wins, else the focused pane's program
-    /// title (OSC 0/2), else its shell name.
+    /// title (OSC 0/2) or shell name, else (for a metric pane) the metric's name.
     pub fn label(&self) -> String {
         if let Some(name) = &self.title {
             return name.clone();
         }
-        self.focused()
-            .map(|term| {
-                term.screen
-                    .lock()
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| term.title.clone())
-            })
-            .unwrap_or_default()
+        match self.panes.get(self.focus) {
+            Some(Pane::Term(term)) => term
+                .screen
+                .lock()
+                .title
+                .clone()
+                .unwrap_or_else(|| term.title.clone()),
+            Some(Pane::Metric(kind)) => kind.to_string(),
+            None => String::new(),
+        }
     }
 
-    /// Whether any pane in this tab still has a live shell.
+    /// Whether any pane in this tab keeps it open: a live shell, or a metric pane
+    /// (which never exits on its own).
     fn has_live_pane(&self) -> bool {
-        self.panes
-            .iter()
-            .any(|(_, t)| t.alive.load(Ordering::Relaxed))
+        self.panes.iter().any(|(_, p)| match p {
+            Pane::Term(t) => t.alive.load(Ordering::Relaxed),
+            Pane::Metric(_) => true,
+        })
     }
 }
 
@@ -512,6 +558,11 @@ pub enum MenuKind {
     /// A right-clicked open-file-descriptor row in a process detail: copy its path.
     FdRow {
         path: String,
+    },
+    /// The "move to pane" menu for a metric popover — pick a direction to graduate
+    /// it into a real split pane.
+    PromotePopover {
+        kind: crate::settings::MetricKind,
     },
 }
 
@@ -1316,12 +1367,12 @@ impl Tty {
     fn reserve_command_ids_everywhere(&mut self) {
         let floor = self.history_id_floor;
         for tab in &mut self.tabs {
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 term.screen.lock().reserve_command_ids(floor);
             }
         }
         for tab in self.detached.values_mut() {
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 term.screen.lock().reserve_command_ids(floor);
             }
         }
@@ -1469,13 +1520,13 @@ impl Tty {
         self.session_untracked = true;
         for tab in &mut self.tabs {
             tab.untracked = true;
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 term.screen.lock().set_untracked(true);
             }
         }
         for tab in self.detached.values_mut() {
             tab.untracked = true;
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 term.screen.lock().set_untracked(true);
             }
         }
@@ -1796,7 +1847,7 @@ impl Tty {
         self.settings.max_scrollback = Some(n);
         self.settings.save();
         for tab in self.tabs.iter().chain(self.detached.values()) {
-            for (_, term) in tab.panes.iter() {
+            for term in tab.terms() {
                 term.screen.lock().set_max_scrollback(n);
             }
         }
@@ -1880,7 +1931,7 @@ impl Tty {
     pub fn activate(&mut self, idx: usize) {
         if let Some(tab) = self.tabs.get_mut(idx) {
             self.active = idx;
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 term.activity = false;
             }
         }
@@ -1937,29 +1988,71 @@ impl Tty {
             self.history_id_floor,
             untracked,
         ) {
-            self.split_with(window, dir, term);
+            self.split_with(window, dir, Pane::Term(term));
         }
     }
 
-    /// Place `term` as a new pane split off `window`'s focused pane toward `dir`, and
-    /// focus it. (The spawn-free core of [`split_focused`], so tests can inject a pty-less
-    /// pane.)
-    pub fn split_with(&mut self, window: iced::window::Id, dir: pane_grid::Direction, term: Term) {
+    /// Graduate a metric drill-in into a real pane: split `window`'s focused pane
+    /// toward `dir` and put a live [`Pane::Metric`] there. Unlike a terminal split
+    /// there's no shell to spawn — the metric reads the shared `Metrics`.
+    pub fn promote_metric_to_pane(
+        &mut self,
+        window: iced::window::Id,
+        dir: pane_grid::Direction,
+        kind: crate::settings::MetricKind,
+    ) {
+        self.split_with(window, dir, Pane::Metric(kind));
+    }
+
+    /// Place `content` as a new pane split off `window`'s focused pane toward `dir`,
+    /// and focus it. (The spawn-free core of [`split_focused`], so a metric pane or a
+    /// pty-less test pane can be inserted directly.)
+    pub fn split_with(
+        &mut self,
+        window: iced::window::Id,
+        dir: pane_grid::Direction,
+        content: Pane,
+    ) {
         use pane_grid::{Axis, Direction};
         let axis = match dir {
             Direction::Left | Direction::Right => Axis::Vertical,
             Direction::Up | Direction::Down => Axis::Horizontal,
         };
         if let Some(tab) = self.tab_for_mut(window) {
-            if let Some((new_pane, _split)) = tab.panes.split(axis, tab.focus, term) {
+            if let Some((new_pane, _split)) = tab.panes.split(axis, tab.focus, content) {
                 // `split` always places the newcomer after the target (right/below); for
-                // Left/Up, swap so the new shell lands on the requested side.
+                // Left/Up, swap so the new pane lands on the requested side.
                 if matches!(dir, Direction::Left | Direction::Up) {
                     tab.panes.swap(tab.focus, new_pane);
                 }
                 tab.focus = new_pane;
             }
         }
+    }
+
+    /// Toggle whether `window`'s focused pane fills the whole grid (maximize /
+    /// restore). iced's `pane_grid` tracks a single maximized pane per tab.
+    pub fn toggle_maximize_pane(&mut self, window: iced::window::Id) {
+        if let Some(tab) = self.tab_for_mut(window) {
+            if tab.panes.maximized().is_some() {
+                tab.panes.restore();
+            } else {
+                tab.panes.maximize(tab.focus);
+            }
+        }
+    }
+
+    /// Close a specific pane in `window`'s tab (its own × control), re-pointing
+    /// focus to a survivor. Returns `false` if it was the tab's last pane (the
+    /// caller decides whether to close the tab).
+    pub fn close_pane(&mut self, window: iced::window::Id, pane: pane_grid::Pane) -> bool {
+        if let Some(tab) = self.tab_for_mut(window) {
+            if let Some((_content, sibling)) = tab.panes.close(pane) {
+                tab.focus = sibling;
+                return true;
+            }
+        }
+        false
     }
 
     /// Move focus to the neighbouring pane in `dir` within `window`'s tab (no-op at the
@@ -2057,7 +2150,7 @@ impl Tty {
         let writer = self.history_writer.as_ref();
         let mut clip = None;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 let (signal, requested) = drain_pane(term, writer);
                 if let Some(c) = requested {
                     clip = Some(c);
@@ -2072,7 +2165,7 @@ impl Tty {
             }
         }
         for tab in self.detached.values_mut() {
-            for (_, term) in tab.panes.iter_mut() {
+            for term in tab.terms_mut() {
                 let (_signal, requested) = drain_pane(term, writer);
                 if let Some(c) = requested {
                     clip = Some(c);
@@ -2099,7 +2192,7 @@ impl Tty {
     /// targets the pane under the cursor).
     pub fn write_pane(&mut self, window: iced::window::Id, pane: pane_grid::Pane, bytes: &[u8]) {
         if let Some(tab) = self.tab_for_mut(window) {
-            if let Some(term) = tab.panes.get_mut(pane) {
+            if let Some(term) = tab.panes.get_mut(pane).and_then(Pane::as_term_mut) {
                 if let Some(pty) = term.pty.as_mut() {
                     if let Err(e) = pty.write_bytes(bytes) {
                         tracing::warn!("PTY write failed: {e}");
@@ -2126,7 +2219,7 @@ impl Tty {
         rows: usize,
     ) {
         if let Some(tab) = self.tab_for(window) {
-            if let Some(term) = tab.panes.get(pane) {
+            if let Some(term) = tab.panes.get(pane).and_then(Pane::as_term) {
                 term.screen.lock().resize(cols, rows);
                 if let Some(pty) = term.pty.as_ref() {
                     let _ = pty.resize(cols as u16, rows as u16);
@@ -2317,10 +2410,14 @@ fn drain_pane(term: &mut Term, writer: Option<&history::writer::Writer>) -> (boo
 /// `retain`/`has_live_pane` check). Re-points focus at a survivor if it was reaped.
 fn reap_tab_panes(tab: &mut Tab) {
     loop {
+        // Only terminals reap (a dead shell); metric panes never exit on their own.
         let dead = tab
             .panes
             .iter()
-            .find(|(_, t)| !t.alive.load(Ordering::Relaxed))
+            .find(|(_, p)| {
+                p.as_term()
+                    .is_some_and(|t| !t.alive.load(Ordering::Relaxed))
+            })
             .map(|(p, _)| *p);
         let Some(dead) = dead else { break };
         if tab.panes.close(dead).is_none() {

@@ -238,6 +238,16 @@ pub enum Message {
     FdRowRightClick(String),
     /// Copy a process's executable path (resolved lazily from its pid).
     CopyProcPath(i32),
+    /// Open the "move to pane" direction menu for a metric popover at the pointer.
+    PromotePopoverMenu(crate::settings::MetricKind),
+    /// Graduate a metric drill-in into a real pane, split off the focused pane in
+    /// the given direction (from the popover's "Move to pane" menu).
+    PromoteMetricToPane(crate::settings::MetricKind, pane_grid::Direction),
+    /// Toggle whether the focused pane fills the whole grid (a metric pane's
+    /// maximize/restore control).
+    ToggleMaximizePane(iced::window::Id),
+    /// Close a specific pane by id (a metric pane's × control).
+    CloseMetricPane(iced::window::Id, pane_grid::Pane),
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
     SetClock24h(bool),
     SetClockSeconds(bool),

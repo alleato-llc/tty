@@ -326,6 +326,24 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 return iced::clipboard::write(path);
             }
         }
+        Message::PromotePopoverMenu(kind) => {
+            state.menu = Some((
+                crate::state::MenuKind::PromotePopover { kind },
+                state.pointer,
+            ));
+        }
+        Message::PromoteMetricToPane(kind, dir) => {
+            state.close_menu();
+            // Drop the floating popover(s) — the view lives in the grid now.
+            state.metric_details.clear();
+            if let Some(main) = state.main_window {
+                state.promote_metric_to_pane(main, dir, kind);
+            }
+        }
+        Message::ToggleMaximizePane(win) => state.toggle_maximize_pane(win),
+        Message::CloseMetricPane(win, pane) => {
+            state.close_pane(win, pane);
+        }
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
         Message::SetClockDate(on) => state.set_clock_date(on),
