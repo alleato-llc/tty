@@ -116,7 +116,11 @@ seconds, date), a **Load** cell sparklines the 1-minute load average and drills
 into the 1/5/15-minute triple, and a **Battery** cell shows charge on a gauge
 (colored by level) with the charging state and time estimate in its drill-in, and a
 **Processes** cell shows the busiest process (`↑ Chrome 92%`) and drills into a
-scrollable, click-to-sort table of every process (by CPU, memory, or name).
+scrollable, click-to-sort table of every process (by CPU, absolute memory, or
+name); double- or right-click a row to drill into that one process — a live CPU
+chart (its history kept only while you're looking), its memory and thread count,
+and the scrollable list of its open file descriptors (`‹ Back` or `Esc` returns
+to the list).
 When the window is too narrow to hold every cell the bar sheds them from the
 right rather than wrapping; **scroll over the bar** to page a sliding window
 through the shed cells (chevrons show when there's more off each edge). The graded

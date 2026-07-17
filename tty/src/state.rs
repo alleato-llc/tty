@@ -311,6 +311,10 @@ pub struct Tty {
     /// scroll offset (px). A header click re-sorts; the body scrolls.
     pub proc_sort: (ProcSortColumn, bool),
     pub proc_table_scroll: f32,
+    /// The pid whose per-process detail is open within the Processes drill-in, or
+    /// `None` to show the process list. Double- or right-clicking a row opens one;
+    /// its live sampling lives in [`crate::metrics::Metrics::proc_detail`].
+    pub proc_detail_pid: Option<i32>,
     /// The metric drill-in popovers currently open (a click on a status-bar
     /// sparkline opens one), each with its own layout. Empty when none are open.
     /// In the default one-at-a-time mode this holds 0 or 1; with
@@ -664,6 +668,7 @@ impl Tty {
             status_metric_drop: None,
             proc_sort: (ProcSortColumn::Cpu, true),
             proc_table_scroll: 0.0,
+            proc_detail_pid: None,
         };
         tty.new_tab();
         tty
@@ -1016,6 +1021,20 @@ impl Tty {
     /// Set the Processes table's scroll offset (px), clamped non-negative.
     pub fn set_proc_scroll(&mut self, offset: f32) {
         self.proc_table_scroll = offset.max(0.0);
+    }
+
+    /// Open the per-process detail view for `pid` within the Processes drill-in.
+    /// The live sample is refreshed by the update loop; here we just flag which
+    /// process to show and reset the (now-hidden) table scroll.
+    pub fn open_proc_detail(&mut self, pid: i32) {
+        self.proc_detail_pid = Some(pid);
+    }
+
+    /// Return the Processes drill-in from a per-process detail back to the list,
+    /// dropping the retained per-process CPU history.
+    pub fn close_proc_detail(&mut self) {
+        self.proc_detail_pid = None;
+        self.metrics.proc_detail = None;
     }
 
     /// Leave drag-to-reorder edit mode (Escape or a press on empty bar space).

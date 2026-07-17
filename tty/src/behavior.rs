@@ -101,6 +101,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         status_metric_drop: None,
         proc_sort: (crate::state::ProcSortColumn::Cpu, true),
         proc_table_scroll: 0.0,
+        proc_detail_pid: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -394,6 +395,29 @@ fn proc_sort_toggles_direction_and_switches_column() {
     assert_eq!(tty.proc_table_scroll, 0.0);
     let _ = update(&mut tty, Message::ProcTableScroll(40.0));
     assert_eq!(tty.proc_table_scroll, 40.0);
+}
+
+#[test]
+fn proc_detail_open_and_close_routing() {
+    use crate::settings::MetricKind;
+    let mut tty = headless(1);
+    assert_eq!(tty.proc_detail_pid, None);
+
+    // Opening a process records its pid (the live sample is refreshed by the
+    // metrics tick; `open_proc_detail` just flags which process to show).
+    tty.open_proc_detail(4321);
+    assert_eq!(tty.proc_detail_pid, Some(4321));
+
+    // "‹ Back" / Escape returns to the process list.
+    let _ = update(&mut tty, Message::CloseProcDetail);
+    assert_eq!(tty.proc_detail_pid, None);
+    assert!(tty.metrics.proc_detail.is_none());
+
+    // Closing the Processes popover entirely also drops any open detail.
+    tty.metric_details = vec![crate::state::MetricPopover::new(MetricKind::Procs)];
+    tty.open_proc_detail(999);
+    let _ = update(&mut tty, Message::CloseMetricPopover(0));
+    assert_eq!(tty.proc_detail_pid, None);
 }
 
 #[test]

@@ -117,6 +117,7 @@ fn populated() -> Tty {
         status_metric_drop: None,
         proc_sort: (crate::state::ProcSortColumn::Cpu, true),
         proc_table_scroll: 0.0,
+        proc_detail_pid: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -1196,19 +1197,22 @@ fn status_bar_scrolled_view() {
 
 /// Seed a deterministic process list for the Processes snapshots.
 fn seed_processes(tty: &mut Tty) {
-    let p = |pid, name: &str, cpu: f32, mem: f32| crate::metrics::ProcInfo {
+    let mb = 1024 * 1024;
+    let p = |pid, name: &str, cpu: f32, mem: u64| crate::metrics::ProcInfo {
         pid,
         name: name.to_string(),
         cpu_percent: cpu,
-        mem_percent: mem,
+        memory_bytes: mem,
     };
     tty.metrics.processes = vec![
-        p(412, "Google Chrome", 92.0, 31.0),
-        p(88, "rustc", 45.0, 12.0),
-        p(1, "Terminal", 4.0, 30.0),
-        p(233, "zsh", 1.0, 1.0),
-        p(700, "Spotify", 8.0, 9.0),
-        p(9, "kernel_task", 12.0, 5.0),
+        p(412, "Google Chrome", 92.0, 4900 * mb),
+        p(88, "rustc", 45.0, 1900 * mb),
+        // A long name, to exercise the fill-column truncation.
+        p(310, "com.apple.WebKit.WebContent", 6.0, 820 * mb),
+        p(1, "Terminal", 4.0, 240 * mb),
+        p(233, "zsh", 1.0, 12 * mb),
+        p(700, "Spotify", 8.0, 1400 * mb),
+        p(9, "kernel_task", 12.0, 760 * mb),
     ];
 }
 
@@ -1255,6 +1259,61 @@ fn metric_detail_procs_view() {
     assert!(
         matches,
         "snapshot `tty-metric-detail-procs` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_proc_one_view() {
+    // Drilling into one process: a "‹ Back" control, the live CPU chart, the
+    // memory / thread readout, and the scrollable list of open file descriptors.
+    use prexp_core::models::{OpenResource, ResourceKind};
+    let mb = 1024 * 1024;
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Procs,
+    )];
+    tty.proc_detail_pid = Some(412);
+    let fd = |descriptor, kind, path: Option<&str>| OpenResource {
+        descriptor,
+        kind,
+        path: path.map(str::to_string),
+    };
+    tty.metrics.proc_detail = Some(crate::metrics::ProcDetail::for_test(
+        412,
+        "Google Chrome",
+        34,
+        4900 * mb,
+        [8.0, 14.0, 40.0, 62.0, 55.0, 71.0, 48.0, 33.0, 44.0, 58.0],
+        vec![
+            fd(0, ResourceKind::Device, Some("/dev/null")),
+            fd(
+                3,
+                ResourceKind::File,
+                Some("/Applications/Google Chrome.app"),
+            ),
+            fd(7, ResourceKind::Socket, Some("tcp4 → 142.250.72.174:443")),
+            fd(9, ResourceKind::Pipe, None),
+            fd(
+                12,
+                ResourceKind::File,
+                Some("/Users/me/Library/Caches/Chrome/index"),
+            ),
+        ],
+    ));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-proc-one.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-proc-one` changed — delete its PNG to re-baseline"
     );
 }
 

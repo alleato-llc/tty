@@ -302,9 +302,12 @@ source serves fdtop; tty consumes it in `metrics.rs`.
 - [x] **Processes** — a top-processes widget. The cell shows the busiest process
   (`↑ Chrome 92%`); the drill-in is a scrollable, re-sortable `rime` table of every
   process (click the PROCESS / CPU / MEM header to sort). Per-process CPU% is folded
-  from `cpu_time_ns` deltas, memory% from `phys` / total; read via `prexp-core`'s
-  light `process_summaries()` (no fd enumeration), sampled only while the cell is
-  shown. *Shipped.*
+  from `cpu_time_ns` deltas, memory shown as an absolute footprint (`phys` bytes);
+  read via `prexp-core`'s light `process_summaries()` (no fd enumeration), sampled
+  only while the cell is shown. Long names truncate to the column. Double- or
+  right-clicking a row drills into that one process (`snapshot_pid`, which *does*
+  enumerate fds): a live CPU chart kept only while it's open, its memory / thread
+  count, and the scrollable list of its open file descriptors. *Shipped.*
 - [x] **Battery** — charge %, charging state, time remaining. A bounded 0..100%
   gauge (fixed-scale sparkline like CPU/memory, colored by charge — low = alarm);
   the drill-in adds the charging state and a time-to-full/empty estimate. Source:

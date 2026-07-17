@@ -304,6 +304,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetStatusBarEditHold(delta) => state.step_status_bar_edit_hold(delta),
         Message::SetProcSort(col) => state.set_proc_sort(col),
         Message::ProcTableScroll(offset) => state.set_proc_scroll(offset),
+        Message::OpenProcDetail(pid) => {
+            state.open_proc_detail(pid);
+            // Sample once now so the detail has data before the next tick.
+            state.metrics.sample_proc_detail(pid);
+        }
+        Message::CloseProcDetail => state.close_proc_detail(),
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
         Message::SetClockDate(on) => state.set_clock_date(on),
@@ -328,6 +334,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 .any(|m| m.kind == crate::settings::MetricKind::Procs)
             {
                 state.metrics.sample_processes();
+                // Refresh the open per-process detail (fds + its live chart).
+                if let Some(pid) = state.proc_detail_pid {
+                    state.metrics.sample_proc_detail(pid);
+                }
             }
         }
         Message::CloseMetricDetail => {
@@ -335,6 +345,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.metric_details.clear();
             state.metric_detail_resize = None;
             state.metric_detail_move_drag = None;
+            state.close_proc_detail();
         }
         Message::CloseMetricPopover(i) => {
             if i < state.metric_details.len() {
@@ -342,6 +353,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 // Indices shift on remove; cancel any in-flight drag to be safe.
                 state.metric_detail_resize = None;
                 state.metric_detail_move_drag = None;
+                state.close_proc_detail();
             }
         }
         Message::ToggleMetricDetailExpanded(i) => {
@@ -490,6 +502,12 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
         if state.status_bar_edit {
             state.exit_status_bar_edit();
+            return iced::Task::none();
+        }
+        if state.proc_detail_pid.is_some() {
+            // A per-process detail is open: Escape steps back to the process list
+            // (the popover itself stays open), matching the "‹ Back" control.
+            state.close_proc_detail();
             return iced::Task::none();
         }
         if !state.metric_details.is_empty() {

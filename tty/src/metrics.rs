@@ -113,6 +113,9 @@ pub struct Metrics {
     /// The current per-process list (unsorted; the view sorts per the active
     /// column). Empty until sampled.
     pub processes: Vec<ProcInfo>,
+    /// The live detail for the process whose drill-in is open, or `None`. Its CPU
+    /// history is fresh per open (see [`ProcDetail`]); sampled only while open.
+    pub proc_detail: Option<ProcDetail>,
 }
 
 /// One process's live resource use, for the Processes widget.
@@ -123,8 +126,29 @@ pub struct ProcInfo {
     /// CPU% over the last interval (can exceed 100 for a multi-threaded process,
     /// like `top`).
     pub cpu_percent: f32,
-    /// Physical memory as a percentage of total RAM.
-    pub mem_percent: f32,
+    /// Physical footprint (private memory) in bytes.
+    pub memory_bytes: u64,
+}
+
+/// The live detail for a single process, driving the Processes drill-in's
+/// per-process view. Populated only while one process's detail is open; the CPU
+/// history starts fresh each time a process is opened (we deliberately do not
+/// retain history for every process, only the one being looked at). Refreshed
+/// each sample via `prexp-core`'s `snapshot_pid` (which enumerates fds).
+#[derive(Debug, Clone)]
+pub struct ProcDetail {
+    pub pid: i32,
+    pub name: String,
+    /// False when the OS denied fd access (pid/name/cpu are still valid).
+    pub accessible: bool,
+    pub thread_count: i32,
+    pub memory_bytes: u64,
+    /// CPU% since this process's detail was opened (oldest first), for the chart.
+    pub cpu_history: std::collections::VecDeque<f32>,
+    /// The process's open file descriptors, refreshed each sample.
+    pub resources: Vec<prexp_core::models::OpenResource>,
+    prev_cpu_ns: u64,
+    prev_instant: std::time::Instant,
 }
 
 impl Metrics {
@@ -300,7 +324,6 @@ impl Metrics {
             .prev_proc_instant
             .map(|p| now.duration_since(p).as_nanos())
             .filter(|n| *n > 0);
-        let mem_total = self.latest.as_ref().map_or(0, |s| s.mem_total);
 
         let mut next_prev = std::collections::HashMap::with_capacity(summaries.len());
         let mut procs = Vec::with_capacity(summaries.len());
@@ -311,22 +334,103 @@ impl Metrics {
                 }
                 _ => 0.0,
             };
-            let mem_percent = if mem_total > 0 {
-                (s.memory_phys as f64 / mem_total as f64 * 100.0) as f32
-            } else {
-                0.0
-            };
             next_prev.insert(s.pid, s.cpu_time_ns);
             procs.push(ProcInfo {
                 pid: s.pid,
                 name: s.name.clone(),
                 cpu_percent,
-                mem_percent,
+                memory_bytes: s.memory_phys,
             });
         }
         self.prev_proc_cpu = next_prev;
         self.prev_proc_instant = Some(now);
         self.processes = procs;
+    }
+
+    /// Refresh the open process's detail (the Processes drill-in's per-process
+    /// view). Reads one process fully via `snapshot_pid` (which enumerates fds),
+    /// folds a CPU% from the cumulative-CPU-time delta, and appends it to a
+    /// history that is *fresh for this pid* — opening a different process starts a
+    /// new history rather than retaining every process's series. If the pid is
+    /// gone (it exited), the detail is dropped. Call only while a detail is open.
+    pub fn sample_proc_detail(&mut self, pid: i32) {
+        let source = NativeSource::new();
+        let snap = match source.snapshot_pid(pid) {
+            Ok(s) => s,
+            Err(_) => {
+                // The process likely exited; drop the detail so the view returns
+                // to the list.
+                self.proc_detail = None;
+                return;
+            }
+        };
+        let now = std::time::Instant::now();
+        let cpu_ns = snap.activity.cpu_time_ns;
+        match self.proc_detail.as_mut() {
+            // Same process still open: fold a CPU% from the delta and append it.
+            Some(d) if d.pid == pid => {
+                let elapsed = now.duration_since(d.prev_instant).as_nanos();
+                if elapsed > 0 {
+                    let cpu = (cpu_ns.saturating_sub(d.prev_cpu_ns) as f64 / elapsed as f64 * 100.0)
+                        as f32;
+                    d.cpu_history.push_back(cpu);
+                    while d.cpu_history.len() > PROC_DETAIL_HISTORY {
+                        d.cpu_history.pop_front();
+                    }
+                }
+                d.prev_cpu_ns = cpu_ns;
+                d.prev_instant = now;
+                d.name = snap.name;
+                d.accessible = snap.accessible;
+                d.thread_count = snap.activity.thread_count;
+                d.memory_bytes = snap.memory.phys;
+                d.resources = snap.resources;
+            }
+            // Newly opened (or switched to a different pid): start a fresh history.
+            _ => {
+                self.proc_detail = Some(ProcDetail {
+                    pid,
+                    name: snap.name,
+                    accessible: snap.accessible,
+                    thread_count: snap.activity.thread_count,
+                    memory_bytes: snap.memory.phys,
+                    cpu_history: std::collections::VecDeque::new(),
+                    resources: snap.resources,
+                    prev_cpu_ns: cpu_ns,
+                    prev_instant: now,
+                });
+            }
+        }
+    }
+}
+
+/// How many CPU% samples the process-detail chart retains (a few minutes at the
+/// usual sample interval).
+const PROC_DETAIL_HISTORY: usize = 180;
+
+#[cfg(test)]
+impl ProcDetail {
+    /// Build a detail with fixed contents, for snapshot/behavior fixtures (the
+    /// live path reads the OS via `snapshot_pid`).
+    pub(crate) fn for_test(
+        pid: i32,
+        name: &str,
+        thread_count: i32,
+        memory_bytes: u64,
+        cpu_history: impl IntoIterator<Item = f32>,
+        resources: Vec<prexp_core::models::OpenResource>,
+    ) -> Self {
+        Self {
+            pid,
+            name: name.to_string(),
+            accessible: true,
+            thread_count,
+            memory_bytes,
+            cpu_history: cpu_history.into_iter().collect(),
+            resources,
+            prev_cpu_ns: 0,
+            prev_instant: std::time::Instant::now(),
+        }
     }
 }
 
@@ -612,7 +716,7 @@ pub fn format_rate(bps: f32) -> String {
 
 /// Compact binary byte size for the status bar: `512M`, `12.1G`. One decimal
 /// place only where it reads cleanly (GiB/TiB), whole numbers below.
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const K: f64 = 1024.0;
     let b = bytes as f64;
     if b < K * K {

@@ -227,6 +227,11 @@ pub enum Message {
     SetProcSort(crate::state::ProcSortColumn),
     /// Scroll the Processes drill-in table to this pixel offset.
     ProcTableScroll(f32),
+    /// Open the per-process detail view (fds + a live chart) for this pid — a
+    /// double-click or right-click on a process row.
+    OpenProcDetail(i32),
+    /// Return the Processes drill-in from a per-process detail back to the list.
+    CloseProcDetail,
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
     SetClock24h(bool),
     SetClockSeconds(bool),

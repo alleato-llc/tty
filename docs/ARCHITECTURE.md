@@ -181,12 +181,19 @@ Thin glue, mirroring `fed`'s module shape:
   (`system_battery()` — IOKit power sources / `/sys/class/power_supply`, hidden with no
   battery). The `Clock` cell is the live wall time (its own 1s tick, no sampler).
   For the **Processes** cell, `sample_processes()` folds a per-pid CPU% from
-  `cpu_time_ns` deltas and a memory% from `phys`/total over `prexp-core`'s light
-  `process_summaries()` (every pid, *no* fd enumeration); it runs only while a
-  Processes cell is shown, since it walks the whole table. The cell shows the
-  busiest process; `procs_body` renders the drill-in — a clickable header (re-sort
-  by column) over a virtualized, scrollable `rime` `table` (`proc_sort` /
-  `proc_table_scroll`).
+  `cpu_time_ns` deltas and reads each process's physical footprint (bytes) over
+  `prexp-core`'s light `process_summaries()` (every pid, *no* fd enumeration); it
+  runs only while a Processes cell is shown, since it walks the whole table. The
+  cell shows the busiest process; `procs_body` renders the drill-in — a clickable
+  header (re-sort by CPU, absolute memory, or name) over a virtualized, scrollable
+  `rime` `table` (`proc_sort` / `proc_table_scroll`), names truncated to the fill
+  column. Double- or right-clicking a row opens `proc_detail_body` for that one
+  pid: `sample_proc_detail()` reads it fully via `snapshot_pid` (which *does*
+  enumerate fds) each tick, folding a CPU% history that is kept only while that
+  process is open (`Metrics::proc_detail`, reset on each open — we never retain a
+  series per process). It shows the live CPU chart, memory / thread count, and the
+  scrollable fd list; `proc_detail_pid` gates the sampling and the view, and
+  `Esc` / "‹ Back" clears it.
   Network / disk have macOS samplers only for now (via `prexp-ffi` — `sysctl
   NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other platforms those reads error
   and are dropped, so the metric simply shows no rate. A failed CPU/memory read is
