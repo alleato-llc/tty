@@ -249,11 +249,13 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     }
 
     // Status bar: shell name on the left, machine stats + grid/tab/font on the
-    // right. With auto-hide on it floats over the bottom edge (revealed when
-    // the pointer nears it) instead of taking a row in the column, so showing
-    // or hiding it never reflows the pane grid underneath.
+    // right. Off entirely gives the terminal the full height. With auto-hide on
+    // it floats over the bottom edge (revealed when the pointer nears it) instead
+    // of taking a row in the column, so showing or hiding it never reflows the
+    // pane grid underneath.
+    let disabled = state.settings.status_bar_disabled();
     let autohide = state.settings.status_bar_autohide();
-    if !autohide {
+    if !disabled && !autohide {
         root = root.push(status_bar_view(state));
     }
 
@@ -262,7 +264,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
         .height(Length::Fill)
         .style(move |_| container::background(bg));
 
-    let chrome: Element<'_, Message> = if autohide && state.status_bar_revealed() {
+    let chrome: Element<'_, Message> = if !disabled && autohide && state.status_bar_revealed() {
         iced::widget::stack![
             chrome,
             container(status_bar_view(state))
@@ -1573,24 +1575,36 @@ fn appearance_tabs_pane(state: &Tty) -> Element<'_, Message> {
     .into()
 }
 
-/// Appearance → Status bar: auto-hide, popover pinning, and the machine-stats
-/// cell editor.
+/// Appearance → Status bar: off switch, auto-hide, popover pinning, and the
+/// machine-stats cell editor. When the bar is off the rest is moot, so only the
+/// off switch (and a note) shows.
 fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
-    column![
-        toggle(
-            "Auto-hide until pointer nears the bottom",
-            state.settings.status_bar_autohide(),
-            Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
-        ),
-        toggle(
-            "Keep metric popovers open (pin several; click away won't close)",
-            state.settings.status_bar_metrics_pinned(),
-            Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
-        ),
-        status_bar_metrics_editor(state),
-    ]
-    .spacing(14)
-    .into()
+    let disabled = state.settings.status_bar_disabled();
+    let mut col = column![toggle(
+        "Disable status bar",
+        disabled,
+        Message::SetStatusBarDisabled(!disabled),
+    )]
+    .spacing(14);
+    if disabled {
+        col = col.push(caption(
+            "The status bar is off. Turn it back on to configure auto-hide and machine-stat cells.",
+        ));
+    } else {
+        col = col
+            .push(toggle(
+                "Auto-hide until pointer nears the bottom",
+                state.settings.status_bar_autohide(),
+                Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
+            ))
+            .push(toggle(
+                "Keep metric popovers open (pin several; click away won't close)",
+                state.settings.status_bar_metrics_pinned(),
+                Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
+            ))
+            .push(status_bar_metrics_editor(state));
+    }
+    col.into()
 }
 
 /// Appearance → Terminal: scrollback depth and per-command output caps.

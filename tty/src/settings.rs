@@ -223,9 +223,15 @@ pub struct Settings {
     /// Hide the bottom status bar until the pointer nears the bottom edge
     /// (`true`/absent, the default), or keep it always visible (`false`). When
     /// on, the bar floats over the bottom edge on near-hover instead of taking
-    /// a row, so revealing it never reflows the terminal grid.
+    /// a row, so revealing it never reflows the terminal grid. Ignored when
+    /// [`Self::status_bar_disabled`] is on (the bar never shows at all).
     #[serde(default)]
     pub status_bar_autohide: Option<bool>,
+    /// Turn the status bar off entirely (`true`): it never shows, not even on
+    /// near-hover, and gives the terminal the full height. Absent/`false` (the
+    /// default) keeps it, governed by [`Self::status_bar_autohide`].
+    #[serde(default)]
+    pub status_bar_disabled: Option<bool>,
     /// The ordered list of live machine-stat cells shown in the status bar —
     /// each an entry `{ metric, style }`. The list order is the display order;
     /// an empty (absent) list means the bar shows no stats, the default. When
@@ -599,6 +605,11 @@ impl Settings {
     /// edge (default `true`).
     pub fn status_bar_autohide(&self) -> bool {
         self.status_bar_autohide.unwrap_or(true)
+    }
+
+    /// Whether the status bar is turned off entirely (default `false`).
+    pub fn status_bar_disabled(&self) -> bool {
+        self.status_bar_disabled.unwrap_or(false)
     }
 
     /// Whether metric popovers stay open on a click away so several can be

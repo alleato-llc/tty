@@ -274,6 +274,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetUnfocusedOpacity(o) => state.set_unfocused_opacity(o),
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
+        Message::SetStatusBarDisabled(on) => state.set_status_bar_disabled(on),
         Message::SetStatusBarMetricsPinned(on) => state.set_status_bar_metrics_pinned(on),
         Message::StatusBarMetricAdd(metric) => state.add_status_bar_metric(&metric),
         Message::StatusBarMetricRemove(idx) => state.remove_status_bar_metric(idx),

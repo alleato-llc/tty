@@ -1165,6 +1165,33 @@ fn status_bar_autohidden_view() {
 }
 
 #[test]
+fn status_bar_disabled_view() {
+    // The status bar turned off entirely: the pane grid takes the full height and
+    // the bar never shows — not even with the pointer down in the reveal zone
+    // (unlike auto-hide, which would float it in there).
+    let mut tty = populated();
+    tty.settings.status_bar_disabled = Some(true);
+    tty.window_height = 768.0;
+    tty.pointer = iced::Point::new(300.0, 760.0);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(1024.0, 768.0),
+        main_chrome(&tty),
+    );
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-disabled.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-disabled` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn status_bar_revealed_view() {
     // Auto-hide on, pointer down within the reveal zone: the status bar floats
     // back in over the bottom edge.

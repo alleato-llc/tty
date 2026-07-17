@@ -785,6 +785,16 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Turn the status bar off entirely, or back on (persisted). Turning it off
+    /// also closes any open metric popovers (their sparklines are gone).
+    pub fn set_status_bar_disabled(&mut self, on: bool) {
+        self.settings.status_bar_disabled = Some(on);
+        if on {
+            self.metric_details.clear();
+        }
+        self.settings.save();
+    }
+
     /// Toggle whether metric popovers stay pinned on a click away (persisted).
     /// Turning it off drops back to one-at-a-time: any open popovers past the
     /// first are closed so the view can't keep a stack the mode no longer allows.

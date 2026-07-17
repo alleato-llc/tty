@@ -275,6 +275,25 @@ fn pinned_mode_keeps_multiple_popovers_until_closed() {
 }
 
 #[test]
+fn disabling_status_bar_closes_popovers() {
+    let mut tty = headless(1);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Cpu,
+    )];
+    // Turning the bar off removes it and closes any open popovers (their
+    // sparklines are gone).
+    let _ = update(&mut tty, Message::SetStatusBarDisabled(true));
+    assert!(tty.settings.status_bar_disabled());
+    assert!(
+        tty.metric_details.is_empty(),
+        "popovers close when the bar goes off"
+    );
+    // And back on is a plain toggle.
+    let _ = update(&mut tty, Message::SetStatusBarDisabled(false));
+    assert!(!tty.settings.status_bar_disabled());
+}
+
+#[test]
 fn cmd_digit_activates_that_tab() {
     let mut tty = headless(3);
     let _ = update(&mut tty, Message::Key(Key::Character("3".into()), cmd()));

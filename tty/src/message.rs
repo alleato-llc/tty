@@ -200,6 +200,8 @@ pub enum Message {
     SetTabHighlight(bool),
     /// Toggle the auto-hiding status bar (reveals on near-hover at the bottom).
     SetStatusBarAutohide(bool),
+    /// Turn the status bar off entirely (never shows), or back on.
+    SetStatusBarDisabled(bool),
     /// Toggle pinning metric popovers open on a click away (several at once).
     SetStatusBarMetricsPinned(bool),
     /// Append a machine-stat cell to the status bar's ordered list, by metric
