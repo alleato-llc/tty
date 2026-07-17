@@ -12,13 +12,12 @@ use crate::state::{Term, Tty};
 
 mod metrics;
 mod settings;
+mod status_bar;
 mod util;
-use metrics::{
-    metric_pane_content, metric_popover_card, place_metric_popover, status_bar_metrics_editor,
-    status_bar_view,
-};
-pub use metrics::status_bar_scroll_max;
+use metrics::{metric_pane_content, metric_popover_card, place_metric_popover};
 use settings::{passphrase_prompt_view, settings_body};
+use status_bar::{status_bar_metrics_editor, status_bar_view};
+pub use status_bar::status_bar_scroll_max;
 use util::*;
 
 /// The `⌘F` matches in `term`'s buffer for `query` (empty when there's no active
