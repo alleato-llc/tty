@@ -368,6 +368,16 @@ pub struct Settings {
     /// it.
     #[serde(default)]
     pub status_bar_metrics_pinned: Option<bool>,
+    /// Allow "graduating" a metric drill-in into a real split pane (the popover's
+    /// ⊞ control). On (`true`/absent) by default; `false` hides the control for
+    /// users who'd rather keep metrics as floating popovers only.
+    #[serde(default)]
+    pub graduate_metrics: Option<bool>,
+    /// Outline the focused pane with an accent border when a tab has more than one
+    /// pane (`true`/absent, the default), so it's clear where typing goes. `false`
+    /// keeps every pane on a neutral hairline.
+    #[serde(default)]
+    pub highlight_focused_pane: Option<bool>,
     /// Deprecated: the old on/off machine-stats toggle, replaced by the ordered
     /// [`Self::status_bar_metrics`] list. Read only to migrate an existing
     /// `true` into `[cpu, mem]` on load (see [`Self::load`]); never written back.
@@ -766,6 +776,18 @@ impl Settings {
     /// pinned at once (default `false`, the one-at-a-time mode).
     pub fn status_bar_metrics_pinned(&self) -> bool {
         self.status_bar_metrics_pinned.unwrap_or(false)
+    }
+
+    /// Whether the popover ⊞ control (graduate a drill-in into a split pane) is
+    /// offered (default `true`).
+    pub fn graduate_metrics(&self) -> bool {
+        self.graduate_metrics.unwrap_or(true)
+    }
+
+    /// Whether the focused pane gets an accent border in a multi-pane tab
+    /// (default `true`).
+    pub fn highlight_focused_pane(&self) -> bool {
+        self.highlight_focused_pane.unwrap_or(true)
     }
 
     /// The configured status-bar metrics resolved to typed metric + style, in

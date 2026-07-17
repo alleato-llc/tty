@@ -202,6 +202,10 @@ pub enum Message {
     SetWindowAlwaysOnTop(bool),
     /// Toggle inking the active tab with the accent color.
     SetTabHighlight(bool),
+    /// Toggle whether a metric drill-in can graduate into a split pane.
+    SetGraduateMetrics(bool),
+    /// Toggle the accent border on the focused pane (multi-pane tabs).
+    SetHighlightFocusedPane(bool),
     /// Toggle the auto-hiding status bar (reveals on near-hover at the bottom).
     SetStatusBarAutohide(bool),
     /// Turn the status bar off entirely (never shows), or back on.

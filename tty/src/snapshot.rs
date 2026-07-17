@@ -600,7 +600,7 @@ fn tty_in_archive_browser() -> (Tty, Vec<cathode::history::PersistedCommandEntry
     let tty = Tty {
         tabs: vec![Tab::new(painted_term("zsh", 56, 6, b"$ "))],
         show_settings: true,
-        settings_section: 3,
+        settings_section: 4,
         show_settings_history: true,
         settings_history: entries.clone(),
         settings_history_cursor: Some(cursor),
@@ -685,9 +685,9 @@ fn settings_appearance_theme_pane_view() {
 
 #[test]
 fn settings_appearance_statusbar_pane_view() {
-    // The same section switched to the "Status bar" sub-tab: only that pane's
-    // controls (auto-hide, pin popovers, the metrics editor) show, proving the
-    // sub-tabs segment the section.
+    // The Appearance section switched to the "Status bar" sub-tab: just the bar's
+    // own chrome (disable + auto-hide). The machine-stat cells live in the Metrics
+    // section now (see `metrics_section_view`).
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
     tty.show_settings = true;
@@ -708,9 +708,35 @@ fn settings_appearance_statusbar_pane_view() {
 }
 
 #[test]
+fn metrics_section_view() {
+    // The new top-level Metrics section (above History): pin-popovers, the
+    // graduate-into-a-pane toggle, reorder hold, and the machine-stat cell editor.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics =
+        vec![metric("cpu", "sparkline"), metric("procs", "sparkline")];
+    // Hide the live bar so only the deterministic settings panel renders.
+    tty.settings.status_bar_autohide = Some(true);
+    tty.pointer = iced::Point::new(300.0, 40.0);
+    tty.show_settings = true;
+    tty.settings_section = 3;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-metrics.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-metrics` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn settings_appearance_clock_format_view() {
-    // With a clock cell configured, the Status bar pane grows a "Clock format"
-    // section (24-hour / seconds / date). Snapshots the settings, not the live
+    // With a clock cell configured, the Metrics section grows a "Clock format"
+    // block (24-hour / seconds / date). Snapshots the settings, not the live
     // time, so it stays deterministic.
     let mut tty = populated();
     tty.settings.status_bar_metrics = vec![metric("clock", "sparkline")];
@@ -720,8 +746,7 @@ fn settings_appearance_clock_format_view() {
     tty.settings.status_bar_autohide = Some(true);
     tty.pointer = iced::Point::new(300.0, 40.0);
     tty.show_settings = true;
-    tty.settings_section = 0;
-    tty.appearance_tab = 2;
+    tty.settings_section = 3;
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -1728,7 +1753,7 @@ fn enable_history_dialog_with_fanout_knob_view() {
     use crate::state::{PassphrasePrompt, PassphrasePromptKind};
     let mut tty = populated();
     tty.show_settings = true;
-    tty.settings_section = 3;
+    tty.settings_section = 4;
     tty.settings.encrypted_history_enabled = Some(false);
     tty.settings.history_key_source = Some("passphrase".to_string());
     tty.settings.history_fanout = Some("auto".to_string());

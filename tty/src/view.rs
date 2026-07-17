@@ -163,6 +163,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
+            let highlight = state.settings.highlight_focused_pane();
             pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
                 let term = match content {
@@ -170,8 +171,8 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     // A graduated metric view (CPU chart, process table, …).
                     crate::state::Pane::Metric(kind) => {
                         return metric_pane_content(
-                            state, *kind, win, pane, is_focused, maximized, multi, accent,
-                            hairline, bg,
+                            state, *kind, win, pane, is_focused, maximized, multi, highlight,
+                            accent, hairline, bg,
                         );
                     }
                 };
@@ -193,8 +194,12 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 .find(search.clone())
                 .scroll_to(scroll_to);
                 // When split, an accent border marks the focused pane so it's clear where
-                // typing goes; the others get a hairline.
-                let border_color = if is_focused { accent } else { hairline };
+                // typing goes (unless the highlight is off); the others get a hairline.
+                let border_color = if is_focused && highlight {
+                    accent
+                } else {
+                    hairline
+                };
                 let bordered = container(term_widget).padding(6).style(move |_| {
                     let border = if multi {
                         Border {
@@ -315,7 +320,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     let mut base: Element<'_, Message> = if state.show_settings {
         rime::widgets::settings(
             chrome,
-            &["Appearance", "Palette", "Keys", "History"],
+            &["Appearance", "Palette", "Keys", "Metrics", "History"],
             state.settings_section,
             Message::SettingsSection,
             settings_body(state),
@@ -555,6 +560,7 @@ fn detached_view<'a>(
     let font = state.font;
     let size = state.font_size;
     let multi = tab.panes.len() > 1;
+    let highlight = state.settings.highlight_focused_pane();
 
     let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
@@ -562,7 +568,8 @@ fn detached_view<'a>(
             crate::state::Pane::Term(term) => term,
             crate::state::Pane::Metric(kind) => {
                 return metric_pane_content(
-                    state, *kind, window, pane, is_focused, maximized, multi, accent, hairline, bg,
+                    state, *kind, window, pane, is_focused, maximized, multi, highlight, accent,
+                    hairline, bg,
                 );
             }
         };
@@ -579,7 +586,11 @@ fn detached_view<'a>(
             Message::OpenLink,
         )
         .find(None);
-        let border_color = if is_focused { accent } else { hairline };
+        let border_color = if is_focused && highlight {
+            accent
+        } else {
+            hairline
+        };
         let bordered = container(term_widget).padding(6).style(move |_| {
             let border = if multi {
                 Border {
@@ -955,7 +966,8 @@ fn settings_body(state: &Tty) -> Element<'_, Message> {
     match state.settings_section {
         1 => palette_section(state),
         2 => keys_section(),
-        3 => history_section(state),
+        3 => metrics_section(state),
+        4 => history_section(state),
         _ => appearance_section(state),
     }
 }
@@ -1619,18 +1631,31 @@ fn appearance_theme_pane(state: &Tty) -> Element<'_, Message> {
 /// Appearance → Tabs: how loud the active tab reads. Off swaps the accent ink for
 /// a subtler normal-ink emphasis (it still beats the muted inactive tabs).
 fn appearance_tabs_pane(state: &Tty) -> Element<'_, Message> {
-    column![toggle(
-        "Highlight active tab",
-        state.settings.tab_highlight(),
-        Message::SetTabHighlight(!state.settings.tab_highlight()),
-    )]
+    column![
+        toggle(
+            "Highlight active tab",
+            state.settings.tab_highlight(),
+            Message::SetTabHighlight(!state.settings.tab_highlight()),
+        ),
+        tooltip(
+            toggle(
+                "Highlight the focused pane",
+                state.settings.highlight_focused_pane(),
+                Message::SetHighlightFocusedPane(!state.settings.highlight_focused_pane()),
+            ),
+            "In a tab that's split into more than one pane, outline the focused \
+             pane with an accent border so it's clear where typing goes. Off keeps \
+             every pane on a neutral hairline.",
+            TooltipPosition::Top,
+        ),
+    ]
     .spacing(14)
     .into()
 }
 
-/// Appearance → Status bar: off switch, auto-hide, popover pinning, and the
-/// machine-stats cell editor. When the bar is off the rest is moot, so only the
-/// off switch (and a note) shows.
+/// Appearance → Status bar: the bar's own chrome (off switch + auto-hide). The
+/// machine-stat cells and everything about their drill-ins live in the separate
+/// **Metrics** section.
 fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
     let disabled = state.settings.status_bar_disabled();
     let mut col = column![toggle(
@@ -1641,53 +1666,77 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
     .spacing(14);
     if disabled {
         col = col.push(caption(
-            "The status bar is off. Turn it back on to configure auto-hide and machine-stat cells.",
+            "The status bar is off. Turn it back on to configure auto-hide; machine-stat cells are in the Metrics section.",
         ));
     } else {
-        col = col
-            .push(toggle(
-                "Auto-hide until pointer nears the bottom",
-                state.settings.status_bar_autohide(),
-                Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
-            ))
-            .push(toggle(
-                "Keep metric popovers open (pin several; click away won't close)",
-                state.settings.status_bar_metrics_pinned(),
-                Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
-            ))
-            .push(tooltip(
-                stepper(
-                    "Reorder hold",
-                    format!("{:.1}s", state.settings.status_bar_edit_hold_secs()),
-                    Message::SetStatusBarEditHold(-0.5),
-                    Message::SetStatusBarEditHold(0.5),
-                ),
-                "How long to press and hold a metric before it enters \
-                 drag-to-reorder edit mode — the outline appears only then, never \
-                 on a quick click (which opens the drill-in). Scroll over the bar \
-                 to page through metrics that don't fit; Esc leaves edit mode.",
-                TooltipPosition::Top,
-            ))
-            .push(status_bar_metrics_editor(state));
-        // Threshold controls, only when a graded (CPU/mem/battery) cell is set.
-        if state
-            .settings
-            .status_bar_metrics
-            .iter()
-            .filter_map(|c| crate::settings::MetricKind::from_setting_str(&c.metric))
-            .any(|k| k.is_graded())
-        {
-            col = col.push(thresholds_editor(state));
-        }
-        // Clock format options, only when a clock cell is configured.
-        if state
-            .settings
-            .status_bar_metrics()
-            .iter()
-            .any(|m| m.kind == crate::settings::MetricKind::Clock)
-        {
-            col = col.push(clock_format_editor(state));
-        }
+        col = col.push(toggle(
+            "Auto-hide until pointer nears the bottom",
+            state.settings.status_bar_autohide(),
+            Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
+        ));
+    }
+    col.into()
+}
+
+/// The **Metrics** settings section: the machine-stat cell editor plus everything
+/// about the drill-ins — pin popovers, graduate-into-a-pane, the reorder hold,
+/// per-cell alert thresholds, and clock format.
+fn metrics_section(state: &Tty) -> Element<'_, Message> {
+    let mut col = column![section("Metrics")].spacing(14);
+    if state.settings.status_bar_disabled() {
+        col = col.push(caption(
+            "The status bar is off (Appearance → Status bar). Cells only show once it's back on.",
+        ));
+    }
+    col = col
+        .push(toggle(
+            "Keep metric popovers open (pin several; click away won't close)",
+            state.settings.status_bar_metrics_pinned(),
+            Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
+        ))
+        .push(tooltip(
+            toggle(
+                "Let drill-ins graduate into split panes (the ⊞ control)",
+                state.settings.graduate_metrics(),
+                Message::SetGraduateMetrics(!state.settings.graduate_metrics()),
+            ),
+            "When on, a metric drill-in's ⊞ moves it out of the floating popover \
+             into a real split pane (Left / Right / Up / Down) with its own \
+             maximize / close. Turn off to keep metrics as popovers only.",
+            TooltipPosition::Top,
+        ))
+        .push(tooltip(
+            stepper(
+                "Reorder hold",
+                format!("{:.1}s", state.settings.status_bar_edit_hold_secs()),
+                Message::SetStatusBarEditHold(-0.5),
+                Message::SetStatusBarEditHold(0.5),
+            ),
+            "How long to press and hold a metric before it enters \
+             drag-to-reorder edit mode — the outline appears only then, never \
+             on a quick click (which opens the drill-in). Scroll over the bar \
+             to page through metrics that don't fit; Esc leaves edit mode.",
+            TooltipPosition::Top,
+        ))
+        .push(status_bar_metrics_editor(state));
+    // Threshold controls, only when a graded (CPU/mem/battery) cell is set.
+    if state
+        .settings
+        .status_bar_metrics
+        .iter()
+        .filter_map(|c| crate::settings::MetricKind::from_setting_str(&c.metric))
+        .any(|k| k.is_graded())
+    {
+        col = col.push(thresholds_editor(state));
+    }
+    // Clock format options, only when a clock cell is configured.
+    if state
+        .settings
+        .status_bar_metrics()
+        .iter()
+        .any(|m| m.kind == crate::settings::MetricKind::Clock)
+    {
+        col = col.push(clock_format_editor(state));
     }
     col.into()
 }
@@ -2492,6 +2541,7 @@ fn metric_pane_content<'a>(
     is_focused: bool,
     maximized: bool,
     multi: bool,
+    highlight: bool,
     accent: iced::Color,
     hairline: iced::Color,
     bg: iced::Color,
@@ -2522,7 +2572,11 @@ fn metric_pane_content<'a>(
     let inner = column![header, metric_body(state, kind, false, card_w, chart_h)]
         .spacing(6)
         .padding(6);
-    let border_color = if is_focused { accent } else { hairline };
+    let border_color = if is_focused && highlight {
+        accent
+    } else {
+        hairline
+    };
     let bordered = container(inner).style(move |_| {
         let border = if multi {
             Border {
@@ -2571,30 +2625,39 @@ fn metric_popover_card<'a>(
     // when popovers are pinned) overlay the card.
     iced::widget::stack![
         with_resize_edges(index, card.into()),
-        popover_controls(index, kind, expanded, pinned),
+        popover_controls(
+            index,
+            kind,
+            expanded,
+            pinned,
+            state.settings.graduate_metrics(),
+        ),
     ]
     .into()
 }
 
 /// The top-right control cluster overlaid on a popover card: a "move to pane" ⊞
-/// (graduate the drill-in into a real split pane), the expand "+" / collapse "−"
-/// toggle, plus a close "×" when popovers are pinned (in the one-at-a-time mode a
-/// click away closes it, so no per-card button is needed).
+/// (graduate the drill-in into a real split pane, when enabled), the expand "+" /
+/// collapse "−" toggle, plus a close "×" when popovers are pinned (in the
+/// one-at-a-time mode a click away closes it, so no per-card button is needed).
 fn popover_controls<'a>(
     index: usize,
     kind: crate::settings::MetricKind,
     expanded: bool,
     pinned: bool,
+    can_graduate: bool,
 ) -> Element<'a, Message> {
-    let mut controls = row![
-        button::ghost_compact("⊞", Message::PromotePopoverMenu(kind)),
-        button::ghost_compact(
-            if expanded { "−" } else { "+" },
-            Message::ToggleMetricDetailExpanded(index),
-        ),
-    ]
-    .spacing(0)
-    .align_y(iced::Alignment::Center);
+    let mut controls = row![].spacing(0).align_y(iced::Alignment::Center);
+    if can_graduate {
+        controls = controls.push(button::ghost_compact(
+            "⊞",
+            Message::PromotePopoverMenu(kind),
+        ));
+    }
+    controls = controls.push(button::ghost_compact(
+        if expanded { "−" } else { "+" },
+        Message::ToggleMetricDetailExpanded(index),
+    ));
     if pinned {
         controls = controls.push(button::ghost_compact(
             "×",

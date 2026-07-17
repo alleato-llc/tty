@@ -846,6 +846,18 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Toggle whether a drill-in can graduate into a split pane (the ⊞ control).
+    pub fn set_graduate_metrics(&mut self, on: bool) {
+        self.settings.graduate_metrics = Some(on);
+        self.settings.save();
+    }
+
+    /// Toggle the accent border on the focused pane (multi-pane tabs).
+    pub fn set_highlight_focused_pane(&mut self, on: bool) {
+        self.settings.highlight_focused_pane = Some(on);
+        self.settings.save();
+    }
+
     /// The settings toggle, ON direction: open the one enable dialog. It
     /// carries every fixed-at-enable choice (key source, KDF, cipher) plus
     /// the passphrase fields or the OS-keychain explainer, depending on the

@@ -1127,6 +1127,20 @@ fn tab_highlight_toggles_and_defaults_on() {
 }
 
 #[test]
+fn graduate_and_focus_border_toggles_default_on() {
+    let mut tty = headless(1);
+    assert!(tty.settings.graduate_metrics(), "graduation on by default");
+    assert!(
+        tty.settings.highlight_focused_pane(),
+        "focus highlight on by default"
+    );
+    let _ = update(&mut tty, Message::SetGraduateMetrics(false));
+    assert!(!tty.settings.graduate_metrics(), "honors the explicit off");
+    let _ = update(&mut tty, Message::SetHighlightFocusedPane(false));
+    assert!(!tty.settings.highlight_focused_pane());
+}
+
+#[test]
 fn splitting_adds_a_focused_pane_to_the_tab() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(1);

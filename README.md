@@ -94,7 +94,9 @@ section is split into sub-tabs — Theme, Tabs, Status bar, Terminal, Window —
 shows a focused pane instead of one long scroll. Pick one of 8 named
 themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
-size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and the
+size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and
+**Highlight the focused pane** (the accent border on the focused pane in a split
+tab — turn it off for a flat, borderless split), and the
 **auto-hiding status bar** (on by default — it floats back in when the pointer
 nears the bottom edge so the grid gets the full height; turn it off to pin it, or
 **Disable status bar** to drop it entirely). The **Window** tab keeps the window
@@ -103,8 +105,9 @@ nears the bottom edge so the grid gets the full height; turn it off to pin it, o
 (up to 95%, when it loses focus). A **Keys** section lists every keyboard shortcut
 for reference. Settings persist to `tty.settings.json`.
 
-The Appearance section also configures **machine stats in the status bar** (off
-until you add one): CPU, memory, and network / disk throughput as compact canvas
+A dedicated **Metrics** section (above History) configures **machine stats in the
+status bar** (off until you add one): CPU, memory, and network / disk throughput
+as compact canvas
 sparklines or plain numbers, in an order you set (add, remove, reorder, choose a
 per-metric style, and a sample interval). CPU and memory grade their color by
 load; the network and disk rates auto-scale to their own recent peak, and the two
@@ -146,7 +149,9 @@ popovers open** to pin several side by side at once (each with its own **×**;
 the popover's **⊞** control moves the drill-in out of the floating overlay and
 into a real split pane (Left / Right / Up / Down) beside the terminal, resizable
 by dragging the divider like any pane. A metric pane has its own maximize (fill
-the terminal area) and close controls, and `⌘W` closes it too. The samplers reuse the sibling `fdtop` project's `prexp-core`
+the terminal area) and close controls, and `⌘W` closes it too. (The ⊞ control can
+be turned off in the Metrics section for those who prefer popovers only.) The
+samplers reuse the sibling `fdtop` project's `prexp-core`
 (network / disk and the per-core P/E split are macOS-only for now). Design sketch
 in `docs/ideas/status-bar-metrics.md`.
 

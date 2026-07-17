@@ -278,23 +278,27 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   the terminal colors). The **Appearance** section is itself split into horizontal
   sub-tabs (`APPEARANCE_TABS`: Theme / Tabs / Status bar / Terminal / Window,
   tracked by `Tty::appearance_tab`) so it shows one pane at a time instead of one
-  long scroll; `settings_subtabs` renders the chip strip. Those panes carry a
-  **Highlight active tab** toggle (the rime `tabs` strip takes a `TabBarStyle {
-  highlight_active, text_size }`, so accent-ink vs. subtler emphasis is
-  host-tunable); the status-bar controls — **Disable status bar** (drops it
+  long scroll; `settings_subtabs` renders the chip strip. Those panes carry the
+  **Highlight active tab** and **Highlight the focused pane** toggles (the latter
+  gates the accent border in the pane-grid closures; the rime `tabs` strip takes a
+  `TabBarStyle { highlight_active, text_size }`, so accent-ink vs. subtler emphasis
+  is host-tunable); the status-bar chrome — **Disable status bar** (drops it
   entirely; wins over auto-hide) and **auto-hide status bar** (on by default; when
   on, `main_view` drops the bar from the column and floats it back over the bottom
   edge via a `stack` only while `status_bar_revealed()` — the pointer within
   `STATUS_BAR_REVEAL_ZONE` of the bottom — so toggling it never reflows the pane
-  grid), the pin-popovers toggle, the reorder-hold stepper, and the machine-stats
-  cell editor (add / reorder / style / remove, per-cell warn/alarm thresholds, and
-  clock-format toggles when a clock cell is present); and the
-  **Window** controls — **Keep window on top** (drives the iced `window::Level`,
+  grid); and the **Window** controls — **Keep window on top** (drives the iced `window::Level`,
   broadcast to every live window via `window::set_level`) and the two transparency
-  amounts. A read-only **Keys** section documents the shortcuts.
+  amounts. A separate top-level **Metrics** section (above History,
+  `metrics_section`) owns everything about the machine-stat cells: the cell editor
+  (add / reorder / style / remove, per-cell warn/alarm thresholds, clock-format
+  toggles), the pin-popovers toggle, the reorder-hold stepper, and the
+  **graduate-into-a-pane** toggle (`graduate_metrics`, which gates the popover ⊞
+  control). A read-only **Keys** section documents the shortcuts.
   `tty.settings.json` persists the theme name, font family/size, any custom palette,
-  the active-tab highlight flag, the status-bar flags (`status_bar_autohide`,
-  `status_bar_disabled`, `status_bar_metrics_pinned`, `status_bar_edit_hold_secs`),
+  the active-tab highlight flag, `highlight_focused_pane`, the status-bar flags
+  (`status_bar_autohide`, `status_bar_disabled`, `status_bar_metrics_pinned`,
+  `graduate_metrics`, `status_bar_edit_hold_secs`),
   the clock format (`clock_24h` / `clock_seconds` / `clock_date`) and the ordered
   `status_bar_metrics` (each `{ metric, style, warn?, alarm? }`), the window flags
   (`window_always_on_top`), the `unfocused_opacity` / `focused_opacity` amounts, and
