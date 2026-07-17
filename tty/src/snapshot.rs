@@ -113,6 +113,8 @@ fn populated() -> Tty {
         metric_detail_expanded: false,
         metric_detail_size: None,
         metric_detail_resize: None,
+        metric_detail_move: (0.0, 0.0),
+        metric_detail_move_drag: None,
     }
 }
 
@@ -892,6 +894,30 @@ fn metric_detail_popover_empty_view() {
     assert!(
         matches,
         "snapshot `tty-metric-detail-popover-empty` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_memory_view() {
+    // Drilling into memory: the chart is a fixed 0..100% gauge, so a ~32%-used
+    // line sits about a third up the plot rather than filling it. Guards the
+    // bounded-metric scaling (a peak-scaled axis would push any steady line to
+    // the top, misreading a third of RAM as all of it).
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("mem", "sparkline")];
+    seed_metric_sample(&mut tty);
+    tty.metric_detail = Some(crate::settings::MetricKind::Mem);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-memory.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-memory` changed — delete its PNG to re-baseline"
     );
 }
 

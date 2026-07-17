@@ -183,18 +183,19 @@ that metric's full-size chart, rather than a whole system panel.
 4. **Ambient peek line** for the auto-hidden state.
 5. **[done] Single-metric drill-in popover.** Clicking a status-bar sparkline
    opens a small card, bottom-centered over the bar, with that metric's full-size
-   `rime` `line_chart` over its retained history (the same series and shared scale
-   the cell used, with a peak y-axis label in the metric's units), its current
-   readout, a two-line legend for the combined I/O metrics, and a sample-count
-   caption. A metric whose history isn't chartable yet (a rate metric with no
+   `rime` `line_chart` over its retained history (the same series the cell used,
+   on a fixed 0..100% axis for the bounded CPU/memory gauges or a peak-scaled axis
+   in the metric's units for the open-ended rate metrics), its current readout, a
+   two-line legend for the combined I/O metrics, and a sample-count caption. A metric whose history isn't chartable yet (a rate metric with no
    sampler on this platform, or the first ticks after opening) still shows the
    card, with a "collecting" note in place of the chart, so the drill-in always
    gives visible feedback. A transparent click-away layer or Escape dismisses it
    (`opaque` on the card so clicking it doesn't close). `Tty::metric_detail` holds
    the drilled-in `MetricKind`; `view::metric_detail_popover` builds the card and
    `main_view` stacks it (over the chrome, under the settings/scrollback layers).
-   `rime`'s `LineChart` grew an optional `y_max_label`. A lighter first cut of the
-   mini-fdtop overlay below.
+   `rime`'s `LineChart` grew optional `y_max` (fixed axis scale) and `y_max_label`
+   (caller-formatted axis label). A lighter first cut of the mini-fdtop overlay
+   below.
    - **Expand.** A `ghost` "Expand" / "Collapse" button floats over the chart's
      top-right (`Tty::metric_detail_expanded` + `ToggleMetricDetailExpanded`).
      Expanded is a large centered card whose chart is sized off the window
@@ -205,15 +206,27 @@ that metric's full-size chart, rather than a whole system panel.
      draws a vertical guide, and marks + labels each series' value there in the
      metric's units (a new `hover_format: Option<fn(f64) -> String>`, a plain `fn`
      so the widget stays generic). Works in the compact and expanded charts alike.
-   - **Resize.** A corner grip on the compact card drag-resizes it
-     (`metric_detail_size` + `metric_detail_resize`), mirroring the tab-drag
-     mechanism: the grip's press starts the drag, `PointerMoved` tracks the delta,
-     `PointerReleased` ends it. Clamped to stay usable and on-screen; Expand still
-     overrides to the window-sized card.
-   - **Peak-scaled axis.** The chart auto-scales its y axis to the data's own
-     peak, so the axis label reads that peak in the metric's units rather than the
-     metric's fixed gauge max — a CPU/memory chart no longer shows a misleading
-     "100%" at the top while its line sits at the real (lower) peak.
+   - **Resize + move.** The card resizes by dragging its own borders — invisible
+     hit strips overlay the right edge, bottom edge, and bottom-right corner
+     (`view::with_resize_edges`), each showing the matching resize cursor, so a
+     single-edge drag moves only that axis and the corner moves both
+     (`state::ResizeEdge`; `metric_detail_size`). Pressing the card body instead
+     drag-moves it (`metric_detail_move`). Both mirror the tab-drag mechanism
+     (press starts, `PointerMoved` tracks the delta, `PointerReleased` ends; the
+     edge strips / buttons take their own press first, so those don't move it).
+     The edge strips stack over the card and `iced`'s `stack` sizes to its first
+     child, so they span exactly the card, not the window. Expand snaps to the
+     window-sized default and clears any drag; the size/move overrides then
+     re-customize from there. Moved placement is absolute (top-left via padding,
+     computed from the default anchor + offset); the un-moved default keeps the
+     alignment-based anchor (also the headless path, where the window size is 0).
+     All clamped to stay on-screen.
+   - **Axis scale by metric type.** CPU and memory are bounded 0..100 gauges:
+     their chart fixes the y axis at `0..100` (`rime` `LineChart`'s `y_max`) so
+     the line reads as a fraction of full capacity — 32%-used memory sits about a
+     third up the plot, not at the top. The open-ended rate metrics (net / disk
+     I/O) instead auto-scale to their own recent peak, labeling the axis with that
+     peak in the metric's units (bytes/sec) rather than a meaningless fixed max.
    - **Per-core CPU grid.** CPU drills into a grid of small per-core sparklines
      (each color-graded by its current load) instead of the single aggregate
      chart, grouped into **Performance** / **Efficiency** sections. Per-core %

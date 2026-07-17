@@ -29,14 +29,25 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::ResizeSplit(win, e) => state.resize_split(win, e.split, e.ratio),
         Message::PointerMoved(p) => {
             state.pointer = p;
-            // While the popover corner grip is held, the pointer delta since the
-            // drag began resizes the card (width, chart height), clamped so it
-            // stays usable and on-screen.
-            if let Some((start, (bw, bh))) = state.metric_detail_resize {
-                let w = (bw + (p.x - start.x)).clamp(280.0, (state.window_width - 40.0).max(280.0));
-                let h =
-                    (bh + (p.y - start.y)).clamp(110.0, (state.window_height - 150.0).max(110.0));
+            // A popover drag is either a resize (an edge / corner) or a move
+            // (body); resize takes precedence if both somehow started. Deltas are
+            // from where the drag began, clamped to stay usable / on-screen. Only
+            // the grabbed edge's axes move; the other keeps its starting value.
+            if let Some((start, (bw, bh), edge)) = state.metric_detail_resize {
+                let (h_ax, v_ax) = edge.axes();
+                let w = if h_ax {
+                    (bw + (p.x - start.x)).clamp(280.0, (state.window_width - 40.0).max(280.0))
+                } else {
+                    bw
+                };
+                let h = if v_ax {
+                    (bh + (p.y - start.y)).clamp(110.0, (state.window_height - 150.0).max(110.0))
+                } else {
+                    bh
+                };
                 state.metric_detail_size = Some((w, h));
+            } else if let Some((start, (bx, by))) = state.metric_detail_move_drag {
+                state.metric_detail_move = (bx + (p.x - start.x), by + (p.y - start.y));
             }
         }
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
@@ -263,23 +274,25 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SampleMetrics => state.metrics.sample(),
         Message::OpenMetricDetail(metric) => {
             state.metric_detail = crate::settings::MetricKind::from_setting_str(&metric);
-            // A fresh open always starts compact, at the default size.
-            state.metric_detail_expanded = false;
-            state.metric_detail_size = None;
-            state.metric_detail_resize = None;
+            // A fresh open always starts compact, at the default size/position.
+            state.reset_metric_detail_layout();
         }
         Message::CloseMetricDetail => {
             state.metric_detail = None;
-            state.metric_detail_expanded = false;
-            state.metric_detail_size = None;
-            state.metric_detail_resize = None;
+            state.reset_metric_detail_layout();
         }
         Message::ToggleMetricDetailExpanded => {
-            state.metric_detail_expanded = !state.metric_detail_expanded
+            state.metric_detail_expanded = !state.metric_detail_expanded;
+            // Snap to the new state's default size/position; drags re-customize.
+            state.metric_detail_size = None;
+            state.metric_detail_move = (0.0, 0.0);
         }
-        Message::MetricDetailResizeStart => {
-            let cur = state.metric_detail_size.unwrap_or((320.0, 150.0));
-            state.metric_detail_resize = Some((state.pointer, cur));
+        Message::MetricDetailResizeStart(edge) => {
+            state.metric_detail_resize =
+                Some((state.pointer, state.metric_detail_effective_size(), edge));
+        }
+        Message::MetricDetailMoveStart => {
+            state.metric_detail_move_drag = Some((state.pointer, state.metric_detail_move));
         }
         Message::SetEncryptedHistoryEnabled(true) => state.request_enable_encrypted_history(),
         Message::SetEncryptedHistoryEnabled(false) => state.disable_encrypted_history(),
@@ -357,6 +370,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::PointerReleased => {
             state.metric_detail_resize = None;
+            state.metric_detail_move_drag = None;
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }
@@ -395,9 +409,7 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
         if state.metric_detail.is_some() {
             state.metric_detail = None;
-            state.metric_detail_expanded = false;
-            state.metric_detail_size = None;
-            state.metric_detail_resize = None;
+            state.reset_metric_detail_layout();
             return iced::Task::none();
         }
         if state.renaming.is_some() {

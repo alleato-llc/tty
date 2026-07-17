@@ -97,6 +97,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         metric_detail_expanded: false,
         metric_detail_size: None,
         metric_detail_resize: None,
+        metric_detail_move: (0.0, 0.0),
+        metric_detail_move_drag: None,
     }
 }
 
@@ -153,6 +155,66 @@ fn cmd_zoom_keys_resize_the_font() {
     assert_eq!(tty.font_size, DEFAULT_FONT_SIZE);
     let _ = update(&mut tty, Message::Key(Key::Character("0".into()), cmd()));
     assert_eq!(tty.font_size, DEFAULT_FONT_SIZE);
+}
+
+#[test]
+fn metric_popover_drags_to_move_and_resizes_in_both_states() {
+    use iced::Point;
+    let mut tty = headless(1);
+    tty.window_width = 1000.0;
+    tty.window_height = 700.0;
+    tty.metric_detail = Some(crate::settings::MetricKind::Cpu);
+
+    // Move: press the body at (500,500), drag to (530,450), release.
+    tty.pointer = Point::new(500.0, 500.0);
+    let _ = update(&mut tty, Message::MetricDetailMoveStart);
+    let _ = update(&mut tty, Message::PointerMoved(Point::new(530.0, 450.0)));
+    assert_eq!(tty.metric_detail_move, (30.0, -50.0));
+    let _ = update(&mut tty, Message::PointerReleased);
+    assert!(tty.metric_detail_move_drag.is_none());
+    assert_eq!(
+        tty.metric_detail_move,
+        (30.0, -50.0),
+        "offset persists after release"
+    );
+
+    // Resize the compact card: corner drag from (530,450) to (630,490) grows
+    // both axes.
+    let _ = update(
+        &mut tty,
+        Message::MetricDetailResizeStart(crate::state::ResizeEdge::Corner),
+    );
+    let _ = update(&mut tty, Message::PointerMoved(Point::new(630.0, 490.0)));
+    let (cw, ch) = tty.metric_detail_size.expect("compact resized");
+    assert!(cw > 320.0 && ch > 150.0, "grew from the compact default");
+    let _ = update(&mut tty, Message::PointerReleased);
+
+    // Toggling expand snaps back to the new state's default size + position.
+    let _ = update(&mut tty, Message::ToggleMetricDetailExpanded);
+    assert!(tty.metric_detail_expanded);
+    assert!(tty.metric_detail_size.is_none());
+    assert_eq!(tty.metric_detail_move, (0.0, 0.0));
+
+    // Resize works while expanded too, and a single-edge drag moves only its
+    // axis: dragging the right edge changes width but leaves height alone.
+    let (start_w, start_h) = tty.metric_detail_effective_size();
+    tty.pointer = Point::new(400.0, 300.0);
+    let _ = update(
+        &mut tty,
+        Message::MetricDetailResizeStart(crate::state::ResizeEdge::Right),
+    );
+    let _ = update(&mut tty, Message::PointerMoved(Point::new(360.0, 330.0)));
+    let (ew, eh) = tty.metric_detail_size.expect("expanded card is resizable");
+    assert!(ew < start_w, "right-edge drag left shrank the width");
+    assert_eq!(eh, start_h, "right-edge drag left the height unchanged");
+
+    // Close resets the whole layout.
+    let _ = update(&mut tty, Message::CloseMetricDetail);
+    assert!(tty.metric_detail.is_none());
+    assert!(tty.metric_detail_size.is_none());
+    assert_eq!(tty.metric_detail_move, (0.0, 0.0));
+    assert!(tty.metric_detail_resize.is_none());
+    assert!(tty.metric_detail_move_drag.is_none());
 }
 
 #[test]

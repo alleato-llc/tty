@@ -218,9 +218,12 @@ pub enum Message {
     /// Toggle the open metric popover between the compact bottom-anchored card
     /// and the large centered one (its "Expand" / "Collapse" affordance).
     ToggleMetricDetailExpanded,
-    /// Begin a drag-resize of the compact metric popover (its corner grip was
-    /// pressed). Tracked via `PointerMoved` and ended by `PointerReleased`.
-    MetricDetailResizeStart,
+    /// Begin a drag-resize of the metric popover from one of its edges/corner.
+    /// Tracked via `PointerMoved` and ended by `PointerReleased`.
+    MetricDetailResizeStart(crate::state::ResizeEdge),
+    /// Begin a drag-move of the metric popover (its body was pressed). Tracked
+    /// via `PointerMoved` and ended by `PointerReleased`.
+    MetricDetailMoveStart,
     /// Toggle encrypted, persisted command history. Turning it on opens the
     /// keychain explainer first (nothing is touched until the user
     /// continues); the start itself is async and commits the setting only on

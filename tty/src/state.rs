@@ -291,14 +291,81 @@ pub struct Tty {
     /// (the "Expand" affordance) rather than the compact bottom-anchored one.
     /// Reset to `false` each time a metric is opened or the popover closes.
     pub metric_detail_expanded: bool,
-    /// A user-dragged size override for the compact popover, `(card_width,
-    /// chart_height)` in px, or `None` for the default. Cleared on open/close.
-    /// Ignored while expanded (that snaps to the window).
+    /// A user-dragged size override, `(card_width, chart_height)` in px, or
+    /// `None` for the current state's default. Applies whether compact or
+    /// expanded. Reset to `None` on open/close and when toggling expand.
     pub metric_detail_size: Option<(f32, f32)>,
-    /// An in-progress popover resize drag: the pointer where it began and the
-    /// size then, so `PointerMoved` can track the delta; `None` when not
-    /// resizing. Ended by `PointerReleased`, like [`Self::tab_drag`].
-    pub metric_detail_resize: Option<(iced::Point, (f32, f32))>,
+    /// An in-progress popover resize drag: the pointer where it began, the size
+    /// then, and which edge/corner was grabbed (so only the dragged axes
+    /// change). `None` when not resizing. Ended by `PointerReleased`.
+    pub metric_detail_resize: Option<(iced::Point, (f32, f32), ResizeEdge)>,
+    /// A user-dragged position offset `(dx, dy)` in px from the popover's
+    /// default anchor (bottom-centered compact / centered expanded). `(0, 0)`
+    /// keeps the default placement. Reset on open/close and expand toggle.
+    pub metric_detail_move: (f32, f32),
+    /// An in-progress popover move drag: the pointer where it began and the
+    /// offset then; `None` when not moving. Ended by `PointerReleased`.
+    pub metric_detail_move_drag: Option<(iced::Point, (f32, f32))>,
+}
+
+/// Which edge or corner of the metric popover a resize drag grabbed. The card
+/// is anchored at its top-left, so only the right edge, bottom edge, and
+/// bottom-right corner resize; each maps to which axes the drag adjusts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeEdge {
+    /// Drag the right edge: width only.
+    Right,
+    /// Drag the bottom edge: height only.
+    Bottom,
+    /// Drag the bottom-right corner: both axes.
+    Corner,
+}
+
+impl ResizeEdge {
+    /// `(adjust_width, adjust_height)` — which axes this grab resizes.
+    pub fn axes(self) -> (bool, bool) {
+        match self {
+            Self::Right => (true, false),
+            Self::Bottom => (false, true),
+            Self::Corner => (true, true),
+        }
+    }
+}
+
+impl Tty {
+    /// The metric popover's current size `(card_width, chart_height)`: the
+    /// user's dragged override if any, else the default for the current
+    /// compact/expanded state. Shared by the view (to lay out) and the update
+    /// loop (to seed a resize drag).
+    pub fn metric_detail_effective_size(&self) -> (f32, f32) {
+        self.metric_detail_size.unwrap_or_else(|| {
+            if self.metric_detail_expanded {
+                let w = if self.window_width > 1.0 {
+                    (self.window_width - 96.0).clamp(420.0, 1200.0)
+                } else {
+                    900.0
+                };
+                let h = if self.window_height > 1.0 {
+                    (self.window_height - 240.0).clamp(220.0, 900.0)
+                } else {
+                    360.0
+                };
+                (w, h)
+            } else {
+                (320.0, 150.0)
+            }
+        })
+    }
+
+    /// Clear the metric popover's expand / size / move state back to the compact
+    /// default and drop any in-progress drag. Used on open and close.
+    pub fn reset_metric_detail_layout(&mut self) {
+        self.metric_detail_expanded = false;
+        self.metric_detail_size = None;
+        self.metric_detail_resize = None;
+        self.metric_detail_move = (0.0, 0.0);
+        self.metric_detail_move_drag = None;
+    }
 }
 
 /// What a launch should do about encrypted history — the pure decision core
@@ -500,6 +567,8 @@ impl Tty {
             metric_detail_expanded: false,
             metric_detail_size: None,
             metric_detail_resize: None,
+            metric_detail_move: (0.0, 0.0),
+            metric_detail_move_drag: None,
             hovered_tab: None,
             selection: None,
             search: None,
