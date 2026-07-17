@@ -94,6 +94,10 @@ pub(crate) fn headless(n: usize) -> Tty {
         untracked_forced_by_cli: false,
         show_session_start_prompt: false,
         metrics: Default::default(),
+        status_bar_scroll: 0,
+        status_bar_edit: false,
+        status_metric_drag: None,
+        status_bar_edit_arm: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -303,6 +307,72 @@ fn window_opacity_and_level_track_their_settings() {
     assert_eq!(tty.window_level(), iced::window::Level::AlwaysOnTop);
     let _ = update(&mut tty, Message::SetWindowAlwaysOnTop(false));
     assert_eq!(tty.window_level(), iced::window::Level::Normal);
+}
+
+fn metric_cfg(kind: &str) -> crate::settings::MetricConfig {
+    crate::settings::MetricConfig {
+        metric: kind.to_string(),
+        style: "sparkline".to_string(),
+        warn: None,
+        alarm: None,
+    }
+}
+
+#[test]
+fn status_bar_edit_mode_drags_reorders_and_exits() {
+    let mut tty = headless(1);
+    tty.settings.status_bar_metrics =
+        vec![metric_cfg("cpu"), metric_cfg("mem"), metric_cfg("net_io")];
+
+    // A held right-press enters edit mode: arm, then a hold past the threshold.
+    let _ = update(&mut tty, Message::StatusBarArmEdit);
+    assert!(tty.status_bar_edit_arm.is_some());
+    // Simulate the hold completing by backdating the arm past the max duration.
+    tty.status_bar_edit_arm = Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
+    let _ = update(&mut tty, Message::StatusBarEditTick);
+    assert!(tty.status_bar_edit, "hold entered edit mode");
+    assert!(tty.status_bar_edit_arm.is_none());
+
+    // Drag CPU (index 0) over Net I/O (index 2): CPU moves to the last slot.
+    let _ = update(&mut tty, Message::StatusMetricDragStart(0));
+    assert!(tty.status_metric_drag.is_some());
+    let _ = update(&mut tty, Message::StatusMetricDragOver(2));
+    assert_eq!(tty.settings.status_bar_metrics[2].metric, "cpu");
+    assert_eq!(tty.settings.status_bar_metrics[0].metric, "mem");
+    let _ = update(&mut tty, Message::PointerReleased);
+    assert!(tty.status_metric_drag.is_none(), "release ends the drag");
+
+    // Escape leaves edit mode.
+    let esc = Key::Named(iced::keyboard::key::Named::Escape);
+    let _ = update(&mut tty, Message::Key(esc, Modifiers::default()));
+    assert!(!tty.status_bar_edit);
+}
+
+#[test]
+fn status_bar_edit_arm_cancels_on_early_release() {
+    let mut tty = headless(1);
+    // Right-press arms; releasing before the hold completes cancels it.
+    let _ = update(&mut tty, Message::StatusBarArmEdit);
+    assert!(tty.status_bar_edit_arm.is_some());
+    let _ = update(&mut tty, Message::StatusBarDisarmEdit);
+    assert!(tty.status_bar_edit_arm.is_none());
+    // A tick with no arm does nothing.
+    let _ = update(&mut tty, Message::StatusBarEditTick);
+    assert!(!tty.status_bar_edit);
+}
+
+#[test]
+fn status_bar_scroll_offset_moves_and_saturates() {
+    // With no cells fitting (window width 0 → everything "fits", max 0), scroll is
+    // pinned at 0; the offset never goes negative.
+    let mut tty = headless(1);
+    tty.settings.status_bar_metrics = vec![metric_cfg("cpu"), metric_cfg("mem")];
+    let _ = update(&mut tty, Message::StatusBarScroll(1.0));
+    assert_eq!(tty.status_bar_scroll, 0, "up-scroll saturates at 0");
+    let _ = update(&mut tty, Message::StatusBarScroll(-1.0));
+    // window_width is 0 in the headless fixture, so every cell "fits" and the max
+    // offset is 0 — the window can't advance.
+    assert_eq!(tty.status_bar_scroll, 0);
 }
 
 #[test]

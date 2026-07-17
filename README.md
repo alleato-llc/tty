@@ -116,9 +116,13 @@ seconds, date), a **Load** cell sparklines the 1-minute load average and drills
 into the 1/5/15-minute triple, and a **Battery** cell shows charge on a gauge
 (colored by level) with the charging state and time estimate in its drill-in.
 When the window is too narrow to hold every cell the bar sheds them from the
-right rather than wrapping. The graded cells (CPU, memory, battery) recolor by
-load with **configurable caution/alarm thresholds** per cell — past a threshold
-the whole cell, label included, recolors so it catches the eye. Click any
+right rather than wrapping; **scroll over the bar** to page a sliding window
+through the shed cells (chevrons show when there's more off each edge). The graded
+cells (CPU, memory, battery) recolor by load with **configurable caution/alarm
+thresholds** per cell — past a threshold the whole cell, label included, recolors
+so it catches the eye. **Right-press and hold** the bar (~3s, configurable
+1.5–5s) to enter a live **drag-to-reorder** edit mode; drag the outlined widgets
+to rearrange them, then click empty space or press `Esc` to finish. Click any
 sparkline to **drill in** — a small popover shows that
 metric's full-size line chart over its retained history, with the current
 readout; hover a point to read its value, hit **+** for a large centered chart,

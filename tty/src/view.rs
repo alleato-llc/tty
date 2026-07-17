@@ -1602,6 +1602,18 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
                 state.settings.status_bar_metrics_pinned(),
                 Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
             ))
+            .push(tooltip(
+                stepper(
+                    "Reorder hold",
+                    format!("{:.1}s", state.settings.status_bar_edit_hold_secs()),
+                    Message::SetStatusBarEditHold(-0.5),
+                    Message::SetStatusBarEditHold(0.5),
+                ),
+                "How long to hold a right-press on the status bar to enter \
+                 drag-to-reorder edit mode. Scroll over the bar to page through \
+                 metrics that don't fit; Esc leaves edit mode.",
+                TooltipPosition::Top,
+            ))
             .push(status_bar_metrics_editor(state));
         // Threshold controls, only when a graded (CPU/mem/battery) cell is set.
         if state
@@ -1865,36 +1877,132 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
     // centers in the gap; with no visible metrics it collapses to nothing and
     // the two spaces merge, leaving the no-stats bar pixel-identical to the old
     // text-only footer (left name, right geometry).
-    let configs = state.settings.status_bar_metrics();
-    let cells: Vec<(crate::settings::ResolvedMetric, MetricRender)> = configs
-        .iter()
-        .filter_map(|&cfg| metric_render(cfg, state).map(|r| (cfg, r)))
+    let editing = state.status_bar_edit;
+    // Each cell carries its raw-config index (drag-reorder mutates the stored list
+    // by index; the resolved list may drop unknown entries, so we can't assume the
+    // display position is the config index).
+    let cells: Vec<(usize, crate::settings::ResolvedMetric, MetricRender)> = state
+        .settings
+        .status_bar_metrics_indexed()
+        .into_iter()
+        .filter_map(|(i, cfg)| metric_render(cfg, state).map(|r| (i, cfg, r)))
         .collect();
+    let total = cells.len();
     let visible = visible_metric_count(&cells, &left, &right, state.window_width);
+    // When the bar can't hold every cell, a scroll over it slides this window
+    // through the full list; clamp the stored offset to the valid range.
+    let max_start = total.saturating_sub(visible);
+    let start = state.status_bar_scroll.min(max_start);
 
     let flex = || iced::widget::Space::new().width(Length::Fill);
     let mut content = row![text(left).size(STATUS_BAR_TEXT_SIZE).color(t.muted), flex()]
         .align_y(iced::Alignment::Center);
 
     if visible > 0 {
-        // Each cell is clickable: a press opens that metric's detail popover.
+        // A muted chevron on each side when there are more cells off that edge, so
+        // the user knows to scroll.
+        let chevron = |show: bool, glyph: &str| -> Element<'_, Message> {
+            if show {
+                text(glyph.to_string())
+                    .size(STATUS_BAR_TEXT_SIZE)
+                    .color(t.muted)
+                    .into()
+            } else {
+                iced::widget::Space::new().width(Length::Fixed(0.0)).into()
+            }
+        };
+        // The window shows `visible` cells from `start`. A normal cell opens its
+        // drill-in on press; in edit mode it instead outlines, starts a reorder
+        // drag on press, and reorders as the pointer crosses other cells (like the
+        // tab drag).
         let cluster: Vec<Element<'_, Message>> = cells
             .into_iter()
+            .skip(start)
             .take(visible)
-            .map(|(cfg, r)| {
-                let key = cfg.kind.as_setting_str().to_string();
-                mouse_area(metric_cell(cfg.style, r))
-                    .on_press(Message::OpenMetricDetail(key))
-                    .into()
+            .map(|(raw_i, cfg, r)| {
+                let cell = metric_cell(cfg.style, r);
+                if editing {
+                    let outlined =
+                        container(cell)
+                            .padding([1, 4])
+                            .style(move |_| container::Style {
+                                border: Border {
+                                    color: t.accent,
+                                    width: 1.0,
+                                    radius: 5.0.into(),
+                                },
+                                ..Default::default()
+                            });
+                    mouse_area(outlined)
+                        .on_press(Message::StatusMetricDragStart(raw_i))
+                        .on_enter(Message::StatusMetricDragOver(raw_i))
+                        .interaction(iced::mouse::Interaction::Grab)
+                        .into()
+                } else {
+                    let key = cfg.kind.as_setting_str().to_string();
+                    mouse_area(cell)
+                        .on_press(Message::OpenMetricDetail(key))
+                        .into()
+                }
             })
             .collect();
+        let cluster = row![
+            chevron(start > 0, "‹"),
+            row(cluster).spacing(14).align_y(iced::Alignment::Center),
+            chevron(start + visible < total, "›"),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+        // Wheel over the cluster slides the window (only meaningful when cells are
+        // shed, i.e. `max_start > 0`).
         content = content
-            .push(row(cluster).spacing(14).align_y(iced::Alignment::Center))
+            .push(mouse_area(cluster).on_scroll(|d| Message::StatusBarScroll(scroll_delta_y(d))))
             .push(flex());
     }
 
-    content = content.push(right_text());
-    status_bar_content(content)
+    // In edit mode the right end shows a hint instead of the geometry.
+    if editing {
+        content = content.push(
+            text("drag to reorder · Esc to finish")
+                .size(STATUS_BAR_TEXT_SIZE)
+                .color(t.accent),
+        );
+    } else {
+        content = content.push(right_text());
+    }
+
+    // A right-press anywhere on the bar arms the long-press-to-edit gesture; in
+    // edit mode a left-press on empty bar space (a chevron / the flex gaps, not a
+    // cell — those consume their own press) exits.
+    let mut area =
+        mouse_area(status_bar_content(content)).on_right_press(Message::StatusBarArmEdit);
+    if editing {
+        area = area.on_press(Message::ExitStatusBarEdit);
+    }
+    area.into()
+}
+
+/// The vertical component of a wheel `ScrollDelta`, for panning the status bar.
+fn scroll_delta_y(delta: iced::mouse::ScrollDelta) -> f32 {
+    match delta {
+        iced::mouse::ScrollDelta::Lines { y, .. } => y,
+        iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+    }
+}
+
+/// The furthest the status-bar metric window can scroll: the number of
+/// renderable cells minus how many currently fit (0 when everything fits). Shared
+/// by the view (to clamp the window) and `update` (to clamp the scroll offset).
+pub fn status_bar_scroll_max(state: &Tty) -> usize {
+    let (left, right) = status_text(state);
+    let cells: Vec<(usize, crate::settings::ResolvedMetric, MetricRender)> = state
+        .settings
+        .status_bar_metrics_indexed()
+        .into_iter()
+        .filter_map(|(i, cfg)| metric_render(cfg, state).map(|r| (i, cfg, r)))
+        .collect();
+    let visible = visible_metric_count(&cells, &left, &right, state.window_width);
+    cells.len().saturating_sub(visible)
 }
 
 /// The renderable data for one metric cell, resolved from the current sample:
@@ -2705,7 +2813,7 @@ fn legend_row<'a>(items: &[(&str, iced::Color)]) -> Element<'a, Message> {
 /// not expose measured text extents at view-build time), erring toward showing
 /// all: an unknown window width (`<= 0`, before the first resize) sheds nothing.
 fn visible_metric_count(
-    cells: &[(crate::settings::ResolvedMetric, MetricRender)],
+    cells: &[(usize, crate::settings::ResolvedMetric, MetricRender)],
     left: &str,
     right: &str,
     window_width: f32,
@@ -2721,7 +2829,7 @@ fn visible_metric_count(
     let reserved = PADDING + (left.chars().count() + right.chars().count()) as f32 * CHAR_W + GAP;
     let mut used = 0.0;
     let mut n = 0;
-    for (cfg, r) in cells {
+    for (_, cfg, r) in cells {
         let label_w = r.label.chars().count() as f32 * CHAR_W;
         let cell_w = match cfg.style {
             // sparkline (44) + inner gap (6) + label
@@ -2918,8 +3026,9 @@ mod tests {
     use super::*;
     use crate::settings::{MetricKind, MetricStyle, ResolvedMetric};
 
-    fn cell(style: MetricStyle) -> (ResolvedMetric, MetricRender) {
+    fn cell(style: MetricStyle) -> (usize, ResolvedMetric, MetricRender) {
         (
+            0,
             ResolvedMetric {
                 kind: MetricKind::Cpu,
                 style,

@@ -22,6 +22,12 @@ pub const MIN_OPACITY: f32 = 0.05;
 /// readable, so active transparency tops out at 50%.
 pub const MIN_FOCUSED_OPACITY: f32 = 0.5;
 
+/// The long-press duration (seconds) that enters the status bar's drag-to-reorder
+/// edit mode: default, and the configurable range.
+pub const DEFAULT_EDIT_HOLD_SECS: f32 = 3.0;
+pub const MIN_EDIT_HOLD_SECS: f32 = 1.5;
+pub const MAX_EDIT_HOLD_SECS: f32 = 5.0;
+
 /// A custom terminal palette as hex strings (so it round-trips through JSON cleanly).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
@@ -303,6 +309,11 @@ pub struct Settings {
     /// (`false`/absent, the default).
     #[serde(default)]
     pub window_always_on_top: Option<bool>,
+    /// How long (seconds) to hold a right-press on the status bar before it enters
+    /// drag-to-reorder edit mode. Absent = [`DEFAULT_EDIT_HOLD_SECS`]; clamped to
+    /// [`MIN_EDIT_HOLD_SECS`]..=[`MAX_EDIT_HOLD_SECS`].
+    #[serde(default)]
+    pub status_bar_edit_hold_secs: Option<f32>,
     /// Clock cell: 24-hour time (`true`) vs 12-hour with AM/PM (`false`/absent).
     #[serde(default)]
     pub clock_24h: Option<bool>,
@@ -711,6 +722,14 @@ impl Settings {
         self.window_always_on_top.unwrap_or(false)
     }
 
+    /// The status-bar edit-mode long-press hold (seconds), clamped to the allowed
+    /// range (default [`DEFAULT_EDIT_HOLD_SECS`]).
+    pub fn status_bar_edit_hold_secs(&self) -> f32 {
+        self.status_bar_edit_hold_secs
+            .unwrap_or(DEFAULT_EDIT_HOLD_SECS)
+            .clamp(MIN_EDIT_HOLD_SECS, MAX_EDIT_HOLD_SECS)
+    }
+
     /// The clock cell's format, resolved from the individual toggles.
     pub fn clock_format(&self) -> crate::metrics::ClockFormat {
         crate::metrics::ClockFormat {
@@ -747,21 +766,36 @@ impl Settings {
     /// `metric` from a hand-edited or forward-version file is dropped rather
     /// than rendered blank).
     pub fn status_bar_metrics(&self) -> Vec<ResolvedMetric> {
+        self.status_bar_metrics_indexed()
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect()
+    }
+
+    /// Like [`Self::status_bar_metrics`] but each resolved metric is paired with
+    /// its index in the raw `status_bar_metrics` list — for direct-manipulation
+    /// actions (drag-reorder) that mutate the list by index. Unknown entries are
+    /// dropped but do not shift the indices of the ones kept.
+    pub fn status_bar_metrics_indexed(&self) -> Vec<(usize, ResolvedMetric)> {
         self.status_bar_metrics
             .iter()
-            .filter_map(|c| {
+            .enumerate()
+            .filter_map(|(i, c)| {
                 MetricKind::from_setting_str(&c.metric).map(|kind| {
                     // Resolve thresholds from the override or the kind's default
                     // (0 for ungraded kinds, which ignore them).
                     let (dw, da) = kind
                         .default_thresholds()
                         .map_or((0.0, 0.0), |(w, a, _)| (w, a));
-                    ResolvedMetric {
-                        kind,
-                        style: MetricStyle::from_setting_str(&c.style),
-                        warn: c.warn.unwrap_or(dw),
-                        alarm: c.alarm.unwrap_or(da),
-                    }
+                    (
+                        i,
+                        ResolvedMetric {
+                            kind,
+                            style: MetricStyle::from_setting_str(&c.style),
+                            warn: c.warn.unwrap_or(dw),
+                            alarm: c.alarm.unwrap_or(da),
+                        },
+                    )
                 })
             })
             .collect()

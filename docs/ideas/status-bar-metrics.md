@@ -266,6 +266,17 @@ that metric's full-size chart, rather than a whole system panel.
      up-and-right from the anchor so a stack stays legible. Off (the default) keeps
      the single-card, click-away-closes behavior; turning it off truncates any
      stack back to one.
+   - **Direct manipulation in the bar.** When the cells overflow, the bar still
+     sheds from the right, but a **wheel scroll** over it slides a window through
+     the full list (`Tty::status_bar_scroll`, clamped by `view::status_bar_scroll_max`;
+     `‹`/`›` chevrons flag more off each edge) so the shed cells stay reachable. A
+     **long right-press** (`status_bar_edit_hold_secs`, default 3s / 1.5–5s, armed
+     via `mouse_area::on_right_press` and completed by a poll tick) enters a
+     drag-to-reorder **edit mode** (`Tty::status_bar_edit`): cells outline and
+     drag-reorder the config list live (`status_metric_drag` + per-cell
+     `on_enter`, mirroring the tab drag), keyed by raw config index
+     (`Settings::status_bar_metrics_indexed`). Escape or a click on empty bar
+     space leaves it.
 6. **System overlay** (mini-fdtop) on click.
 
 ## Cell backlog

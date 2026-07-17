@@ -208,6 +208,23 @@ pub enum Message {
     SetStatusBarDisabled(bool),
     /// Toggle pinning metric popovers open on a click away (several at once).
     SetStatusBarMetricsPinned(bool),
+    /// Wheel-scroll over the status bar (the vertical delta): slides the visible
+    /// window of metric cells left/right when the bar is too narrow for them all.
+    StatusBarScroll(f32),
+    /// A right-press landed on the status bar: arm the long-press-to-edit gesture.
+    StatusBarArmEdit,
+    /// The right button was released: cancel an armed (not-yet-entered) long-press.
+    StatusBarDisarmEdit,
+    /// Periodic tick while armed: enter edit mode once the hold completes.
+    StatusBarEditTick,
+    /// Leave drag-to-reorder edit mode (Escape or a click on empty bar space).
+    ExitStatusBarEdit,
+    /// Begin dragging the status-bar metric at this config index (edit mode).
+    StatusMetricDragStart(usize),
+    /// The pointer entered the cell at this config index while dragging: reorder.
+    StatusMetricDragOver(usize),
+    /// Nudge the edit-mode long-press hold duration by a seconds delta.
+    SetStatusBarEditHold(f32),
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
     SetClock24h(bool),
     SetClockSeconds(bool),

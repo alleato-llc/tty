@@ -288,6 +288,22 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
         Message::SetStatusBarDisabled(on) => state.set_status_bar_disabled(on),
         Message::SetStatusBarMetricsPinned(on) => state.set_status_bar_metrics_pinned(on),
+        Message::StatusBarScroll(dy) => {
+            // Wheel down slides the window toward the later cells; up, back.
+            let max = crate::view::status_bar_scroll_max(state);
+            if dy < 0.0 {
+                state.status_bar_scroll = (state.status_bar_scroll + 1).min(max);
+            } else if dy > 0.0 {
+                state.status_bar_scroll = state.status_bar_scroll.saturating_sub(1).min(max);
+            }
+        }
+        Message::StatusBarArmEdit => state.arm_status_bar_edit(),
+        Message::StatusBarDisarmEdit => state.disarm_status_bar_edit(),
+        Message::StatusBarEditTick => state.check_status_bar_edit_hold(),
+        Message::ExitStatusBarEdit => state.exit_status_bar_edit(),
+        Message::StatusMetricDragStart(idx) => state.start_status_metric_drag(idx),
+        Message::StatusMetricDragOver(idx) => state.reorder_dragged_metric(idx),
+        Message::SetStatusBarEditHold(delta) => state.step_status_bar_edit_hold(delta),
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
         Message::SetClockDate(on) => state.set_clock_date(on),
@@ -428,6 +444,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::PointerReleased => {
             state.metric_detail_resize = None;
             state.metric_detail_move_drag = None;
+            state.finish_status_metric_drag();
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }
@@ -464,6 +481,10 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     // Escape closes the rename field / settings panel / find bar (when open) instead of
     // going to the shell.
     if matches!(key, Key::Named(iced::keyboard::key::Named::Escape)) {
+        if state.status_bar_edit {
+            state.exit_status_bar_edit();
+            return iced::Task::none();
+        }
         if !state.metric_details.is_empty() {
             // Escape closes every open popover at once (in both modes).
             state.metric_details.clear();

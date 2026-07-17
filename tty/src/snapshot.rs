@@ -110,6 +110,10 @@ fn populated() -> Tty {
         untracked_forced_by_cli: false,
         show_session_start_prompt: false,
         metrics: Default::default(),
+        status_bar_scroll: 0,
+        status_bar_edit: false,
+        status_metric_drag: None,
+        status_bar_edit_arm: None,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -1107,6 +1111,56 @@ fn seed_load(tty: &mut Tty) {
     tty.metrics.load1_history = [0.6, 0.8, 0.7, 1.0, 1.1, 0.9, 1.3, 1.23]
         .into_iter()
         .collect();
+}
+
+#[test]
+fn status_bar_edit_mode_view() {
+    // Live edit mode: each metric cell gets an accent outline (draggable), and the
+    // right end shows the "drag to reorder · Esc to finish" hint.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
+    seed_metric_sample(&mut tty);
+    tty.status_bar_edit = true;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-edit.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-edit` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn status_bar_scrolled_view() {
+    // A narrow bar with more metrics than fit, scrolled to the middle of the list:
+    // one windowed cell (memory) flanked by ‹ and › chevrons that say there are
+    // more metrics off each edge.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![
+        metric("cpu", "sparkline"),
+        metric("mem", "sparkline"),
+        metric("net_io", "sparkline"),
+    ];
+    tty.window_width = 400.0;
+    tty.status_bar_scroll = 1;
+    seed_metric_sample(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-scrolled.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-scrolled` changed — delete its PNG to re-baseline"
+    );
 }
 
 #[test]

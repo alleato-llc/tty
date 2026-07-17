@@ -288,6 +288,21 @@ pub struct Tty {
     /// unless `settings.status_bar_metrics()` is non-empty; fed by the periodic
     /// `SampleMetrics` tick. See `metrics.rs`.
     pub metrics: crate::metrics::Metrics,
+    /// The start index of the visible window of status-bar metric cells: when the
+    /// bar is too narrow to hold every cell, scrolling over it slides this window
+    /// through the full list (so the shed cells are still reachable). `0` = the
+    /// front. Clamped to the scrollable range in `update`.
+    pub status_bar_scroll: usize,
+    /// Whether the status bar is in live-edit (drag-to-reorder) mode, and an
+    /// in-progress metric-cell drag `(config index, pointer anchor)` — mirrors
+    /// [`Self::tab_drag`]. Edit mode is entered by a long right-press on the bar
+    /// and left by Escape or a click on empty bar space.
+    pub status_bar_edit: bool,
+    pub status_metric_drag: Option<(usize, iced::Point)>,
+    /// When a right-press on the bar armed the long-press-to-edit gesture (the
+    /// instant it began); `None` when not armed. A tick checks the elapsed hold
+    /// against [`crate::settings::Settings::status_bar_edit_hold_secs`].
+    pub status_bar_edit_arm: Option<std::time::Instant>,
     /// The metric drill-in popovers currently open (a click on a status-bar
     /// sparkline opens one), each with its own layout. Empty when none are open.
     /// In the default one-at-a-time mode this holds 0 or 1; with
@@ -626,6 +641,10 @@ impl Tty {
             untracked_forced_by_cli: cli_untracked,
             show_session_start_prompt: plan == StartupPlan::Ask,
             metrics: crate::metrics::Metrics::default(),
+            status_bar_scroll: 0,
+            status_bar_edit: false,
+            status_metric_drag: None,
+            status_bar_edit_arm: None,
         };
         tty.new_tab();
         tty
@@ -897,6 +916,79 @@ impl Tty {
         self.settings
             .step_status_bar_metric_threshold(idx, warn, delta);
         self.settings.save();
+    }
+
+    /// Nudge the edit-mode long-press hold duration by `delta` seconds
+    /// (persisted, clamped to the allowed range).
+    pub fn step_status_bar_edit_hold(&mut self, delta: f32) {
+        let next = (self.settings.status_bar_edit_hold_secs() + delta).clamp(
+            crate::settings::MIN_EDIT_HOLD_SECS,
+            crate::settings::MAX_EDIT_HOLD_SECS,
+        );
+        self.settings.status_bar_edit_hold_secs = Some(next);
+        self.settings.save();
+    }
+
+    /// Arm the long-press-to-edit gesture (a right-press landed on the bar).
+    /// No-op once already editing.
+    pub fn arm_status_bar_edit(&mut self) {
+        if !self.status_bar_edit {
+            self.status_bar_edit_arm = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Cancel an armed long-press (the right button was released before the hold
+    /// completed). Leaves an active edit session alone.
+    pub fn disarm_status_bar_edit(&mut self) {
+        self.status_bar_edit_arm = None;
+    }
+
+    /// If the long-press has been held for the configured duration, enter edit
+    /// mode. Called from the periodic tick while armed.
+    pub fn check_status_bar_edit_hold(&mut self) {
+        if let Some(started) = self.status_bar_edit_arm {
+            let hold = self.settings.status_bar_edit_hold_secs();
+            if started.elapsed().as_secs_f32() >= hold {
+                self.status_bar_edit = true;
+                self.status_bar_edit_arm = None;
+            }
+        }
+    }
+
+    /// Leave drag-to-reorder edit mode (Escape or a click on empty bar space).
+    pub fn exit_status_bar_edit(&mut self) {
+        self.status_bar_edit = false;
+        self.status_bar_edit_arm = None;
+        self.status_metric_drag = None;
+    }
+
+    /// Begin dragging the status-bar metric at config index `idx` (edit mode).
+    pub fn start_status_metric_drag(&mut self, idx: usize) {
+        if self.status_bar_edit {
+            self.status_metric_drag = Some((idx, self.pointer));
+        }
+    }
+
+    /// While a metric drag is armed, moving the pointer over the cell at config
+    /// index `target` live-reorders the dragged metric to that slot (persisted),
+    /// mirroring [`Self::reorder_dragged_tab`]. No-op when not dragging.
+    pub fn reorder_dragged_metric(&mut self, target: usize) {
+        let Some((from, start)) = self.status_metric_drag else {
+            return;
+        };
+        let len = self.settings.status_bar_metrics.len();
+        if from == target || from >= len || target >= len {
+            return;
+        }
+        let item = self.settings.status_bar_metrics.remove(from);
+        self.settings.status_bar_metrics.insert(target, item);
+        self.status_metric_drag = Some((target, start));
+        self.settings.save();
+    }
+
+    /// End a metric drag on pointer release (the reorder already happened live).
+    pub fn finish_status_metric_drag(&mut self) {
+        self.status_metric_drag = None;
     }
 
     /// Whether the floating (auto-hide) status bar should show right now: the
