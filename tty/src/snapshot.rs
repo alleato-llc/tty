@@ -1206,7 +1206,8 @@ fn seed_processes(tty: &mut Tty) {
     };
     tty.metrics.processes = vec![
         p(412, "Google Chrome", 92.0, 4900 * mb),
-        p(88, "rustc", 45.0, 1900 * mb),
+        // 64% grades amber (>=60), 92% red (>=85) — exercises the CPU-hog coloring.
+        p(88, "rustc", 64.0, 1900 * mb),
         // A long name, to exercise the fill-column truncation.
         p(310, "com.apple.WebKit.WebContent", 6.0, 820 * mb),
         p(1, "Terminal", 4.0, 240 * mb),
@@ -1314,6 +1315,39 @@ fn metric_detail_proc_one_view() {
     assert!(
         matches,
         "snapshot `tty-metric-detail-proc-one` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn proc_row_context_menu_view() {
+    // Right-clicking a process row opens its context menu (View file descriptors
+    // + copy actions) at the pointer, over the process list.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Procs,
+    )];
+    tty.pointer = iced::Point::new(760.0, 360.0);
+    tty.menu = Some((
+        crate::state::MenuKind::ProcRow {
+            pid: 412,
+            name: "Google Chrome".to_string(),
+        },
+        tty.pointer,
+    ));
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-proc-row-menu.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-proc-row-menu` changed — delete its PNG to re-baseline"
     );
 }
 

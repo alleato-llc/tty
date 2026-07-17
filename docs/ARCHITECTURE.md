@@ -187,12 +187,18 @@ Thin glue, mirroring `fed`'s module shape:
   cell shows the busiest process; `procs_body` renders the drill-in — a clickable
   header (re-sort by CPU, absolute memory, or name) over a virtualized, scrollable
   `rime` `table` (`proc_sort` / `proc_table_scroll`), names truncated to the fill
-  column. Double- or right-clicking a row opens `proc_detail_body` for that one
-  pid: `sample_proc_detail()` reads it fully via `snapshot_pid` (which *does*
-  enumerate fds) each tick, folding a CPU% history that is kept only while that
-  process is open (`Metrics::proc_detail`, reset on each open — we never retain a
-  series per process). It shows the live CPU chart, memory / thread count, and the
-  scrollable fd list; `proc_detail_pid` gates the sampling and the view, and
+  column and the CPU% cell graded a color via the table's `cell_color` hook (the
+  shared `grade`/`grade_color` at the CPU cell's 60/85 cutoffs). Right-clicking a
+  row opens a `MenuKind::ProcRow` context menu (the app's one global `context_menu`
+  overlay, anchored at the pointer): **View file descriptors** →
+  `OpenProcDetail`, plus copy actions. **Copy path** resolves lazily via
+  `metrics::process_path` (prexp-core's light `process_path(pid)`) so the list
+  never pays for paths; PID/name reuse `CopyText`. `proc_detail_body` (opened only
+  from that menu) shows the one process: `sample_proc_detail()` reads it fully via
+  `snapshot_pid` (which *does* enumerate fds) each tick, folding a CPU% history
+  kept only while that process is open (`Metrics::proc_detail`, reset on each open
+  — we never retain a series per process); the fd rows are each right-click-to-copy
+  (`MenuKind::FdRow`). `proc_detail_pid` gates the sampling and the view, and
   `Esc` / "‹ Back" clears it.
   Network / disk have macOS samplers only for now (via `prexp-ffi` — `sysctl
   NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other platforms those reads error

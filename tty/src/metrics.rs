@@ -408,6 +408,13 @@ impl Metrics {
 /// usual sample interval).
 const PROC_DETAIL_HISTORY: usize = 180;
 
+/// Resolve a process's executable path by pid, or `None` if it can't be read
+/// (the process exited, or the platform doesn't support it). Used lazily by the
+/// process context menu's "Copy path" so the whole list isn't paying for it.
+pub(crate) fn process_path(pid: i32) -> Option<String> {
+    NativeSource::new().process_path(pid).ok()
+}
+
 #[cfg(test)]
 impl ProcDetail {
     /// Build a detail with fixed contents, for snapshot/behavior fixtures (the

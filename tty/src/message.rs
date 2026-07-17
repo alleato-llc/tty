@@ -227,11 +227,17 @@ pub enum Message {
     SetProcSort(crate::state::ProcSortColumn),
     /// Scroll the Processes drill-in table to this pixel offset.
     ProcTableScroll(f32),
-    /// Open the per-process detail view (fds + a live chart) for this pid — a
-    /// double-click or right-click on a process row.
+    /// Open the per-process detail view (fds + a live chart) for this pid — from
+    /// the process row's context menu ("View file descriptors").
     OpenProcDetail(i32),
     /// Return the Processes drill-in from a per-process detail back to the list.
     CloseProcDetail,
+    /// Right-click on a process row: open its context menu at the pointer.
+    ProcRowRightClick(i32, String),
+    /// Right-click on an open-file-descriptor row: open its context menu.
+    FdRowRightClick(String),
+    /// Copy a process's executable path (resolved lazily from its pid).
+    CopyProcPath(i32),
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
     SetClock24h(bool),
     SetClockSeconds(bool),

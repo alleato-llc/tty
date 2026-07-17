@@ -418,6 +418,19 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     Message::RequestDeleteSettingsHistoryRow(target.clone()),
                 ),
             ],
+            MenuKind::ProcRow { pid, name } => vec![
+                MenuItem::action("View file descriptors", Message::OpenProcDetail(*pid)),
+                MenuItem::separator(),
+                MenuItem::action("Copy path", Message::CopyProcPath(*pid)),
+                MenuItem::action("Copy PID", Message::CopyText(pid.to_string())),
+                MenuItem::action("Copy name", Message::CopyText(name.clone())),
+            ],
+            MenuKind::FdRow { path } => {
+                vec![MenuItem::action(
+                    "Copy path",
+                    Message::CopyText(path.clone()),
+                )]
+            }
         };
         base = context_menu(base, &items, at, Message::CloseMenu);
     }
@@ -2725,10 +2738,19 @@ fn procs_body(state: &Tty, card_w: f32, chart_h: f32) -> Element<'_, Message> {
     ]
     .align_y(iced::Alignment::Center);
 
-    // The pids in the sorted row order, so a row click maps back to a process. The
-    // table hands its callbacks a row index; each of the two closures owns a copy.
-    let pids: Vec<i32> = order.iter().map(|&i| procs[i].pid).collect();
-    let pids_activate = pids.clone();
+    // Sorted-order metadata for the callbacks: (pid, name) so a right-clicked row
+    // opens its context menu, and the CPU% per row so a hog can be graded a color.
+    let row_meta: Vec<(i32, String)> = order
+        .iter()
+        .map(|&i| (procs[i].pid, procs[i].name.clone()))
+        .collect();
+    let cpu_by_row: Vec<f32> = order.iter().map(|&i| procs[i].cpu_percent).collect();
+    // Grade the CPU% cell by the same cutoffs as the CPU status-bar cell, so a
+    // busy process reads amber (>=60%) / red (>=85%) at a glance.
+    let (warn, alarm, _) = crate::settings::MetricKind::Cpu
+        .default_thresholds()
+        .unwrap_or((60.0, 85.0, false));
+    let (warn, alarm) = (warn as f32, alarm as f32);
 
     // The virtualized body. The cell closure owns the sorted order and borrows the
     // process list.
@@ -2741,20 +2763,34 @@ fn procs_body(state: &Tty, card_w: f32, chart_h: f32) -> Element<'_, Message> {
             _ => crate::metrics::format_bytes(p.memory_bytes),
         }
     };
+    let cell_color = move |row: usize, col: usize| -> Option<iced::Color> {
+        if col != 1 {
+            return None;
+        }
+        match grade(cpu_by_row[row], warn, alarm, false) {
+            Grade::Calm => None,
+            g => Some(grade_color(g)),
+        }
+    };
     let columns = vec![
         TableColumn::fill("").align(CellAlign::Left),
         TableColumn::fixed("", NUM_W).align(CellAlign::Right),
         TableColumn::fixed("", NUM_W).align(CellAlign::Right),
     ];
     let body = table(rows, columns, cell)
+        .cell_color(cell_color)
         .metrics(TableMetrics {
             row_height: 22.0,
             header_height: 0.0,
         })
         .offset(state.proc_table_scroll)
         .on_scroll(Message::ProcTableScroll)
-        .on_activate(move |row| Message::OpenProcDetail(pids_activate[row]))
-        .on_right_click(move |row| Message::OpenProcDetail(pids[row]));
+        // Right-click opens the row's context menu (View fds / Copy path / PID /
+        // name); it is the way into the per-process detail.
+        .on_right_click(move |row| {
+            let (pid, name) = &row_meta[row];
+            Message::ProcRowRightClick(*pid, name.clone())
+        });
 
     column![
         text(format!("Processes — {}", rows)).size(14).color(t.ink),
@@ -2870,12 +2906,17 @@ fn proc_detail_body(state: &Tty, chart_h: f32) -> Element<'_, Message> {
         for r in &d.resources {
             let kind = resource_kind_label(&r.kind);
             let path = r.path.as_deref().unwrap_or("—");
-            list = list.push(
-                text(format!("{:>3}  {:<6} {}", r.descriptor, kind, path))
-                    .size(11)
-                    .color(t.muted)
-                    .font(iced::Font::MONOSPACE),
-            );
+            let line = text(format!("{:>3}  {:<6} {}", r.descriptor, kind, path))
+                .size(11)
+                .color(t.muted)
+                .font(iced::Font::MONOSPACE);
+            // Right-click a descriptor with a path to copy it.
+            list = list.push(match &r.path {
+                Some(p) => mouse_area(line)
+                    .on_right_press(Message::FdRowRightClick(p.clone()))
+                    .into(),
+                None => Element::from(line),
+            });
         }
         scrollable(list).height(Length::Fill).into()
     };

@@ -304,10 +304,13 @@ source serves fdtop; tty consumes it in `metrics.rs`.
   process (click the PROCESS / CPU / MEM header to sort). Per-process CPU% is folded
   from `cpu_time_ns` deltas, memory shown as an absolute footprint (`phys` bytes);
   read via `prexp-core`'s light `process_summaries()` (no fd enumeration), sampled
-  only while the cell is shown. Long names truncate to the column. Double- or
-  right-clicking a row drills into that one process (`snapshot_pid`, which *does*
-  enumerate fds): a live CPU chart kept only while it's open, its memory / thread
-  count, and the scrollable list of its open file descriptors. *Shipped.*
+  only while the cell is shown. Long names truncate to the column, and the CPU%
+  cell grades a color (amber ≥60%, red ≥85%) so hogs stand out. Right-clicking a
+  row opens a context menu: **View file descriptors** (drills into that one
+  process — `snapshot_pid`, which *does* enumerate fds — for a live CPU chart kept
+  only while it's open, its memory / thread count, and the scrollable list of its
+  open file descriptors, each right-click-to-copy), plus **Copy path** (resolved
+  lazily) / **Copy PID** / **Copy name**. *Shipped.*
 - [x] **Battery** — charge %, charging state, time remaining. A bounded 0..100%
   gauge (fixed-scale sparkline like CPU/memory, colored by charge — low = alarm);
   the drill-in adds the charging state and a time-to-full/empty estimate. Source:

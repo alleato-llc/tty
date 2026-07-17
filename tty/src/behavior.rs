@@ -421,6 +421,34 @@ fn proc_detail_open_and_close_routing() {
 }
 
 #[test]
+fn proc_and_fd_right_click_open_context_menus() {
+    use crate::state::MenuKind;
+    let mut tty = headless(1);
+    tty.pointer = iced::Point::new(120.0, 200.0);
+
+    // Right-clicking a process row opens its menu at the pointer.
+    let _ = update(
+        &mut tty,
+        Message::ProcRowRightClick(412, "Google Chrome".to_string()),
+    );
+    assert!(matches!(
+        &tty.menu,
+        Some((MenuKind::ProcRow { pid: 412, name }, _)) if name == "Google Chrome"
+    ));
+
+    // A copy action closes the menu (path resolves for our own live pid).
+    let _ = update(&mut tty, Message::CopyProcPath(std::process::id() as i32));
+    assert!(tty.menu.is_none());
+
+    // Right-clicking a descriptor row opens a menu carrying its path.
+    let _ = update(&mut tty, Message::FdRowRightClick("/dev/null".to_string()));
+    assert!(matches!(
+        &tty.menu,
+        Some((MenuKind::FdRow { path }, _)) if path == "/dev/null"
+    ));
+}
+
+#[test]
 fn status_bar_scroll_offset_moves_and_saturates() {
     // With no cells fitting (window width 0 → everything "fits", max 0), scroll is
     // pinned at 0; the offset never goes negative.

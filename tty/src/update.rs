@@ -310,6 +310,18 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.metrics.sample_proc_detail(pid);
         }
         Message::CloseProcDetail => state.close_proc_detail(),
+        Message::ProcRowRightClick(pid, name) => {
+            state.menu = Some((crate::state::MenuKind::ProcRow { pid, name }, state.pointer));
+        }
+        Message::FdRowRightClick(path) => {
+            state.menu = Some((crate::state::MenuKind::FdRow { path }, state.pointer));
+        }
+        Message::CopyProcPath(pid) => {
+            state.close_menu();
+            if let Some(path) = crate::metrics::process_path(pid) {
+                return iced::clipboard::write(path);
+            }
+        }
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
         Message::SetClockDate(on) => state.set_clock_date(on),

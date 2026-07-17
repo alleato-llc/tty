@@ -503,6 +503,16 @@ pub enum MenuKind {
     /// The full archive address of the row — Copy uses its `command`, Delete
     /// needs the rest to tombstone it on disk.
     SettingsHistoryRow(ArchivedTarget),
+    /// A right-clicked row in the Processes drill-in: view its fds, or copy its
+    /// path / pid / name. The path is resolved lazily when copied (not held here).
+    ProcRow {
+        pid: i32,
+        name: String,
+    },
+    /// A right-clicked open-file-descriptor row in a process detail: copy its path.
+    FdRow {
+        path: String,
+    },
 }
 
 /// What a right-clicked Scrollback History row refers to, live (in
