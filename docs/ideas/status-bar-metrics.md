@@ -274,7 +274,9 @@ that metric's full-size chart, rather than a whole system panel.
      drill-in (`Tty::open_metric_detail`, from `PointerReleased`), while a **hold**
      past `status_bar_edit_hold_secs` (default 3s / 1.5–5s, completed by a poll
      tick) enters drag-to-reorder **edit mode** (`Tty::status_bar_edit`) and starts
-     dragging that cell. In edit mode cells outline, the dragged one lifts, and an
+     dragging that cell. The outline appears only once the hold engages — never on
+     a quick tap, and the hold floor is 1.5s, so a press under 1.5s never flashes a
+     border. In edit mode cells outline, the dragged one lifts, and an
      accent **insertion bar** marks the drop slot (`status_metric_drag` /
      `status_metric_drop`, keyed by raw config index via
      `Settings::status_bar_metrics_indexed`); the reorder commits on release.

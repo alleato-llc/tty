@@ -135,14 +135,23 @@ Thin glue, mirroring `fed`'s module shape:
   accordion of its captured output lines; a text filter narrows the list, double-clicking
   a row copies its command, and a single `stat("Commands", …)` reports the shown/filtered
   count. **Machine stats** live on the status bar: each `settings.status_bar_metrics`
-  entry (`{ metric, style }`, resolved leniently so an unknown metric is skipped, not
-  fatal) renders as a `rime` `sparkline` (CPU/memory color-graded by load; network/disk
-  rates auto-scaled to their recent peak; the combined Net/Disk I/O metrics overlay two
-  series on one scale) or a plain number, in configured order. `visible_metric_count`
-  sheds cells from the right when the tracked window width can't hold them all, so the
-  bar never wraps. Clicking a cell emits `OpenMetricDetail`, which pushes a
-  `MetricPopover` (metric + per-popover expand / size / position) onto
-  `Tty::metric_details`; `metric_popover_card` builds each and `main_view` places them
+  entry (`{ metric, style, warn?, alarm? }`, resolved leniently via
+  `status_bar_metrics_indexed` so an unknown metric is skipped, not fatal) renders as a
+  `rime` `sparkline` or a plain number. The graded cells (CPU, memory, battery) color
+  by a `grade` against per-cell **warn/alarm thresholds** (configurable, per-kind
+  defaults) and, when past a threshold, recolor the whole cell including its label
+  (`MetricRender::alert`); network/disk rates auto-scale to their recent peak (Net/Disk
+  I/O overlay two series on one scale); `Uptime` / `Session` / `Clock` are text cells;
+  `Load` sparklines the 1-minute load; `Battery` is a fixed 0..100% gauge.
+  `visible_metric_count` sheds cells from the right when the tracked window width can't
+  hold them all; a **wheel scroll** over the bar slides a window (`Tty::status_bar_scroll`,
+  clamped by `status_bar_scroll_max`, `‹`/`›` chevrons) through the shed cells. A cell
+  **tap** opens its drill-in (`open_metric_detail` on release); a **press-hold** past
+  `status_bar_edit_hold_secs` enters drag-to-reorder **edit mode** (`status_bar_edit`):
+  cells outline, the dragged one lifts, an insertion bar marks the drop
+  (`status_metric_drag` / `status_metric_drop`), and the reorder commits on release.
+  Opening a drill-in pushes a `MetricPopover` (metric + per-popover expand / size /
+  position) onto `Tty::metric_details`; `metric_popover_card` builds each and `main_view` places them
   (bottom-centered over the bar, cascaded when several are open). The card holds the
   metric's full-size `rime` `line_chart` over its retained history — or a "collecting"
   note when the history isn't chartable yet — with a "+" / "−" expand affordance
@@ -160,16 +169,21 @@ Thin glue, mirroring `fed`'s module shape:
   deltas over the `Instant`-measured interval, and keeps a bounded per-metric history
   for the sparklines. It also keeps **per-core** CPU% history (`core_history`) for the
   CPU drill-in's per-core grid, plus each core's cached P/E `perf_levels` (static, read
-  once from `prexp-core`'s `cpu_perf_levels()`). It also tracks two uptimes
+  once from `prexp-core`'s `cpu_perf_levels()`). Memory now also carries **swap**
+  (`prexp-core`'s `MemoryInfo.swap_*` — `sysctl(vm.swapusage)` on macOS, `/proc/meminfo`
+  on Linux), shown as a line in the Memory drill-in. It tracks two uptimes
   (`system_uptime_secs` / `session_uptime_secs`): the system boot time is read once
   via `prexp-core`'s `system_boot_time_secs()` (`sysctl(KERN_BOOTTIME)` on macOS,
   `/proc/uptime` on Linux) and the session start is stamped on the first sample; the
-  `Uptime` / `Session` metric kinds render as text cells (abbreviated `up 3d 4h`,
-  drilling into a full breakdown) rather than sparklines. Network / disk have macOS
-  samplers only for now (via `prexp-ffi` — `sysctl NET_RT_IFLIST2` + IOKit
-  `IOBlockStorageDriver`); on other platforms those reads error and are dropped, so
-  the metric simply shows no rate. A failed CPU/memory read is warned and skipped —
-  a stats hiccup never disturbs the terminal.
+  `Uptime` / `Session` kinds render as text cells (abbreviated `up 3d 4h`, drilling
+  into a full breakdown). It also samples the **load average**
+  (`system_load_average()` — `getloadavg(3)` / `/proc/loadavg`) and the **battery**
+  (`system_battery()` — IOKit power sources / `/sys/class/power_supply`, hidden with no
+  battery). The `Clock` cell is the live wall time (its own 1s tick, no sampler).
+  Network / disk have macOS samplers only for now (via `prexp-ffi` — `sysctl
+  NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other platforms those reads error
+  and are dropped, so the metric simply shows no rate. A failed CPU/memory read is
+  warned and skipped — a stats hiccup never disturbs the terminal.
 - **`subscription`** — key events + per-window geometry (`Focused`/`Resized`/`Moved` via
   `listen_with`'s window id) + `window::close_events` + **one always-on output stream** fed
   by `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
@@ -244,15 +258,19 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   on, `main_view` drops the bar from the column and floats it back over the bottom
   edge via a `stack` only while `status_bar_revealed()` — the pointer within
   `STATUS_BAR_REVEAL_ZONE` of the bottom — so toggling it never reflows the pane
-  grid), plus the pin-popovers toggle and the machine-stats cell editor; and the
+  grid), the pin-popovers toggle, the reorder-hold stepper, and the machine-stats
+  cell editor (add / reorder / style / remove, per-cell warn/alarm thresholds, and
+  clock-format toggles when a clock cell is present); and the
   **Window** controls — **Keep window on top** (drives the iced `window::Level`,
   broadcast to every live window via `window::set_level`) and the two transparency
   amounts. A read-only **Keys** section documents the shortcuts.
   `tty.settings.json` persists the theme name, font family/size, any custom palette,
   the active-tab highlight flag, the status-bar flags (`status_bar_autohide`,
-  `status_bar_disabled`, `status_bar_metrics_pinned`) and the ordered
-  `status_bar_metrics`, the window flags (`window_always_on_top`), the
-  `unfocused_opacity` / `focused_opacity` amounts, and the encrypted-history fields
+  `status_bar_disabled`, `status_bar_metrics_pinned`, `status_bar_edit_hold_secs`),
+  the clock format (`clock_24h` / `clock_seconds` / `clock_date`) and the ordered
+  `status_bar_metrics` (each `{ metric, style, warn?, alarm? }`), the window flags
+  (`window_always_on_top`), the `unfocused_opacity` / `focused_opacity` amounts, and
+  the encrypted-history fields
   (`encrypted_history_enabled`, `history_key_source`, `history_kdf`,
   `history_fanout`, `history_cipher`, `history_reauth_interval_minutes`,
   `history_session_start`). `window_opacity()` drives a uniform per-surface fade —
