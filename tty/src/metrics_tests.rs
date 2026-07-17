@@ -74,6 +74,25 @@ fn rate_from_counter_delta() {
 }
 
 #[test]
+fn proc_cpu_percent_from_time_delta() {
+    // Half a second of CPU time over a one-second interval → 50%.
+    assert_eq!(proc_cpu_percent(0, 500_000_000, 1_000_000_000), 50.0);
+    // A full second of CPU per wall-second → 100% (one saturated thread).
+    assert_eq!(proc_cpu_percent(0, 1_000_000_000, 1_000_000_000), 100.0);
+    // Multi-threaded: two cores' worth of CPU time reads over 100, like `top`.
+    assert_eq!(proc_cpu_percent(0, 2_000_000_000, 1_000_000_000), 200.0);
+    // Only the delta counts (prev is subtracted).
+    assert_eq!(
+        proc_cpu_percent(1_000_000_000, 1_250_000_000, 1_000_000_000),
+        25.0
+    );
+    // A counter reset (cur < prev) saturates to 0, not a huge spike.
+    assert_eq!(proc_cpu_percent(500_000_000, 0, 1_000_000_000), 0.0);
+    // A non-positive interval reads calm (first sample / clock hiccup).
+    assert_eq!(proc_cpu_percent(0, 500_000_000, 0), 0.0);
+}
+
+#[test]
 fn push_capped_keeps_newest_and_bounds_length() {
     let mut hist = std::collections::VecDeque::new();
     for i in 0..(HISTORY_LEN + 10) {

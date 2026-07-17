@@ -329,9 +329,7 @@ impl Metrics {
         let mut procs = Vec::with_capacity(summaries.len());
         for s in &summaries {
             let cpu_percent = match (self.prev_proc_cpu.get(&s.pid), elapsed_ns) {
-                (Some(&prev), Some(el)) => {
-                    (s.cpu_time_ns.saturating_sub(prev) as f64 / el as f64 * 100.0) as f32
-                }
+                (Some(&prev), Some(el)) => proc_cpu_percent(prev, s.cpu_time_ns, el),
                 _ => 0.0,
             };
             next_prev.insert(s.pid, s.cpu_time_ns);
@@ -371,8 +369,7 @@ impl Metrics {
             Some(d) if d.pid == pid => {
                 let elapsed = now.duration_since(d.prev_instant).as_nanos();
                 if elapsed > 0 {
-                    let cpu = (cpu_ns.saturating_sub(d.prev_cpu_ns) as f64 / elapsed as f64 * 100.0)
-                        as f32;
+                    let cpu = proc_cpu_percent(d.prev_cpu_ns, cpu_ns, elapsed);
                     d.cpu_history.push_back(cpu);
                     while d.cpu_history.len() > PROC_DETAIL_HISTORY {
                         d.cpu_history.pop_front();
@@ -448,6 +445,18 @@ fn rate(cur: u64, prev: u64, elapsed: f32) -> f32 {
         return 0.0;
     }
     cur.saturating_sub(prev) as f32 / elapsed
+}
+
+/// A process's CPU% over an interval: the cumulative-CPU-time delta (`cur_ns` −
+/// `prev_ns`, in nanoseconds) as a fraction of the wall-clock `elapsed_ns`. Can
+/// exceed 100 for a multi-threaded process, like `top`. Saturating (a counter
+/// reset reads 0, not a huge spike), and 0 on a non-positive interval so a first
+/// sample or a clock hiccup reads calm.
+fn proc_cpu_percent(prev_ns: u64, cur_ns: u64, elapsed_ns: u128) -> f32 {
+    if elapsed_ns == 0 {
+        return 0.0;
+    }
+    (cur_ns.saturating_sub(prev_ns) as f64 / elapsed_ns as f64 * 100.0) as f32
 }
 
 /// Push `v` onto `hist`, dropping the oldest past [`HISTORY_LEN`].
