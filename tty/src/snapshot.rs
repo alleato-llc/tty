@@ -61,6 +61,7 @@ fn populated() -> Tty {
         selection: None,
         search: None,
         search_match: 0,
+        scroll_target: None,
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,

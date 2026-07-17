@@ -107,6 +107,7 @@ impl Tty {
             selection: None,
             search: None,
             search_match: 0,
+            scroll_target: None,
             show_scrollback: false,
             scrollback_query: String::new(),
             scrollback_selected: None,
@@ -487,6 +488,49 @@ impl Tty {
         }
         self.settings.set_palette(&style);
         self.apply_settings();
+    }
+
+    /// OSC 133 **prompt-jump** (`⌘↑`/`⌘↓`): move the focused pane's [`Self::scroll_target`]
+    /// to the previous (`back`) or next command prompt. Positions come from the pane's
+    /// recorded [`command regions`](cathode::screen::TerminalScreen::command_regions), so
+    /// it's a no-op when the shell has no integration (no marks). The view feeds the
+    /// resulting target to the pane's `scroll_to`.
+    pub fn jump_to_prompt(&mut self, window: iced::window::Id, back: bool) {
+        let Some(term) = self.tab_for(window).and_then(Tab::focused) else {
+            return;
+        };
+        let mut prompts: Vec<usize> = term
+            .screen
+            .lock()
+            .command_regions()
+            .iter()
+            .map(|r| r.prompt_row)
+            .collect();
+        prompts.sort_unstable();
+        prompts.dedup();
+        if prompts.is_empty() {
+            return;
+        }
+        let cur = self.scroll_target;
+        self.scroll_target = if back {
+            // Previous (earlier) prompt: the largest below the current target; on the
+            // first press (no target) that's the newest prompt. Stays put past the oldest.
+            let bound = cur.unwrap_or(usize::MAX);
+            prompts.iter().rev().find(|&&p| p < bound).copied().or(cur)
+        } else {
+            // Next (later) prompt: the smallest above the current target. At the live
+            // bottom (`None`) there's nothing below; past the newest it stays put.
+            match cur {
+                Some(c) => prompts.iter().find(|&&p| p > c).copied().or(cur),
+                None => None,
+            }
+        };
+    }
+
+    /// Clear the prompt-jump target (back to the live bottom) — called when the user
+    /// sends input to the shell, so the next `⌘↑` starts from the newest prompt again.
+    pub fn clear_prompt_jump(&mut self) {
+        self.scroll_target = None;
     }
 
     /// Toggle the `⌘F` find bar. Opening returns the search-field id to focus.

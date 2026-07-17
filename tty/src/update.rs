@@ -655,6 +655,21 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                     return iced::Task::none();
                 }
             }
+            // Plain ⌘↑ / ⌘↓ jumps to the previous / next command prompt (OSC 133).
+            use iced::keyboard::key::Named;
+            if !mods.alt() && !mods.control() {
+                match named {
+                    Named::ArrowUp => {
+                        state.jump_to_prompt(win, true);
+                        return iced::Task::none();
+                    }
+                    Named::ArrowDown => {
+                        state.jump_to_prompt(win, false);
+                        return iced::Task::none();
+                    }
+                    _ => {}
+                }
+            }
         }
     }
     // App chords use the platform *command* modifier (⌘ on macOS) so Ctrl stays a
@@ -756,6 +771,9 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
     }
     // Otherwise the keystroke is terminal input (arrow keys honor the app's DECCKM mode).
     if let Some(bytes) = phosphor::input::to_bytes(&key, mods, state.app_cursor_for(win)) {
+        // Typing at the shell returns focus to the live bottom, so prompt-jump restarts
+        // from the newest prompt next time.
+        state.clear_prompt_jump();
         state.write_focused(win, &bytes);
     }
     iced::Task::none()

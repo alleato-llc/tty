@@ -59,15 +59,21 @@ a clock.
   RIS reset queue **nothing** (eviction is not deletion). `seed_command_log` loads
   persisted entries back into the live window at startup. cathode knows nothing of
   crypto or files — that all lives in the app.
-- **OSC 133 semantic-prompt marks** — `command_started_at` + `pending_command_completions`
-  in `TerminalScreen`. The osc handler acts on `133;C` (command started) and
-  `133;D[;code]` (finished): the pair yields a `CommandCompletion { command, exit_code,
-  duration }`, drained by the host via `take_command_completions`. Duration is measured
-  at parse time (real-time, on the PTY-read thread), so cathode owns the clock here —
-  pairing `C`→`D` across byte chunks is what makes the measurement correct. `A`/`B`
-  (prompt boundaries) are consumed but unused; command *capture* stays the Enter
-  heuristic's job (see the `command_log` note above). Independent of shell integration:
-  no marks, no completions, and the rest of the terminal works unchanged.
+- **OSC 133 semantic-prompt marks** — the osc handler records both the *timing* and the
+  *positions* of each command. `133;A`/`B` pin the prompt line, `133;C` the output start
+  (+ a start `Instant`), `133;D[;code]` the output end + exit code. Two products: a
+  `CommandCompletion { command, exit_code, duration }` drained via
+  `take_command_completions` (duration measured at parse time on the PTY-read thread, so
+  cathode owns the clock — pairing `C`→`D` across byte chunks is what makes it correct),
+  and a `CommandMark` recorded per command. Marks are pinned to a **stable global line id**
+  (`lines_scrolled + cursor_row`, where `lines_scrolled` advances at the sole `scroll_up`
+  choke point) so a position follows its line through scrollback and survives eviction
+  without renumbering. `command_regions()` resolves the stored ids to current absolute
+  buffer lines (the same coordinate as `scroll_to`), pruning evicted marks — the host's
+  data for prompt-jump navigation, failed-command flagging, and output copy;
+  `CommandRegion::failed()` reports a non-zero exit. Command *text* capture stays the Enter
+  heuristic's job (see the `command_log` note above). Independent of shell integration: no
+  marks, no regions, and the rest of the terminal works unchanged.
 - **`wake`** — a process-global signal channel. The read loop calls
   `wake::signal()` after each parse (and on shell exit); the UI's subscription awaits
   it. This is what makes repaint **output-driven**: no idle polling, zero cost when
@@ -140,7 +146,10 @@ Thin glue, mirroring `fed`'s module shape:
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. `⌘F` opens the scrollback find bar (`Enter`/`⇧Enter`
-  step to the next/previous match, driving `phosphor`'s `.scroll_to`), `⌘K` clears the
+  step to the next/previous match, driving `phosphor`'s `.scroll_to`), `⌘↑`/`⌘↓`
+  **prompt-jump** to the previous/next OSC 133 command prompt (`jump_to_prompt` sets a
+  `scroll_target` the focused pane feeds to the same `.scroll_to`, reset to the live
+  bottom when the user types), `⌘K` clears the
   focused pane's scrollback (`command_log` included), and `⌘⇧H` toggles the
   **Scrollback History** panel — all three main-window-only, mirroring `⌘,`'s scope.
   Everything else becomes PTY input via `phosphor::input`.

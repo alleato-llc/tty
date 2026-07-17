@@ -168,6 +168,11 @@ pub struct Tty {
     /// the live match count (which can shrink as the query changes or output
     /// arrives) via `rem_euclid`, so it never needs resetting except on a new query.
     pub search_match: i64,
+    /// The absolute buffer line the focused pane should scroll to for OSC 133
+    /// **prompt-jump** (`⌘↑`/`⌘↓`) — the prompt row of the command last jumped to, or
+    /// `None` when at the live bottom. Fed to the focused pane's `scroll_to`; reset
+    /// when the user types into the shell. See [`Tty::jump_to_prompt`].
+    pub scroll_target: Option<usize>,
     /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
     pub show_scrollback: bool,
     /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).

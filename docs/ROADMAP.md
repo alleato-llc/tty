@@ -130,10 +130,12 @@ tier is complete.
 ## Backlog — proposed, not committed (review & prune)
 
 ### High-leverage next
-- **More from OSC 133 semantic prompts** — ✦ — the `C`/`D` marks are parsed and drive
-  **command-finished notifications** (shipped, see above). The rest of the protocol's
-  wins are still open: jump prompt-to-prompt, flag/underline failed commands inline, and
-  "copy last command's output." The modern-terminal killer feature
+- **More from OSC 133 semantic prompts** — ✦ — *shipping incrementally.* Done:
+  **command-finished notifications** (`C`/`D` timing + exit), a cathode **command-regions**
+  layer (mark positions pinned to stable line ids, surviving scrollback), and
+  **prompt-to-prompt navigation** (`⌘↑`/`⌘↓`). *Remaining:* flag/underline failed commands
+  inline (the exit code is already recorded per region), and "copy last command's output"
+  (the `C`→`D` line span is already recorded). The modern-terminal killer feature
   (kitty/iTerm/WezTerm/Ghostty). Deliberately **not** how Scrollback History's
   command/output separation works today (that stays the Enter heuristic); this is the
   prompt-navigation layer on top.

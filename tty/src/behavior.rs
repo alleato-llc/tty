@@ -51,6 +51,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         selection: None,
         search: None,
         search_match: 0,
+        scroll_target: None,
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,
@@ -159,6 +160,63 @@ fn adopt_settings_applies_external_changes_and_no_ops_when_unchanged() {
         !tty.adopt_settings(edited),
         "unchanged settings are a no-op"
     );
+}
+
+#[test]
+fn prompt_jump_walks_command_prompts_both_ways() {
+    use cathode::parser::TermParser;
+    let mut tty = headless(1);
+    let win = tty.main_window.unwrap();
+    // Record three OSC 133 command blocks in the focused pane.
+    {
+        let term = tty.tabs[0].focused().unwrap();
+        let mut s = term.screen.lock();
+        let mut p = TermParser::new();
+        for _ in 0..3 {
+            p.process(
+                b"\x1b]133;A\x07$ cmd\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07",
+                &mut s,
+            );
+        }
+    }
+    let prompts: Vec<usize> = {
+        let s = tty.tabs[0].focused().unwrap().screen.lock();
+        let mut v: Vec<usize> = s.command_regions().iter().map(|r| r.prompt_row).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    assert_eq!(prompts.len(), 3, "three prompts recorded");
+
+    // ⌘↑ walks newest → oldest from the live bottom, then stays at the oldest.
+    tty.jump_to_prompt(win, true);
+    assert_eq!(tty.scroll_target, Some(prompts[2]));
+    tty.jump_to_prompt(win, true);
+    assert_eq!(tty.scroll_target, Some(prompts[1]));
+    tty.jump_to_prompt(win, true);
+    assert_eq!(tty.scroll_target, Some(prompts[0]));
+    tty.jump_to_prompt(win, true);
+    assert_eq!(tty.scroll_target, Some(prompts[0]), "stays at the oldest");
+
+    // ⌘↓ walks back toward the newest, then stays.
+    tty.jump_to_prompt(win, false);
+    assert_eq!(tty.scroll_target, Some(prompts[1]));
+    tty.jump_to_prompt(win, false);
+    assert_eq!(tty.scroll_target, Some(prompts[2]));
+    tty.jump_to_prompt(win, false);
+    assert_eq!(tty.scroll_target, Some(prompts[2]), "stays at the newest");
+
+    // Typing at the shell returns to the live bottom.
+    tty.clear_prompt_jump();
+    assert_eq!(tty.scroll_target, None);
+}
+
+#[test]
+fn prompt_jump_is_a_no_op_without_recorded_prompts() {
+    let mut tty = headless(1);
+    let win = tty.main_window.unwrap();
+    tty.jump_to_prompt(win, true);
+    assert_eq!(tty.scroll_target, None, "no marks, nothing to jump to");
 }
 
 #[test]

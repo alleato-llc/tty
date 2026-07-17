@@ -170,6 +170,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             let size = state.font_size;
             let search = state.search.clone();
             let search_match = state.search_match;
+            let scroll_target = state.scroll_target;
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
@@ -186,9 +187,12 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                         );
                     }
                 };
+                // A `⌘F` match wins; otherwise the focused pane honors an OSC 133
+                // prompt-jump target (`⌘↑`/`⌘↓`). Non-focused panes never prompt-jump.
                 let scroll_to = search
                     .as_deref()
-                    .and_then(|q| current_match_line(term, q, search_match));
+                    .and_then(|q| current_match_line(term, q, search_match))
+                    .or_else(|| (pane == focus).then_some(scroll_target).flatten());
                 let term_widget = phosphor::terminal(
                     term.screen.clone(),
                     style,
