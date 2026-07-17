@@ -171,7 +171,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             let search = state.search.clone();
             let search_match = state.search_match;
             let scroll_target = state.scroll_target;
-            let prompt_gutter = state.settings.prompt_gutter();
+            let prompt_gutter = state.settings.shell_integration().gutter;
             // A focus border only earns its keep when there's more than one pane to tell
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
@@ -686,7 +686,7 @@ fn detached_view<'a>(
             Message::OpenFile,
         )
         .find(None)
-        .prompt_gutter(state.settings.prompt_gutter());
+        .prompt_gutter(state.settings.shell_integration().gutter);
         let border_color = if is_focused && highlight {
             accent
         } else {

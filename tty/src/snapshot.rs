@@ -185,7 +185,7 @@ fn prompt_gutter_view() {
     // Same commands as the failed-marker test, but with the prompt gutter on: every
     // prompt gets a dot to its left (red for the failed one), and the grid shifts right.
     let mut tty = populated();
-    tty.settings.prompt_gutter = Some(true);
+    tty.settings.shell_integration.gutter = Some(true);
     let term = painted_term(
         "zsh",
         56,

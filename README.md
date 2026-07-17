@@ -109,8 +109,10 @@ themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
 size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and
 **Highlight the focused pane** (the accent border on the focused pane in a split
-tab — turn it off for a flat, borderless split), a **prompt gutter** (opt-in — a dot
-beside every OSC 133 command prompt, red for a failed command), and the
+tab — turn it off for a flat, borderless split), the whole **shell integration
+(OSC 133)** group behind one master toggle (notifications, prompt-jump, failed-command
+flagging, output copy, and an opt-in **prompt gutter** — a dot beside every command
+prompt, red for a failure — all off at once when it's disabled), and the
 **auto-hiding status bar** (on by default — it floats back in when the pointer
 nears the bottom edge so the grid gets the full height; turn it off to pin it, or
 **Disable status bar** to drop it entirely). The **Window** tab keeps the window

@@ -323,6 +323,9 @@ pub struct TerminalScreen {
     /// Finalized OSC 133 command marks (positions + exit code), oldest first — pruned
     /// as their prompt line evicts from scrollback and capped at [`MAX_COMMAND_MARKS`].
     command_marks: Vec<CommandMark>,
+    /// The host's master gate for OSC 133: when false, the marks are ignored entirely
+    /// (see [`Self::set_honor_osc133`]). On by default.
+    honor_osc133: bool,
     /// Finished commands (OSC 133) queued for the host — see [`CommandCompletion`]
     /// and [`Self::take_command_completions`].
     pending_command_completions: Vec<CommandCompletion>,
@@ -356,6 +359,7 @@ impl TerminalScreen {
             lines_scrolled: 0,
             pending_mark: None,
             command_marks: Vec::new(),
+            honor_osc133: true,
             pending_command_completions: Vec::new(),
             dirty_rows: BTreeSet::new(),
             fg: TermColor::Default,
@@ -470,7 +474,8 @@ impl TerminalScreen {
                 // Keep the output span only while its end is still in the buffer;
                 // clamp a partially-evicted start up to the buffer's first line.
                 output: m.output.and_then(|(start, end)| {
-                    (end >= base).then(|| ((start.max(base) - base) as usize, (end - base) as usize))
+                    (end >= base)
+                        .then(|| ((start.max(base) - base) as usize, (end - base) as usize))
                 }),
                 exit_code: m.exit_code,
             })
@@ -494,6 +499,20 @@ impl TerminalScreen {
     /// Whether this screen is untracked.
     pub fn untracked(&self) -> bool {
         self.untracked
+    }
+
+    /// Set the host's master gate for OSC 133 semantic-prompt marks. When turned off,
+    /// incoming marks are ignored *and* any already-recorded regions/completions are
+    /// dropped, so every OSC 133 feature (notifications, prompt-jump, failed flagging,
+    /// output copy, the gutter) goes inert at once. The host applies this from its
+    /// `shell_integration.enabled` setting; on by default.
+    pub fn set_honor_osc133(&mut self, honor: bool) {
+        self.honor_osc133 = honor;
+        if !honor {
+            self.pending_mark = None;
+            self.command_marks.clear();
+            self.pending_command_completions.clear();
+        }
     }
 
     /// Queue a change for the host's persisted-history writer — the single
@@ -1407,14 +1426,17 @@ impl vte::Perform for TerminalScreen {
                     }
                 }
             }
-            b"133" => {
-                // Semantic-prompt marks (FinalTerm / iTerm2 shell integration). The four
-                // marks delimit regions: `A` prompt start, `B` command-input start, `C`
-                // output start, `D[;code]` finished. We pin each to a global line id (so
-                // the position survives scrollback) to drive prompt-jump navigation,
-                // failed-command flagging, and output copy; `C`/`D` also feed the
-                // completion notification (duration + exit). Command *text* capture stays
-                // the Enter heuristic's job (`record_output_line`).
+            // Semantic-prompt marks (FinalTerm / iTerm2 shell integration). The four
+            // marks delimit regions: `A` prompt start, `B` command-input start, `C`
+            // output start, `D[;code]` finished. We pin each to a global line id (so the
+            // position survives scrollback) to drive prompt-jump navigation, failed-
+            // command flagging, and output copy; `C`/`D` also feed the completion
+            // notification (duration + exit). Command *text* capture stays the Enter
+            // heuristic's job (`record_output_line`). The `honor_osc133` guard is the
+            // master gate: with OSC 133 off, the marks fall through to `_` and are
+            // dropped, so no regions/completions form and every downstream feature is
+            // inert.
+            b"133" if self.honor_osc133 => {
                 if let Some(sub) = params.get(1) {
                     let line = self.current_line_id();
                     match *sub {

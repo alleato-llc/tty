@@ -71,9 +71,12 @@ a clock.
   without renumbering. `command_regions()` resolves the stored ids to current absolute
   buffer lines (the same coordinate as `scroll_to`), pruning evicted marks — the host's
   data for prompt-jump navigation, failed-command flagging, and output copy;
-  `CommandRegion::failed()` reports a non-zero exit. Command *text* capture stays the Enter
-  heuristic's job (see the `command_log` note above). Independent of shell integration: no
-  marks, no regions, and the rest of the terminal works unchanged.
+  `CommandRegion::failed()` reports a non-zero exit. `set_honor_osc133(false)` is the host's
+  **master gate**: it makes the OSC handler ignore the marks (a match guard) *and* drops any
+  already-recorded regions/completions, so every downstream feature goes inert through one
+  switch. Command *text* capture stays the Enter heuristic's job (see the `command_log` note
+  above). Independent of shell integration: no marks, no regions, and the rest of the
+  terminal works unchanged.
 - **`wake`** — a process-global signal channel. The read loop calls
   `wake::signal()` after each parse (and on shell exit); the UI's subscription awaits
   it. This is what makes repaint **output-driven**: no idle polling, zero cost when
@@ -259,7 +262,11 @@ Thin glue, mirroring `fed`'s module shape:
   `shell_integration` owns the OSC 133 hooks: `ZSH_SNIPPET` (the pasteable manual snippet
   shown in settings) and `autoinstall_env` — an opt-in, zsh-only, off-by-default
   auto-install that points a new shell at a generated `ZDOTDIR` which sources the user's
-  real config and then installs the hooks. Non-zsh shells fall back to manual.
+  real config and then installs the hooks. Non-zsh shells fall back to manual. All of the
+  OSC 133 features — these plus prompt-jump, flagging, output copy, and the gutter — are one
+  cohesive unit gated by `shell_integration.enabled`: the resolver master-gates every
+  sub-option, and `set_shell_integration_enabled` pushes the flag to every open pane's
+  `set_honor_osc133` (like the scrollback cap), so flipping it clears the marks live.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the
   full key-derivation pipeline and its open refinement options are surveyed in
   `docs/history-keys.md`), opt-in
@@ -349,9 +356,11 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   the encrypted-history fields
   (`encrypted_history_enabled`, `history_key_source`, `history_kdf`,
   `history_fanout`, `history_cipher`, `history_reauth_interval_minutes`,
-  `history_session_start`), plus the notification + open-file fields
-  (`notify_on_command_finish`, `notify_command_min_seconds`,
-  `shell_integration_autoinstall`, `open_file_command`). `save()` is a **round-trip
+  `history_session_start`), `open_file_command`, and the whole OSC 133 feature grouped
+  under one `[shell_integration]` block (`enabled` master + `notify` / `notify_min_seconds`
+  / `gutter` / `autoinstall`), read once as a master-gated `ResolvedShellIntegration` via
+  `settings.shell_integration()` and migrated from the old flat keys on load. `save()` is a
+  **round-trip
   merge**: it re-reads the on-disk `DocumentMut` and replaces only the values, so a
   user's comments (full-line and inline) and key order survive a GUI write; unset
   `Option`s are simply omitted (TOML has no null). `load()` migrates a legacy

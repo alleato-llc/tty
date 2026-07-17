@@ -422,56 +422,83 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
         )
         .size(12)
         .color(t.muted),
-        toggle(
-            "Mark command prompts in a left gutter (failed = red)",
-            state.settings.prompt_gutter(),
-            Message::SetPromptGutter(!state.settings.prompt_gutter()),
-        ),
-        caption("COMMAND-FINISHED NOTIFICATIONS"),
-        toggle(
-            "Notify when a command finishes while unfocused",
-            state.settings.notify_on_command_finish(),
-            Message::SetNotifyOnCommandFinish(!state.settings.notify_on_command_finish()),
-        ),
-        stepper(
-            "Only notify for commands longer than (seconds)",
-            state.settings.notify_command_min_seconds().to_string(),
-            Message::NotifyMinSecondsStep(-5),
-            Message::NotifyMinSecondsStep(5),
-        ),
-        toggle(
-            "Auto-install shell integration (zsh; affects new shells)",
-            state.settings.shell_integration_autoinstall(),
-            Message::SetShellIntegrationAutoinstall(
-                !state.settings.shell_integration_autoinstall(),
-            ),
-        ),
-        text(
-            "Notifications need OSC 133 hooks in your shell. Auto-install wires zsh up \
-             for you; otherwise add this to your ~/.zshrc:"
-        )
-        .size(12)
-        .color(t.muted),
-        container(
-            text(crate::shell_integration::ZSH_SNIPPET)
-                .font(iced::Font::MONOSPACE)
-                .size(11)
-                .color(t.ink),
-        )
-        .padding(8)
-        .width(Length::Fill)
-        .style(move |_| container::Style {
-            border: Border {
-                color: t.hairline,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..container::background(t.surface)
-        }),
-        button::secondary("Copy snippet", Message::CopyShellSnippet),
+        shell_integration_section(state),
     ]
     .spacing(14)
     .into()
+}
+
+/// Appearance → Terminal: the OSC 133 shell-integration group — one master toggle,
+/// with every sub-option (notifications, gutter, auto-install, the manual snippet)
+/// shown only when it's on, so the whole feature reads as a single cohesive unit.
+fn shell_integration_section(state: &Tty) -> Element<'_, Message> {
+    let t = theme::tokens();
+    let si = state.settings.shell_integration();
+    let mut col = column![
+        caption("SHELL INTEGRATION (OSC 133)"),
+        toggle(
+            "Enable shell integration (command marks)",
+            si.enabled,
+            Message::SetShellIntegrationEnabled(!si.enabled),
+        ),
+        text(
+            "Marks each command's prompt + exit status so tty can notify you when one \
+             finishes, jump between prompts (⌘↑/⌘↓), flag failures, and copy output. \
+             Needs OSC 133 hooks in your shell (below)."
+        )
+        .size(12)
+        .color(t.muted),
+    ]
+    .spacing(14);
+    if si.enabled {
+        col = col
+            .push(toggle(
+                "Notify when a command finishes while unfocused",
+                si.notify,
+                Message::SetNotifyOnCommandFinish(!si.notify),
+            ))
+            .push(stepper(
+                "Only notify for commands longer than (seconds)",
+                si.notify_min_seconds.to_string(),
+                Message::NotifyMinSecondsStep(-5),
+                Message::NotifyMinSecondsStep(5),
+            ))
+            .push(toggle(
+                "Mark command prompts in a left gutter (failed = red)",
+                si.gutter,
+                Message::SetPromptGutter(!si.gutter),
+            ))
+            .push(toggle(
+                "Auto-install hooks into new shells (zsh)",
+                si.autoinstall,
+                Message::SetShellIntegrationAutoinstall(!si.autoinstall),
+            ))
+            .push(
+                text("Auto-install wires zsh up for you; otherwise add this to your ~/.zshrc:")
+                    .size(12)
+                    .color(t.muted),
+            )
+            .push(
+                container(
+                    text(crate::shell_integration::ZSH_SNIPPET)
+                        .font(iced::Font::MONOSPACE)
+                        .size(11)
+                        .color(t.ink),
+                )
+                .padding(8)
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    border: Border {
+                        color: t.hairline,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::background(t.surface)
+                }),
+            )
+            .push(button::secondary("Copy snippet", Message::CopyShellSnippet));
+    }
+    col.into()
 }
 
 /// Appearance → Window: keep-on-top, and the two transparency amounts (active

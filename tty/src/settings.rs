@@ -48,6 +48,55 @@ pub struct OutputLineOverride {
     pub max_lines: usize,
 }
 
+/// The OSC 133 (semantic-prompt) feature group — a master `enabled` switch plus its
+/// sub-options — serialized as one `[shell_integration]` table in `tty.toml`. Every
+/// field is optional so an absent block, or an absent key, falls back to the documented
+/// default. The rest of the app never reads these raw: it reads the resolved,
+/// master-gated [`ResolvedShellIntegration`] via [`Settings::shell_integration`].
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShellIntegration {
+    /// Master switch. When off, tty ignores OSC 133 marks entirely (no notifications,
+    /// gutter, prompt-jump, failed flagging, or output copy) and never auto-installs the
+    /// hooks — one gate for the whole feature. On (`true`/absent) by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Auto-install the OSC 133 hooks into new shells (zsh only). Off by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoinstall: Option<bool>,
+    /// Notify when a command finishes while the window is unfocused. On by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify: Option<bool>,
+    /// Minimum command duration (seconds) before a completion notification fires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_min_seconds: Option<u32>,
+    /// Reserve a one-cell left gutter marking each prompt (a dot, red on failure). Off
+    /// by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gutter: Option<bool>,
+}
+
+impl ShellIntegration {
+    /// Whether every key is unset — so a default config writes no `[shell_integration]`
+    /// block at all (keeps `tty.toml` clean until something is customized).
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// [`Settings::shell_integration`] resolved to concrete values, with defaults applied
+/// and the master gate honored (a sub-option reads `false` whenever `enabled` is off) —
+/// the single object the rest of the app consults.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedShellIntegration {
+    /// Whether tty honors OSC 133 at all: the master gate. cathode ignores the marks
+    /// when this is false, so every feature below is inert regardless.
+    pub enabled: bool,
+    pub autoinstall: bool,
+    pub notify: bool,
+    pub notify_min_seconds: u32,
+    pub gutter: bool,
+}
+
 /// A metric that can appear in the status bar. CPU, memory, and the four
 /// network/disk throughput rates have live samplers today (see `metrics.rs`);
 /// swap/load arrive with their samplers later, so the set grows from here.
@@ -443,26 +492,20 @@ pub struct Settings {
     /// overrides all three for one launch.
     #[serde(default)]
     pub history_session_start: Option<String>,
-    /// Post a system notification when a command finishes while the window is
-    /// unfocused (needs shell integration — see [`Self::shell_integration_autoinstall`]).
-    /// On (`true`/absent) by default; the notification only fires past
-    /// [`Self::notify_command_min_seconds`] so quick commands don't spam.
-    #[serde(default)]
+    /// Everything OSC 133 (semantic-prompt) — the master enable plus its sub-options —
+    /// grouped under one `[shell_integration]` block. See [`ShellIntegration`] and the
+    /// resolved [`Self::shell_integration`].
+    #[serde(default, skip_serializing_if = "ShellIntegration::is_empty")]
+    pub shell_integration: ShellIntegration,
+    /// Deprecated flat OSC 133 keys, read once to migrate into [`Self::shell_integration`]
+    /// (see [`Self::migrate_shell_integration`]) and never written back.
+    #[serde(default, skip_serializing)]
     pub notify_on_command_finish: Option<bool>,
-    /// Minimum command duration (seconds) before a completion notification fires.
-    /// Absent = [`DEFAULT_NOTIFY_MIN_SECONDS`].
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub notify_command_min_seconds: Option<u32>,
-    /// Reserve a one-cell left gutter that marks every OSC 133 command prompt (a dot,
-    /// red for a failed command). Off (absent) by default — opt-in, since it shifts the
-    /// grid right one column. Needs shell integration to show anything.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub prompt_gutter: Option<bool>,
-    /// Whether to auto-install the OSC 133 shell-integration hooks into new shells
-    /// (zsh only for now). Off (absent) by default — opt-in, since it wraps the
-    /// shell's startup. When off, enable notifications by adding the hooks to your
-    /// shell rc yourself (the settings panel shows the snippet).
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub shell_integration_autoinstall: Option<bool>,
     /// Command template for ⌘-clicking a `path:line[:col]` reference in terminal
     /// output. `{file}`/`{line}`/`{col}` are substituted (line/col default to `1`
@@ -750,6 +793,7 @@ impl Settings {
     pub fn load() -> Self {
         let mut settings = Self::load_inner();
         settings.migrate_status_bar_metrics();
+        settings.migrate_shell_integration();
         settings
     }
 
@@ -911,29 +955,40 @@ impl Settings {
         self.highlight_focused_pane.unwrap_or(true)
     }
 
-    /// Whether a completion notification fires for commands finishing while the
-    /// window is unfocused (default `true`).
-    pub fn notify_on_command_finish(&self) -> bool {
-        self.notify_on_command_finish.unwrap_or(true)
+    /// The OSC 133 settings resolved to concrete values, with per-key defaults applied
+    /// and the master `enabled` gate honored (every sub-option reads `false` when the
+    /// master is off). The one entry point the rest of the app uses — see
+    /// [`ResolvedShellIntegration`].
+    pub fn shell_integration(&self) -> ResolvedShellIntegration {
+        let si = &self.shell_integration;
+        let enabled = si.enabled.unwrap_or(true);
+        ResolvedShellIntegration {
+            enabled,
+            // A sub-option only takes effect when the master is on: with OSC 133 off
+            // there are no marks to act on, and we don't wrap the shell either.
+            autoinstall: enabled && si.autoinstall.unwrap_or(false),
+            notify: enabled && si.notify.unwrap_or(true),
+            notify_min_seconds: si
+                .notify_min_seconds
+                .unwrap_or(DEFAULT_NOTIFY_MIN_SECONDS)
+                .clamp(MIN_NOTIFY_MIN_SECONDS, MAX_NOTIFY_MIN_SECONDS),
+            gutter: enabled && si.gutter.unwrap_or(false),
+        }
     }
 
-    /// The minimum command duration (seconds) that triggers a completion
-    /// notification (default [`DEFAULT_NOTIFY_MIN_SECONDS`], clamped to a sane range).
-    pub fn notify_command_min_seconds(&self) -> u32 {
-        self.notify_command_min_seconds
-            .unwrap_or(DEFAULT_NOTIFY_MIN_SECONDS)
-            .clamp(MIN_NOTIFY_MIN_SECONDS, MAX_NOTIFY_MIN_SECONDS)
-    }
-
-    /// Whether to auto-install the OSC 133 shell hooks into new shells (default
-    /// `false` — opt-in).
-    pub fn shell_integration_autoinstall(&self) -> bool {
-        self.shell_integration_autoinstall.unwrap_or(false)
-    }
-
-    /// Whether to show the OSC 133 prompt gutter (default `false` — opt-in).
-    pub fn prompt_gutter(&self) -> bool {
-        self.prompt_gutter.unwrap_or(false)
+    /// Fold the deprecated flat OSC 133 keys into [`Self::shell_integration`] (a nested
+    /// key already set wins), then clear them so they never round-trip back to disk.
+    /// Runs once at [`Self::load`], like [`Self::migrate_status_bar_metrics`].
+    fn migrate_shell_integration(&mut self) {
+        let notify = self.notify_on_command_finish.take();
+        let min = self.notify_command_min_seconds.take();
+        let gutter = self.prompt_gutter.take();
+        let autoinstall = self.shell_integration_autoinstall.take();
+        let si = &mut self.shell_integration;
+        si.notify = si.notify.or(notify);
+        si.notify_min_seconds = si.notify_min_seconds.or(min);
+        si.gutter = si.gutter.or(gutter);
+        si.autoinstall = si.autoinstall.or(autoinstall);
     }
 
     /// The configured status-bar metrics resolved to typed metric + style, in

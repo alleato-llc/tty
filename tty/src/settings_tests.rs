@@ -179,7 +179,10 @@ fn toml_roundtrips_the_fields_it_writes() {
     let s = Settings {
         theme: Some("nord".into()),
         font_size: Some(15.0),
-        notify_on_command_finish: Some(false),
+        shell_integration: ShellIntegration {
+            notify: Some(false),
+            ..Default::default()
+        },
         open_file_command: Some("code -g {file}:{line}:{col}".into()),
         status_bar_metrics: vec![MetricConfig {
             metric: "cpu".into(),
@@ -193,7 +196,7 @@ fn toml_roundtrips_the_fields_it_writes() {
     let back = Settings::from_toml_str(&doc.to_string()).expect("parse");
     assert_eq!(back.theme.as_deref(), Some("nord"));
     assert_eq!(back.font_size, Some(15.0));
-    assert_eq!(back.notify_on_command_finish, Some(false));
+    assert_eq!(back.shell_integration.notify, Some(false));
     assert_eq!(
         back.open_file_command.as_deref(),
         Some("code -g {file}:{line}:{col}")
@@ -271,7 +274,11 @@ fn toml_serializes_full_settings_with_palette_and_overrides() {
         theme: Some("nord".into()),
         font_size: Some(14.0),
         window_always_on_top: Some(true),
-        notify_command_min_seconds: Some(30),
+        shell_integration: ShellIntegration {
+            notify_min_seconds: Some(30),
+            gutter: Some(true),
+            ..Default::default()
+        },
         palette: Some(Palette {
             ansi: (0..16).map(|i| format!("#0000{i:02x}")).collect(),
             fg: "#ffffff".into(),
@@ -297,7 +304,8 @@ fn toml_serializes_full_settings_with_palette_and_overrides() {
     assert_eq!(back.palette.as_ref().map(|p| p.ansi.len()), Some(16));
     assert_eq!(back.output_line_overrides.len(), 1);
     assert_eq!(back.window_always_on_top, Some(true));
-    assert_eq!(back.notify_command_min_seconds, Some(30));
+    assert_eq!(back.shell_integration.notify_min_seconds, Some(30));
+    assert_eq!(back.shell_integration.gutter, Some(true));
 }
 
 #[test]
@@ -323,4 +331,84 @@ fn legacy_json_migrates_cleanly_to_toml() {
     assert_eq!(back.status_bar_metrics.len(), 1);
     assert_eq!(back.encrypted_history_enabled, Some(true));
     assert_eq!(back.history_key_source.as_deref(), Some("passphrase"));
+}
+
+#[test]
+fn migrates_flat_osc133_keys_into_the_group() {
+    // An old file with the flat keys parses, then migrate folds them into the group.
+    let toml = "notify_on_command_finish = false\nprompt_gutter = true\n\
+                shell_integration_autoinstall = true\nnotify_command_min_seconds = 20\n";
+    let mut s = Settings::from_toml_str(toml).expect("parse legacy flat keys");
+    s.migrate_shell_integration();
+    assert_eq!(s.shell_integration.notify, Some(false));
+    assert_eq!(s.shell_integration.gutter, Some(true));
+    assert_eq!(s.shell_integration.autoinstall, Some(true));
+    assert_eq!(s.shell_integration.notify_min_seconds, Some(20));
+    // The flat keys are cleared and everything now lives under the grouped key.
+    let out = toml_edit::ser::to_document(&s).unwrap().to_string();
+    assert!(
+        !out.contains("notify_on_command_finish"),
+        "flat keys gone:\n{out}"
+    );
+    assert!(
+        out.contains("shell_integration = {"),
+        "grouped under one key:\n{out}"
+    );
+    assert!(
+        out.contains("gutter = true"),
+        "sub-option preserved:\n{out}"
+    );
+    // And it round-trips back into the group.
+    let back = Settings::from_toml_str(&out).expect("reparse");
+    assert_eq!(back.shell_integration.gutter, Some(true));
+}
+
+#[test]
+fn migration_prefers_an_already_grouped_value() {
+    // Both a flat key and its new home set → the group wins, the flat one is dropped.
+    let mut s = Settings {
+        shell_integration: ShellIntegration {
+            notify: Some(true),
+            ..Default::default()
+        },
+        notify_on_command_finish: Some(false),
+        ..Default::default()
+    };
+    s.migrate_shell_integration();
+    assert_eq!(s.shell_integration.notify, Some(true));
+    assert_eq!(s.notify_on_command_finish, None);
+}
+
+#[test]
+fn shell_integration_master_gate_disables_sub_options() {
+    let s = Settings {
+        shell_integration: ShellIntegration {
+            enabled: Some(false),
+            notify: Some(true),
+            gutter: Some(true),
+            autoinstall: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let si = s.shell_integration();
+    assert!(!si.enabled);
+    assert!(!si.notify, "master off gates notify");
+    assert!(!si.gutter, "master off gates gutter");
+    assert!(!si.autoinstall, "master off gates autoinstall");
+}
+
+#[test]
+fn shell_integration_defaults_when_absent() {
+    let si = Settings::default().shell_integration();
+    assert!(si.enabled, "on by default");
+    assert!(si.notify, "notify on by default");
+    assert!(!si.gutter, "gutter off by default");
+    assert!(!si.autoinstall, "autoinstall off by default");
+    assert_eq!(si.notify_min_seconds, DEFAULT_NOTIFY_MIN_SECONDS);
+    // A pristine config writes no [shell_integration] block.
+    let out = toml_edit::ser::to_document(&Settings::default())
+        .unwrap()
+        .to_string();
+    assert!(!out.contains("shell_integration"), "no empty block:\n{out}");
 }

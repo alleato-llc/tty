@@ -287,28 +287,47 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Toggle the OSC 133 master switch (persisted) and apply it live to every open
+    /// pane, so turning it off drops the marks (and their notifications / gutter / jump
+    /// targets) immediately, not just for shells spawned afterward.
+    pub fn set_shell_integration_enabled(&mut self, on: bool) {
+        self.settings.shell_integration.enabled = Some(on);
+        self.settings.save();
+        for tab in self.tabs.iter().chain(self.detached.values()) {
+            for term in tab.terms() {
+                term.screen.lock().set_honor_osc133(on);
+            }
+        }
+    }
+
     /// Toggle completion notifications (persisted).
     pub fn set_notify_on_command_finish(&mut self, on: bool) {
-        self.settings.notify_on_command_finish = Some(on);
+        self.settings.shell_integration.notify = Some(on);
         self.settings.save();
     }
 
     /// Nudge the completion-notification duration threshold (seconds, clamped,
     /// persisted).
     pub fn step_notify_min_seconds(&mut self, delta: i64) {
-        let current = self.settings.notify_command_min_seconds() as i64;
+        let current = self.settings.shell_integration().notify_min_seconds as i64;
         let next = (current + delta).clamp(
             crate::settings::MIN_NOTIFY_MIN_SECONDS as i64,
             crate::settings::MAX_NOTIFY_MIN_SECONDS as i64,
         );
-        self.settings.notify_command_min_seconds = Some(next as u32);
+        self.settings.shell_integration.notify_min_seconds = Some(next as u32);
         self.settings.save();
     }
 
     /// Toggle auto-installing the OSC 133 shell hooks into new shells (persisted).
     /// Applies to shells spawned after this — existing panes keep their environment.
     pub fn set_shell_integration_autoinstall(&mut self, on: bool) {
-        self.settings.shell_integration_autoinstall = Some(on);
+        self.settings.shell_integration.autoinstall = Some(on);
+        self.settings.save();
+    }
+
+    /// Toggle the OSC 133 prompt gutter (persisted).
+    pub fn set_prompt_gutter(&mut self, on: bool) {
+        self.settings.shell_integration.gutter = Some(on);
         self.settings.save();
     }
 
@@ -417,13 +436,17 @@ impl Tty {
             .map(named_font)
             .unwrap_or(Font::MONOSPACE);
         self.font_size = self.settings.font_size.unwrap_or(DEFAULT_FONT_SIZE);
-        // The scrollback cap has to reach every open pane (mirrors `set_max_scrollback`).
-        // Opacity, status-bar flags, metrics, etc. are read from `settings` at render
-        // time, so adopting the struct is enough for them.
+        // The scrollback cap and the OSC 133 master gate have to reach every open pane
+        // (mirrors `set_max_scrollback` / `set_shell_integration_enabled`). Opacity,
+        // status-bar flags, metrics, notify/gutter, etc. are read from `settings` at
+        // render/drain time, so adopting the struct is enough for them.
         let cap = self.settings.max_scrollback();
+        let honor_osc133 = self.settings.shell_integration().enabled;
         for tab in self.tabs.iter().chain(self.detached.values()) {
             for term in tab.terms() {
-                term.screen.lock().set_max_scrollback(cap);
+                let mut screen = term.screen.lock();
+                screen.set_max_scrollback(cap);
+                screen.set_honor_osc133(honor_osc133);
             }
         }
         true
@@ -699,11 +722,11 @@ fn spawn_term(
     pane_tag: &str,
     id_floor: u32,
     untracked: bool,
-    shell_autoinstall: bool,
+    integration: crate::settings::ResolvedShellIntegration,
 ) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
-    let env = if shell_autoinstall {
+    let env = if integration.autoinstall {
         crate::shell_integration::autoinstall_env(&shell)
     } else {
         Vec::new()
@@ -722,6 +745,7 @@ fn spawn_term(
     // used today (see `Tty::history_id_floor`).
     initial_screen.reserve_command_ids(id_floor);
     initial_screen.set_untracked(untracked);
+    initial_screen.set_honor_osc133(integration.enabled);
     let screen = Arc::new(Mutex::new(initial_screen));
     let alive = Arc::new(AtomicBool::new(true));
     let dirty = Arc::new(AtomicBool::new(false));

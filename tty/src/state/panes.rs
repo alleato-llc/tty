@@ -83,7 +83,7 @@ impl Tty {
             &pane_tag,
             self.history_id_floor,
             untracked,
-            self.settings.shell_integration_autoinstall(),
+            self.settings.shell_integration(),
         ) {
             let mut tab = Tab::new(term);
             tab.untracked = untracked;
@@ -112,7 +112,7 @@ impl Tty {
             &pane_tag,
             self.history_id_floor,
             untracked,
-            self.settings.shell_integration_autoinstall(),
+            self.settings.shell_integration(),
         ) {
             self.split_with(window, dir, Pane::Term(term));
         }
@@ -276,9 +276,9 @@ impl Tty {
         let writer = self.history_writer.as_ref();
         // Notify only for commands that finished while the window is unfocused and ran
         // past the threshold — the "I walked away, tell me when it's done" case.
-        let notify = self.settings.notify_on_command_finish() && !self.focused;
-        let threshold =
-            std::time::Duration::from_secs(self.settings.notify_command_min_seconds() as u64);
+        let si = self.settings.shell_integration();
+        let notify = si.notify && !self.focused;
+        let threshold = std::time::Duration::from_secs(si.notify_min_seconds as u64);
         let mut clip = None;
         let mut completions = Vec::new();
         for (i, tab) in self.tabs.iter_mut().enumerate() {

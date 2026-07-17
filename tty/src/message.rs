@@ -106,6 +106,8 @@ pub enum Message {
     SetNotifyOnCommandFinish(bool),
     /// Nudge the completion-notification duration threshold (seconds).
     NotifyMinSecondsStep(i64),
+    /// Toggle the OSC 133 master switch (all shell-integration features at once).
+    SetShellIntegrationEnabled(bool),
     /// Toggle auto-installing the OSC 133 shell hooks into new shells.
     SetShellIntegrationAutoinstall(bool),
     /// Toggle the OSC 133 prompt gutter.

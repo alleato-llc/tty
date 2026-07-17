@@ -369,7 +369,10 @@ fn osc133_region_falls_back_to_output_start_without_a_prompt_mark() {
     p.process(b"\x1b]133;D;0\x07", &mut s);
     let regions = s.command_regions();
     assert_eq!(regions.len(), 1);
-    assert_eq!(regions[0].prompt_row, 0, "output start stands in for the prompt");
+    assert_eq!(
+        regions[0].prompt_row, 0,
+        "output start stands in for the prompt"
+    );
 }
 
 #[test]
@@ -414,6 +417,35 @@ fn osc133_region_evicts_when_its_prompt_scrolls_off() {
         s.command_regions().is_empty(),
         "the prompt line evicted, so its region is gone"
     );
+}
+
+#[test]
+fn osc133_master_gate_ignores_marks_and_clears_existing() {
+    let mut s = TerminalScreen::new(20, 4);
+    let mut p = TermParser::new();
+    // A command recorded while enabled.
+    p.process(
+        b"\x1b]133;A\x07$ ls\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07",
+        &mut s,
+    );
+    assert_eq!(s.command_regions().len(), 1);
+    // Turning the gate off drops what's recorded...
+    s.set_honor_osc133(false);
+    assert!(s.command_regions().is_empty(), "existing regions cleared");
+    // ...and new marks are ignored entirely (no regions, no completions).
+    p.process(
+        b"\x1b]133;A\x07$ bad\r\n\x1b]133;C\x07e\r\n\x1b]133;D;1\x07",
+        &mut s,
+    );
+    assert!(s.command_regions().is_empty(), "marks ignored while off");
+    assert!(s.take_command_completions().is_empty());
+    // Re-enabling resumes recording.
+    s.set_honor_osc133(true);
+    p.process(
+        b"\x1b]133;A\x07$ id\r\n\x1b]133;C\x07uid\r\n\x1b]133;D;0\x07",
+        &mut s,
+    );
+    assert_eq!(s.command_regions().len(), 1, "resumes after re-enable");
 }
 
 #[test]
