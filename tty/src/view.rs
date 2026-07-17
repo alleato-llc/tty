@@ -1609,9 +1609,10 @@ fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
                     Message::SetStatusBarEditHold(-0.5),
                     Message::SetStatusBarEditHold(0.5),
                 ),
-                "How long to hold a right-press on the status bar to enter \
-                 drag-to-reorder edit mode. Scroll over the bar to page through \
-                 metrics that don't fit; Esc leaves edit mode.",
+                "How long to press and hold a metric before it enters \
+                 drag-to-reorder edit mode — the outline appears only then, never \
+                 on a quick click (which opens the drill-in). Scroll over the bar \
+                 to page through metrics that don't fit; Esc leaves edit mode.",
                 TooltipPosition::Top,
             ))
             .push(status_bar_metrics_editor(state));
@@ -1911,9 +1912,10 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
                 iced::widget::Space::new().width(Length::Fixed(0.0)).into()
             }
         };
-        // Which cell (if any) is mid press-hold, being dragged, and where a drop
-        // would land — for the outline / lift / insertion-bar affordances.
-        let pending = state.status_metric_press.map(|(i, _)| i);
+        // What's being dragged, and where a drop would land — for the outline /
+        // lift / insertion-bar affordances. A cell mid press-hold shows *no*
+        // border: the outline appears only once the hold engages (edit mode), so a
+        // quick tap never flashes one.
         let dragging = state.status_metric_drag;
         let drop = state.status_metric_drop;
         // The window shows `visible` cells from `start`. A cell arms a press on
@@ -1936,10 +1938,10 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
                 );
             }
             let cell = metric_cell(cfg.style, r);
-            // Outline a cell that is being edited or mid press-hold; fill the one
-            // actively being dragged so it reads as "lifted".
+            // In edit mode every cell outlines; the one being dragged also fills so
+            // it reads as "lifted".
             let is_dragged = dragging == Some(raw_i);
-            let el: Element<'_, Message> = if editing || pending == Some(raw_i) {
+            let el: Element<'_, Message> = if editing {
                 container(cell)
                     .padding([1, 4])
                     .style(move |_| container::Style {
