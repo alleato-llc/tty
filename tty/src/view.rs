@@ -1460,8 +1460,67 @@ fn keys_section<'a>() -> Element<'a, Message> {
 }
 
 /// Appearance: named theme, font family, font size.
+/// The Appearance section's sub-tabs, in display order. Each groups a slice of
+/// the (formerly one long) Appearance settings so only one pane shows at a time.
+/// Indices match `Tty::appearance_tab` and the `appearance_*_pane` dispatch.
+pub const APPEARANCE_TABS: [&str; 5] = ["Theme", "Tabs", "Status bar", "Terminal", "Window"];
+
 fn appearance_section(state: &Tty) -> Element<'_, Message> {
+    // A horizontal sub-tab strip splits the section into panes so it isn't one
+    // long scroll; the pane below scrolls on its own for a short window.
+    let strip = settings_subtabs(
+        &APPEARANCE_TABS,
+        state.appearance_tab,
+        Message::AppearanceTab,
+    );
+    let pane = match state.appearance_tab {
+        1 => appearance_tabs_pane(state),
+        2 => appearance_statusbar_pane(state),
+        3 => appearance_terminal_pane(state),
+        4 => appearance_window_pane(state),
+        _ => appearance_theme_pane(state),
+    };
+    column![
+        strip,
+        scrollable(container(pane).padding(iced::Padding::ZERO.right(8))).height(Length::Fill),
+    ]
+    .spacing(14)
+    .into()
+}
+
+/// A horizontal row of sub-tab chips (the active one inked on a raised chip,
+/// mirroring the settings shell's section rail), for splitting a settings section
+/// into panes. `on_select(i)` switches to sub-tab `i`.
+fn settings_subtabs<'a>(
+    labels: &'a [&'a str],
+    active: usize,
+    on_select: impl Fn(usize) -> Message + 'a,
+) -> Element<'a, Message> {
     let t = theme::tokens();
+    let mut strip = row![].spacing(4);
+    for (i, label) in labels.iter().enumerate() {
+        let is_active = i == active;
+        let color = if is_active { t.ink } else { t.muted };
+        strip = strip.push(
+            iced::widget::button(text((*label).to_string()).size(13).color(color))
+                .on_press(on_select(i))
+                .padding([6, 12])
+                .style(move |_, _| iced::widget::button::Style {
+                    background: is_active.then(|| t.bg.into()),
+                    text_color: color,
+                    border: Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+        );
+    }
+    strip.into()
+}
+
+/// Appearance → Theme: terminal theme, font family, and font size.
+fn appearance_theme_pane(state: &Tty) -> Element<'_, Message> {
     // Theme: the rime built-in set. A custom palette (base16/edit) reads as "Custom".
     let mut themes = crate::theme::theme_names();
     let current_theme = if state.settings.palette.is_some() {
@@ -1488,6 +1547,55 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
         .unwrap_or_else(|| crate::state::DEFAULT_FONT_LABEL.to_string());
     let font_pick = select(fonts, Some(current_font), Message::SetFont);
 
+    column![
+        labeled("Theme", theme_pick),
+        labeled("Font", font_pick),
+        stepper(
+            "Font size",
+            format!("{}px", state.font_size as u32),
+            Message::FontSizeStep(-1.0),
+            Message::FontSizeStep(1.0),
+        ),
+    ]
+    .spacing(14)
+    .into()
+}
+
+/// Appearance → Tabs: how loud the active tab reads. Off swaps the accent ink for
+/// a subtler normal-ink emphasis (it still beats the muted inactive tabs).
+fn appearance_tabs_pane(state: &Tty) -> Element<'_, Message> {
+    column![toggle(
+        "Highlight active tab",
+        state.settings.tab_highlight(),
+        Message::SetTabHighlight(!state.settings.tab_highlight()),
+    )]
+    .spacing(14)
+    .into()
+}
+
+/// Appearance → Status bar: auto-hide, popover pinning, and the machine-stats
+/// cell editor.
+fn appearance_statusbar_pane(state: &Tty) -> Element<'_, Message> {
+    column![
+        toggle(
+            "Auto-hide until pointer nears the bottom",
+            state.settings.status_bar_autohide(),
+            Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
+        ),
+        toggle(
+            "Keep metric popovers open (pin several; click away won't close)",
+            state.settings.status_bar_metrics_pinned(),
+            Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
+        ),
+        status_bar_metrics_editor(state),
+    ]
+    .spacing(14)
+    .into()
+}
+
+/// Appearance → Terminal: scrollback depth and per-command output caps.
+fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
+    let t = theme::tokens();
     // Per-command output-cap overrides — read-only here (mirrors the Local History
     // exclude-list convention in fed-ide's settings): edited by hand in the JSON file.
     let overrides_text = if state.settings.output_line_overrides.is_empty() {
@@ -1504,39 +1612,7 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
             .join(", ")
     };
 
-    let body = column![
-        section("Appearance"),
-        labeled("Theme", theme_pick),
-        labeled("Font", font_pick),
-        stepper(
-            "Font size",
-            format!("{}px", state.font_size as u32),
-            Message::FontSizeStep(-1.0),
-            Message::FontSizeStep(1.0),
-        ),
-        // Tabs: dial how loud the active tab reads. Off swaps the accent ink for a
-        // subtler normal-ink emphasis (it still beats the muted inactive tabs).
-        section("Tabs"),
-        toggle(
-            "Highlight active tab",
-            state.settings.tab_highlight(),
-            Message::SetTabHighlight(!state.settings.tab_highlight()),
-        ),
-        // Status bar: hide it until the pointer nears the bottom edge, so the
-        // grid/panes get the full height and the bar floats in on demand.
-        section("Status bar"),
-        toggle(
-            "Auto-hide until pointer nears the bottom",
-            state.settings.status_bar_autohide(),
-            Message::SetStatusBarAutohide(!state.settings.status_bar_autohide()),
-        ),
-        toggle(
-            "Keep metric popovers open (pin several; click away won't close)",
-            state.settings.status_bar_metrics_pinned(),
-            Message::SetStatusBarMetricsPinned(!state.settings.status_bar_metrics_pinned()),
-        ),
-        status_bar_metrics_editor(state),
-        section("Terminal"),
+    column![
         stepper(
             "Max scrollback lines",
             state.settings.max_scrollback().to_string(),
@@ -1551,37 +1627,33 @@ fn appearance_section(state: &Tty) -> Element<'_, Message> {
         ),
         caption("PER-COMMAND OVERRIDES"),
         text(overrides_text).size(12).color(t.muted),
-        // Transparency that kicks in only when the window loses focus. Shown as a
-        // 0–95% transparency amount; stored as the resulting opacity (1 − amount).
-        section("Window"),
-        {
-            let transparency = 1.0 - state.settings.unfocused_opacity();
-            let max = 1.0 - crate::settings::MIN_OPACITY;
-            let control = slider(
-                "Transparency On Blur",
-                0.0..=max,
-                transparency,
-                format!("{}%", (transparency * 100.0).round() as i32),
-                |t| Message::SetUnfocusedOpacity(1.0 - t),
-            );
-            tooltip(
-                control,
-                "Fades the whole window when it loses focus, so what's behind it \
-                 shows through. At 0% it stays opaque. The window is always solid \
-                 while focused.",
-                TooltipPosition::Top,
-            )
-        },
     ]
-    .spacing(14);
+    .spacing(14)
+    .into()
+}
 
-    // The section outgrew the settings panel once the status-bar metrics editor
-    // landed; without a scrollable, iced silently clips whatever falls below the
-    // panel's height on a shorter window (the editor and the Terminal/Window
-    // sections vanished). Mirror `history_section`.
-    scrollable(body.padding(iced::Padding::ZERO.right(8)))
-        .height(Length::Fill)
-        .into()
+/// Appearance → Window: transparency that kicks in only when the window loses
+/// focus. Shown as a 0–95% transparency amount; stored as the resulting opacity
+/// (1 − amount).
+fn appearance_window_pane(state: &Tty) -> Element<'_, Message> {
+    let transparency = 1.0 - state.settings.unfocused_opacity();
+    let max = 1.0 - crate::settings::MIN_OPACITY;
+    let control = slider(
+        "Transparency On Blur",
+        0.0..=max,
+        transparency,
+        format!("{}%", (transparency * 100.0).round() as i32),
+        |t| Message::SetUnfocusedOpacity(1.0 - t),
+    );
+    column![tooltip(
+        control,
+        "Fades the whole window when it loses focus, so what's behind it \
+         shows through. At 0% it stays opaque. The window is always solid \
+         while focused.",
+        TooltipPosition::Top,
+    )]
+    .spacing(14)
+    .into()
 }
 
 /// Palette: import a base16 scheme, or tweak the 16 ANSI colors + fg/bg/cursor directly.
@@ -2412,7 +2484,25 @@ fn status_bar_metrics_editor(state: &Tty) -> Element<'_, Message> {
         })
         .collect();
     if !add_buttons.is_empty() {
-        rows.push(row(add_buttons).spacing(8).into());
+        rows.push(caption("ADD A METRIC"));
+        // Wrap into rows of four so the full metric list (now ten, with the three
+        // CPU variants) doesn't overflow the panel width.
+        let mut wrapped = column![].spacing(8);
+        let mut current = row![].spacing(8);
+        let mut n = 0;
+        for btn in add_buttons {
+            current = current.push(btn);
+            n += 1;
+            if n == 4 {
+                wrapped = wrapped.push(current);
+                current = row![].spacing(8);
+                n = 0;
+            }
+        }
+        if n > 0 {
+            wrapped = wrapped.push(current);
+        }
+        rows.push(wrapped.into());
     }
 
     column(rows).spacing(8).into()

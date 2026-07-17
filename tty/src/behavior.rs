@@ -59,6 +59,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         settings: Default::default(),
         show_settings: false,
         settings_section: 0,
+        appearance_tab: 0,
         base16_input: String::new(),
         focused: true,
         pointer: iced::Point::ORIGIN,

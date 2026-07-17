@@ -75,6 +75,7 @@ fn populated() -> Tty {
         },
         show_settings: false,
         settings_section: 0,
+        appearance_tab: 0,
         base16_input: String::new(),
         focused: true,
         pointer: iced::Point::ORIGIN,
@@ -619,6 +620,53 @@ fn settings_history_row_context_menu_view() {
     assert!(
         matches,
         "snapshot `tty-settings-history-row-menu` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_appearance_theme_pane_view() {
+    // Settings → Appearance, landing on the "Theme" sub-tab: the horizontal
+    // sub-tab strip (Theme active, the rest muted) over just that pane's controls
+    // (theme / font / font size), instead of the whole section as one scroll.
+    let mut tty = populated();
+    tty.show_settings = true;
+    tty.settings_section = 0;
+    tty.appearance_tab = 0;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-appearance-theme.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-appearance-theme` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn settings_appearance_statusbar_pane_view() {
+    // The same section switched to the "Status bar" sub-tab: only that pane's
+    // controls (auto-hide, pin popovers, the metrics editor) show, proving the
+    // sub-tabs segment the section.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("cpu", "sparkline"), metric("mem", "sparkline")];
+    tty.show_settings = true;
+    tty.settings_section = 0;
+    tty.appearance_tab = 2;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-appearance-statusbar.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-appearance-statusbar` changed — delete its PNG to re-baseline"
     );
 }
 

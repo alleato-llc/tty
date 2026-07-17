@@ -175,6 +175,9 @@ pub enum Message {
     ToggleSettings,
     /// Switch the settings panel to section `i` (Appearance / Palette).
     SettingsSection(usize),
+    /// Switch the Appearance section's sub-tab to `i` (Theme / Tabs / Status bar
+    /// / Terminal / Window).
+    AppearanceTab(usize),
     /// Pick a named built-in theme (e.g. `"Nord"`).
     SetTheme(String),
     /// Pick the terminal font family (a `FONT_CHOICES` label).

@@ -262,6 +262,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::ToggleSettings => state.toggle_settings(),
         Message::SettingsSection(i) => state.settings_section = i,
+        Message::AppearanceTab(i) => state.appearance_tab = i,
         Message::SetTheme(name) => state.set_theme(&name),
         Message::SetFont(family) => state.set_font(&family),
         Message::FontSizeStep(delta) => state.step_font_size(delta),

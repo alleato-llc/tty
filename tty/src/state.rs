@@ -168,6 +168,11 @@ pub struct Tty {
     pub show_settings: bool,
     /// The active settings section (0 = Appearance, 1 = Palette).
     pub settings_section: usize,
+    /// The active sub-tab within the Appearance section (see
+    /// `view::APPEARANCE_TABS`), so its groups show one pane at a time rather
+    /// than one long list. Persists across section switches (a return to
+    /// Appearance lands where it left off).
+    pub appearance_tab: usize,
     /// The base16 paste box's contents (16 hex colors to import).
     pub base16_input: String,
     /// Whether the window currently has focus (drives the unfocused-opacity effect).
@@ -586,6 +591,7 @@ impl Tty {
             settings,
             show_settings: false,
             settings_section: 0,
+            appearance_tab: 0,
             base16_input: String::new(),
             focused: true,
             pointer: iced::Point::ORIGIN,
