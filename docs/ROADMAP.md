@@ -57,6 +57,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   grep output: `⌘`-hover underlines a file reference, `⌘`-click resolves it against
   the shell's cwd (OSC 7) and opens it via a configurable editor command (Appearance
   → Terminal), defaulting to the system opener.
+- **Command-finished notifications** — OSC 133 shell integration (`133;C`/`133;D`)
+  drives a system notification (✓/✗ + command + duration) when a command finishes
+  while the window is unfocused and ran past a threshold. Manual snippet by default;
+  opt-in zsh auto-install (generated `ZDOTDIR`) in Appearance → Terminal.
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
 - **Output-driven repaint** — redraw on shell output, idle-silent (no polling tick).
 - **Theme catalog** — 8 named themes (Dracula, Nord, Gruvbox Dark, Solarized

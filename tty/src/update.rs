@@ -228,6 +228,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::ScrollbackPageNewer => state.page_scrollback_newer(),
         Message::ScrollbackScrolled(offset) => state.scrollback_scroll = offset,
         Message::OpenFileCommandChanged(s) => state.set_open_file_command(s),
+        Message::SetNotifyOnCommandFinish(on) => state.set_notify_on_command_finish(on),
+        Message::NotifyMinSecondsStep(delta) => state.step_notify_min_seconds(delta),
+        Message::SetShellIntegrationAutoinstall(on) => state.set_shell_integration_autoinstall(on),
+        Message::CopyShellSnippet => {
+            return iced::clipboard::write(crate::shell_integration::ZSH_SNIPPET.to_string());
+        }
         Message::MaxScrollbackStep(delta) => state.step_max_scrollback(delta),
         Message::DefaultOutputLinesStep(delta) => state.step_default_output_lines(delta),
         Message::NewTab => {

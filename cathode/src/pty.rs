@@ -29,6 +29,19 @@ impl PtySession {
         rows: u16,
         cwd: Option<&std::path::Path>,
     ) -> Result<(Self, mpsc::Receiver<Vec<u8>>), BoxError> {
+        Self::spawn_in_env(shell, cols, rows, cwd, &[])
+    }
+
+    /// Like [`spawn_in`](Self::spawn_in), with extra environment variables set on the
+    /// child (used to point a shell at tty's OSC 133 integration — see the host's
+    /// `shell_integration`).
+    pub fn spawn_in_env(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<&std::path::Path>,
+        env: &[(String, String)],
+    ) -> Result<(Self, mpsc::Receiver<Vec<u8>>), BoxError> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -39,6 +52,9 @@ impl PtySession {
 
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
         if let Some(dir) = cwd {
             if dir.is_dir() {
                 cmd.cwd(dir);

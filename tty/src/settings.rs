@@ -441,6 +441,22 @@ pub struct Settings {
     /// overrides all three for one launch.
     #[serde(default)]
     pub history_session_start: Option<String>,
+    /// Post a system notification when a command finishes while the window is
+    /// unfocused (needs shell integration — see [`Self::shell_integration_autoinstall`]).
+    /// On (`true`/absent) by default; the notification only fires past
+    /// [`Self::notify_command_min_seconds`] so quick commands don't spam.
+    #[serde(default)]
+    pub notify_on_command_finish: Option<bool>,
+    /// Minimum command duration (seconds) before a completion notification fires.
+    /// Absent = [`DEFAULT_NOTIFY_MIN_SECONDS`].
+    #[serde(default)]
+    pub notify_command_min_seconds: Option<u32>,
+    /// Whether to auto-install the OSC 133 shell-integration hooks into new shells
+    /// (zsh only for now). Off (absent) by default — opt-in, since it wraps the
+    /// shell's startup. When off, enable notifications by adding the hooks to your
+    /// shell rc yourself (the settings panel shows the snippet).
+    #[serde(default)]
+    pub shell_integration_autoinstall: Option<bool>,
     /// Command template for ⌘-clicking a `path:line[:col]` reference in terminal
     /// output. `{file}`/`{line}`/`{col}` are substituted (line/col default to `1`
     /// when the reference omits them). Absent = the smart default: `$VISUAL` or
@@ -500,6 +516,14 @@ pub const MAX_MAX_SCROLLBACK: usize = 20_000;
 pub const DEFAULT_OUTPUT_LINES: usize = 50;
 pub const MIN_OUTPUT_LINES: usize = 1;
 pub const MAX_OUTPUT_LINES: usize = 10_000;
+
+/// [`Settings::notify_command_min_seconds`]'s default and clamp range. Ten seconds
+/// is long enough that a notification means "the slow thing you walked away from is
+/// done", not every trivial command; the floor keeps it from firing on near-instant
+/// commands, the ceiling from being unreachable.
+pub const DEFAULT_NOTIFY_MIN_SECONDS: u32 = 10;
+pub const MIN_NOTIFY_MIN_SECONDS: u32 = 1;
+pub const MAX_NOTIFY_MIN_SECONDS: u32 = 3600;
 
 /// [`Settings::status_bar_metrics_interval_ms`]'s default and clamp range. The
 /// design sketch's 2s cadence is the default; the floor keeps a rogue value
@@ -835,6 +859,26 @@ impl Settings {
     /// (default `true`).
     pub fn highlight_focused_pane(&self) -> bool {
         self.highlight_focused_pane.unwrap_or(true)
+    }
+
+    /// Whether a completion notification fires for commands finishing while the
+    /// window is unfocused (default `true`).
+    pub fn notify_on_command_finish(&self) -> bool {
+        self.notify_on_command_finish.unwrap_or(true)
+    }
+
+    /// The minimum command duration (seconds) that triggers a completion
+    /// notification (default [`DEFAULT_NOTIFY_MIN_SECONDS`], clamped to a sane range).
+    pub fn notify_command_min_seconds(&self) -> u32 {
+        self.notify_command_min_seconds
+            .unwrap_or(DEFAULT_NOTIFY_MIN_SECONDS)
+            .clamp(MIN_NOTIFY_MIN_SECONDS, MAX_NOTIFY_MIN_SECONDS)
+    }
+
+    /// Whether to auto-install the OSC 133 shell hooks into new shells (default
+    /// `false` — opt-in).
+    pub fn shell_integration_autoinstall(&self) -> bool {
+        self.shell_integration_autoinstall.unwrap_or(false)
     }
 
     /// The configured status-bar metrics resolved to typed metric + style, in

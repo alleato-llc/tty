@@ -83,6 +83,7 @@ impl Tty {
             &pane_tag,
             self.history_id_floor,
             untracked,
+            self.settings.shell_integration_autoinstall(),
         ) {
             let mut tab = Tab::new(term);
             tab.untracked = untracked;
@@ -111,6 +112,7 @@ impl Tty {
             &pane_tag,
             self.history_id_floor,
             untracked,
+            self.settings.shell_integration_autoinstall(),
         ) {
             self.split_with(window, dir, Pane::Term(term));
         }
@@ -272,10 +274,17 @@ impl Tty {
     pub fn drain_effects(&mut self) -> Option<String> {
         let active = self.active;
         let writer = self.history_writer.as_ref();
+        // Notify only for commands that finished while the window is unfocused and ran
+        // past the threshold — the "I walked away, tell me when it's done" case.
+        let notify = self.settings.notify_on_command_finish() && !self.focused;
+        let threshold =
+            std::time::Duration::from_secs(self.settings.notify_command_min_seconds() as u64);
         let mut clip = None;
+        let mut completions = Vec::new();
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             for term in tab.terms_mut() {
-                let (signal, requested) = drain_pane(term, writer);
+                let (signal, requested, done) = drain_pane(term, writer);
+                completions.extend(done);
                 if let Some(c) = requested {
                     clip = Some(c);
                 }
@@ -290,11 +299,19 @@ impl Tty {
         }
         for tab in self.detached.values_mut() {
             for term in tab.terms_mut() {
-                let (_signal, requested) = drain_pane(term, writer);
+                let (_signal, requested, done) = drain_pane(term, writer);
+                completions.extend(done);
                 if let Some(c) = requested {
                     clip = Some(c);
                 }
                 term.activity = false;
+            }
+        }
+        if notify {
+            for c in completions {
+                if c.duration >= threshold {
+                    crate::notify::command_finished(&c);
+                }
             }
         }
         clip

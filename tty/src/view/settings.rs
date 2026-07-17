@@ -419,6 +419,48 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
         )
         .size(12)
         .color(t.muted),
+        caption("COMMAND-FINISHED NOTIFICATIONS"),
+        toggle(
+            "Notify when a command finishes while unfocused",
+            state.settings.notify_on_command_finish(),
+            Message::SetNotifyOnCommandFinish(!state.settings.notify_on_command_finish()),
+        ),
+        stepper(
+            "Only notify for commands longer than (seconds)",
+            state.settings.notify_command_min_seconds().to_string(),
+            Message::NotifyMinSecondsStep(-5),
+            Message::NotifyMinSecondsStep(5),
+        ),
+        toggle(
+            "Auto-install shell integration (zsh; affects new shells)",
+            state.settings.shell_integration_autoinstall(),
+            Message::SetShellIntegrationAutoinstall(
+                !state.settings.shell_integration_autoinstall(),
+            ),
+        ),
+        text(
+            "Notifications need OSC 133 hooks in your shell. Auto-install wires zsh up \
+             for you; otherwise add this to your ~/.zshrc:"
+        )
+        .size(12)
+        .color(t.muted),
+        container(
+            text(crate::shell_integration::ZSH_SNIPPET)
+                .font(iced::Font::MONOSPACE)
+                .size(11)
+                .color(t.ink),
+        )
+        .padding(8)
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            border: Border {
+                color: t.hairline,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..container::background(t.surface)
+        }),
+        button::secondary("Copy snippet", Message::CopyShellSnippet),
     ]
     .spacing(14)
     .into()

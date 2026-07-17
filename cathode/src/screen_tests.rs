@@ -297,6 +297,38 @@ fn osc52_decodes_clipboard() {
 }
 
 #[test]
+fn osc133_reports_a_finished_command_with_exit_code() {
+    // C (start) → the command runs → D;3 (finished, exit 3). One completion, drained.
+    let mut s = TerminalScreen::new(20, 3);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;C\x07", &mut s);
+    p.process(b"boom\r\n", &mut s);
+    p.process(b"\x1b]133;D;3\x07", &mut s);
+    let done = s.take_command_completions();
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].exit_code, Some(3));
+    assert_eq!(s.take_command_completions(), vec![], "drained");
+}
+
+#[test]
+fn osc133_d_without_a_c_is_ignored() {
+    // An empty Enter emits D with no preceding C — nothing to report.
+    let mut s = run(20, 2, b"\x1b]133;D\x07");
+    assert!(s.take_command_completions().is_empty());
+}
+
+#[test]
+fn osc133_d_without_code_reports_none() {
+    let mut s = TerminalScreen::new(20, 2);
+    let mut p = TermParser::new();
+    p.process(b"\x1b]133;C\x07", &mut s);
+    p.process(b"\x1b]133;D\x07", &mut s);
+    let done = s.take_command_completions();
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].exit_code, None);
+}
+
+#[test]
 fn bell_flag_reads_and_clears() {
     let mut s = run(10, 2, b"\x07");
     assert!(s.take_bell());

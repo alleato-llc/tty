@@ -91,6 +91,12 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   shell's working directory (from OSC 7). By default the file goes to the system
   opener; set an **open-file command** in Appearance → Terminal (e.g.
   `code -g {file}:{line}:{col}` or `vim +{line} {file}`) to jump to the exact line
+- **Command-finished notifications** — when a command finishes while the window is
+  unfocused and it ran longer than a threshold, tty posts a system notification
+  (✓/✗ from the exit code, the command, and how long it took). This needs OSC 133
+  shell integration: paste the snippet from Appearance → Terminal into your
+  `~/.zshrc`, or turn on **auto-install** there (zsh; off by default) to have tty
+  wire it up for new shells
 
 ## Customize
 

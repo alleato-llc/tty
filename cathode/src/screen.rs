@@ -134,6 +134,24 @@ impl CommandEntry {
     }
 }
 
+/// A finished shell command, reported via the OSC 133 semantic-prompt marks
+/// (`133;C` = command started, `133;D[;code]` = command finished). Produced only
+/// when shell integration is installed; the host drains these
+/// ([`TerminalScreen::take_command_completions`]) to drive completion notifications.
+/// `duration` is measured at parse time (real-time, on the PTY-read thread), so it's
+/// accurate regardless of when the host drains it — cathode owns the clock here
+/// because pairing `C`→`D` across byte chunks is what makes the measurement correct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandCompletion {
+    /// The command text (from the most recent [`CommandEntry`] at finish time), for
+    /// the notification body. Empty if nothing was captured.
+    pub command: String,
+    /// The reported exit code (`133;D;<code>`), or `None` when the mark omitted it.
+    pub exit_code: Option<i32>,
+    /// Wall-clock time from the `C` mark to the `D` mark.
+    pub duration: Duration,
+}
+
 /// How many commands [`TerminalScreen::mark_command_boundary`] remembers before
 /// evicting the oldest — not user-configurable (unlike the per-command output cap),
 /// just a generous backstop. `pub` so a host loading persisted history back in (see
@@ -245,6 +263,12 @@ pub struct TerminalScreen {
     pub cwd: Option<String>,
     bell: bool,
     clipboard: Option<String>,
+    /// When the current command started running (`OSC 133;C`), for measuring its
+    /// duration at the `D` mark. `None` between commands / with no shell integration.
+    command_started_at: Option<Instant>,
+    /// Finished commands (OSC 133) queued for the host — see [`CommandCompletion`]
+    /// and [`Self::take_command_completions`].
+    pending_command_completions: Vec<CommandCompletion>,
 }
 
 impl TerminalScreen {
@@ -272,6 +296,8 @@ impl TerminalScreen {
             untracked: false,
             next_command_id: 0,
             pending_history_events: Vec::new(),
+            command_started_at: None,
+            pending_command_completions: Vec::new(),
             dirty_rows: BTreeSet::new(),
             fg: TermColor::Default,
             bg: TermColor::Default,
@@ -310,6 +336,11 @@ impl TerminalScreen {
     /// Read-and-clear a pending OSC 52 clipboard write request.
     pub fn take_clipboard(&mut self) -> Option<String> {
         self.clipboard.take()
+    }
+
+    /// Read-and-clear the shell commands that finished (OSC 133) since the last call.
+    pub fn take_command_completions(&mut self) -> Vec<CommandCompletion> {
+        std::mem::take(&mut self.pending_command_completions)
     }
 
     /// Set which pane this screen belongs to, for [`CommandEntry::pane_tag`] on
@@ -1228,6 +1259,39 @@ impl vte::Perform for TerminalScreen {
                         if let Ok(s) = String::from_utf8(bytes) {
                             self.clipboard = Some(s);
                         }
+                    }
+                }
+            }
+            b"133" => {
+                // Semantic-prompt marks (FinalTerm / iTerm2 shell integration). We only
+                // act on `C` (command started running) and `D[;code]` (finished): the pair
+                // measures duration + carries the exit code for completion notifications.
+                // `A`/`B` (prompt boundaries) are consumed but unused — command capture
+                // is the Enter heuristic's job.
+                if let Some(sub) = params.get(1) {
+                    match *sub {
+                        b"C" => self.command_started_at = Some(Instant::now()),
+                        b"D" => {
+                            // Only report a real command (one we saw start), so an empty
+                            // Enter — which emits `D` with no preceding `C` — is ignored.
+                            if let Some(started) = self.command_started_at.take() {
+                                let exit_code = params
+                                    .get(2)
+                                    .and_then(|b| std::str::from_utf8(b).ok())
+                                    .and_then(|s| s.trim().parse().ok());
+                                let command = self
+                                    .command_log
+                                    .back()
+                                    .map(|e| e.command.clone())
+                                    .unwrap_or_default();
+                                self.pending_command_completions.push(CommandCompletion {
+                                    command,
+                                    exit_code,
+                                    duration: started.elapsed(),
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

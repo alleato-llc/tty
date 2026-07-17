@@ -286,6 +286,31 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Toggle completion notifications (persisted).
+    pub fn set_notify_on_command_finish(&mut self, on: bool) {
+        self.settings.notify_on_command_finish = Some(on);
+        self.settings.save();
+    }
+
+    /// Nudge the completion-notification duration threshold (seconds, clamped,
+    /// persisted).
+    pub fn step_notify_min_seconds(&mut self, delta: i64) {
+        let current = self.settings.notify_command_min_seconds() as i64;
+        let next = (current + delta).clamp(
+            crate::settings::MIN_NOTIFY_MIN_SECONDS as i64,
+            crate::settings::MAX_NOTIFY_MIN_SECONDS as i64,
+        );
+        self.settings.notify_command_min_seconds = Some(next as u32);
+        self.settings.save();
+    }
+
+    /// Toggle auto-installing the OSC 133 shell hooks into new shells (persisted).
+    /// Applies to shells spawned after this — existing panes keep their environment.
+    pub fn set_shell_integration_autoinstall(&mut self, on: bool) {
+        self.settings.shell_integration_autoinstall = Some(on);
+        self.settings.save();
+    }
+
     /// Set the ⌘-click open-file command template (persisted). A blank value clears
     /// it, restoring the OS-opener default (see
     /// [`crate::settings::resolve_open_file_command`]).
@@ -496,13 +521,21 @@ impl Default for Tty {
 /// and clear the pane's dirty flag. Returns `(produced_signal,
 /// clipboard_request)` — `produced_signal` is true if the pane wrote output
 /// or rang the bell (drives the background-activity dot).
-fn drain_pane(term: &mut Term, writer: Option<&history::writer::Writer>) -> (bool, Option<String>) {
-    let (bell, requested, history_events) = {
+fn drain_pane(
+    term: &mut Term,
+    writer: Option<&history::writer::Writer>,
+) -> (
+    bool,
+    Option<String>,
+    Vec<cathode::screen::CommandCompletion>,
+) {
+    let (bell, requested, history_events, completions) = {
         let mut s = term.screen.lock();
         (
             s.take_bell(),
             s.take_clipboard(),
             s.take_pending_history_events(),
+            s.take_command_completions(),
         )
     };
     if let Some(writer) = writer {
@@ -511,7 +544,7 @@ fn drain_pane(term: &mut Term, writer: Option<&history::writer::Writer>) -> (boo
         }
     }
     let was_dirty = term.dirty.swap(false, Ordering::Relaxed);
-    (was_dirty || bell, requested)
+    (was_dirty || bell, requested, completions)
 }
 
 /// Close every pane in `tab` whose shell has exited (one at a time; `close` is a no-op
@@ -547,6 +580,7 @@ fn reap_tab_panes(tab: &mut Tab) {
 /// is a display label (e.g. "Tab 2") recorded on every command persisted from this
 /// screen, for context in the encrypted history archive — see
 /// `TerminalScreen::set_pane_tag`.
+#[allow(clippy::too_many_arguments)]
 fn spawn_term(
     cols: u16,
     rows: u16,
@@ -555,10 +589,16 @@ fn spawn_term(
     pane_tag: &str,
     id_floor: u32,
     untracked: bool,
+    shell_autoinstall: bool,
 ) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
-    let (session, mut rx) = match PtySession::spawn_in(&shell, cols, rows, dir) {
+    let env = if shell_autoinstall {
+        crate::shell_integration::autoinstall_env(&shell)
+    } else {
+        Vec::new()
+    };
+    let (session, mut rx) = match PtySession::spawn_in_env(&shell, cols, rows, dir, &env) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("Failed to spawn shell {shell:?}: {e}");

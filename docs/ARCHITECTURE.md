@@ -59,6 +59,15 @@ a clock.
   RIS reset queue **nothing** (eviction is not deletion). `seed_command_log` loads
   persisted entries back into the live window at startup. cathode knows nothing of
   crypto or files — that all lives in the app.
+- **OSC 133 semantic-prompt marks** — `command_started_at` + `pending_command_completions`
+  in `TerminalScreen`. The osc handler acts on `133;C` (command started) and
+  `133;D[;code]` (finished): the pair yields a `CommandCompletion { command, exit_code,
+  duration }`, drained by the host via `take_command_completions`. Duration is measured
+  at parse time (real-time, on the PTY-read thread), so cathode owns the clock here —
+  pairing `C`→`D` across byte chunks is what makes the measurement correct. `A`/`B`
+  (prompt boundaries) are consumed but unused; command *capture* stays the Enter
+  heuristic's job (see the `command_log` note above). Independent of shell integration:
+  no marks, no completions, and the rest of the terminal works unchanged.
 - **`wake`** — a process-global signal channel. The read loop calls
   `wake::signal()` after each parse (and on shell exit); the UI's subscription awaits
   it. This is what makes repaint **output-driven**: no idle polling, zero cost when
@@ -227,6 +236,15 @@ Thin glue, mirroring `fed`'s module shape:
   by `cathode::wake` (drains an output burst into a single redraw; also reaps dead tabs).
   While a detached window is settling after a drag, a short-lived timer polls the drag-dock
   debounce.
+- **`notify` / `shell_integration`** — **command-finished notifications**. `drain_effects`
+  (per redraw) drains each screen's `CommandCompletion`s (cathode's OSC 133 marks); when
+  the window is unfocused and a command ran past the configured threshold,
+  `notify::command_finished` posts a macOS notification via `osascript` (no crate, no app
+  bundle) with a ✓/✗ from the exit code, the elided command, and a compact duration.
+  `shell_integration` owns the OSC 133 hooks: `ZSH_SNIPPET` (the pasteable manual snippet
+  shown in settings) and `autoinstall_env` — an opt-in, zsh-only, off-by-default
+  auto-install that points a new shell at a generated `ZDOTDIR` which sources the user's
+  real config and then installs the hooks. Non-zsh shells fall back to manual.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the
   full key-derivation pipeline and its open refinement options are surveyed in
   `docs/history-keys.md`), opt-in

@@ -102,6 +102,14 @@ pub enum Message {
     OpenFile(String, Option<u32>, Option<u32>),
     /// The Appearance → Terminal "open file command" field changed (persisted).
     OpenFileCommandChanged(String),
+    /// Toggle completion notifications.
+    SetNotifyOnCommandFinish(bool),
+    /// Nudge the completion-notification duration threshold (seconds).
+    NotifyMinSecondsStep(i64),
+    /// Toggle auto-installing the OSC 133 shell hooks into new shells.
+    SetShellIntegrationAutoinstall(bool),
+    /// Copy the manual shell-integration snippet to the clipboard.
+    CopyShellSnippet,
     /// The "Copy Link" menu item was chosen — write the URL to the clipboard.
     CopyLink(String),
     /// A "Split <dir>" context-menu item was chosen.
