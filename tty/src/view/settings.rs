@@ -26,6 +26,7 @@ pub(super) fn settings_body(state: &Tty) -> Element<'_, Message> {
         2 => keys_section(),
         3 => metrics_section(state),
         4 => history_section(state),
+        5 => shell_section(state),
         _ => appearance_section(state),
     }
 }
@@ -422,20 +423,21 @@ fn appearance_terminal_pane(state: &Tty) -> Element<'_, Message> {
         )
         .size(12)
         .color(t.muted),
-        shell_integration_section(state),
     ]
     .spacing(14)
     .into()
 }
 
-/// Appearance → Terminal: the OSC 133 shell-integration group — one master toggle,
-/// with every sub-option (notifications, gutter, auto-install, the manual snippet)
-/// shown only when it's on, so the whole feature reads as a single cohesive unit.
-fn shell_integration_section(state: &Tty) -> Element<'_, Message> {
+/// The top-level **Shell** section: the OSC 133 shell-integration group — one master
+/// toggle, with every sub-option (notifications, gutter, auto-install, the manual
+/// snippet) shown only when it's on, so the whole feature reads as a single cohesive
+/// unit. It lives here rather than under Appearance because it's terminal *behavior*,
+/// not looks.
+fn shell_section(state: &Tty) -> Element<'_, Message> {
     let t = theme::tokens();
     let si = state.settings.shell_integration();
     let mut col = column![
-        caption("SHELL INTEGRATION (OSC 133)"),
+        section("Shell integration (OSC 133)"),
         toggle(
             "Enable shell integration (command marks)",
             si.enabled,

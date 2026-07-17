@@ -373,7 +373,14 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     let mut base: Element<'_, Message> = if state.show_settings {
         rime::widgets::settings(
             chrome,
-            &["Appearance", "Palette", "Keys", "Metrics", "History"],
+            &[
+                "Appearance",
+                "Palette",
+                "Keys",
+                "Metrics",
+                "History",
+                "Shell",
+            ],
             state.settings_section,
             Message::SettingsSection,
             settings_body(state),

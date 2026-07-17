@@ -813,6 +813,28 @@ fn settings_appearance_theme_pane_view() {
 }
 
 #[test]
+fn settings_shell_section_view() {
+    // The top-level Shell section: the OSC 133 master toggle with its sub-options
+    // (moved out of Appearance → Terminal into its own section).
+    let mut tty = populated();
+    tty.settings.shell_integration.gutter = Some(true);
+    tty.show_settings = true;
+    tty.settings_section = 5;
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-settings-shell.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-settings-shell` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn settings_appearance_statusbar_pane_view() {
     // The Appearance section switched to the "Status bar" sub-tab: just the bar's
     // own chrome (disable + auto-hide). The machine-stat cells live in the Metrics

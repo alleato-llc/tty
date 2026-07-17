@@ -96,7 +96,7 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 - **Command-finished notifications** — when a command finishes while the window is
   unfocused and it ran longer than a threshold, tty posts a system notification
   (✓/✗ from the exit code, the command, and how long it took). This needs OSC 133
-  shell integration: paste the snippet from Appearance → Terminal into your
+  shell integration: paste the snippet from the **Shell** settings section into your
   `~/.zshrc`, or turn on **auto-install** there (zsh; off by default) to have tty
   wire it up for new shells
 
@@ -109,17 +109,18 @@ themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
 size, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and
 **Highlight the focused pane** (the accent border on the focused pane in a split
-tab — turn it off for a flat, borderless split), the whole **shell integration
-(OSC 133)** group behind one master toggle (notifications, prompt-jump, failed-command
-flagging, output copy, and an opt-in **prompt gutter** — a dot beside every command
-prompt, red for a failure — all off at once when it's disabled), and the
+tab — turn it off for a flat, borderless split), and the
 **auto-hiding status bar** (on by default — it floats back in when the pointer
 nears the bottom edge so the grid gets the full height; turn it off to pin it, or
 **Disable status bar** to drop it entirely). The **Window** tab keeps the window
 **on top** of other windows and fades it with two transparency amounts —
 **When Active** (up to 50%, so an in-use window stays readable) and **On Blur**
 (up to 95%, when it loses focus). A **Keys** section lists every keyboard shortcut
-for reference. Settings persist to a hand-editable `tty.toml` in the config dir
+for reference. A dedicated **Shell** section holds the whole **shell integration
+(OSC 133)** group behind one master toggle — notifications, prompt-jump,
+failed-command flagging, output copy, and an opt-in **prompt gutter** (a dot beside
+every command prompt, red for a failure) — all off at once when it's disabled.
+Settings persist to a hand-editable `tty.toml` in the config dir
 (`~/.config/tty/` or the platform equivalent). You can edit it directly — the GUI
 does a round-trip save, so your comments and layout survive, and an edit you make in
 another editor is picked up live the moment you switch back to a tty window. A

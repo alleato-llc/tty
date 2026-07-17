@@ -344,7 +344,10 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   (add / reorder / style / remove, per-cell warn/alarm thresholds, clock-format
   toggles), the pin-popovers toggle, the reorder-hold stepper, and the
   **graduate-into-a-pane** toggle (`graduate_metrics`, which gates the popover ⊞
-  control). A read-only **Keys** section documents the shortcuts.
+  control). A read-only **Keys** section documents the shortcuts. A top-level **Shell**
+  section (`shell_section`) owns the whole OSC 133 group — the master enable plus its
+  sub-options — filed on its own rather than under Appearance because it's terminal
+  *behavior*, not looks.
   A hand-editable `tty.toml` (via `toml_edit` + serde) persists the theme name, font
   family/size, any custom palette,
   the active-tab highlight flag, `highlight_focused_pane`, the status-bar flags
