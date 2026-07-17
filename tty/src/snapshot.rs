@@ -1106,6 +1106,60 @@ fn metric_detail_uptime_view() {
     );
 }
 
+/// Seed a deterministic load average + 1-minute history for the load snapshots.
+fn seed_load(tty: &mut Tty) {
+    tty.metrics.load_avg = Some([1.23, 0.95, 0.80]);
+    tty.metrics.load1_history = [0.6, 0.8, 0.7, 1.0, 1.1, 0.9, 1.3, 1.23]
+        .into_iter()
+        .collect();
+}
+
+#[test]
+fn status_bar_load_view() {
+    // The load cell: a sparkline of the 1-minute load beside its value.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("load", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_load(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-load.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-load` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_load_view() {
+    // The load drill-in: the 1-minute load line chart over the full 1/5/15-minute
+    // triple.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("load", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_load(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Load,
+    )];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-load.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-load` changed — delete its PNG to re-baseline"
+    );
+}
+
 #[test]
 fn metric_detail_cpu_all_view() {
     // The "CPU (all)" drill-in: the aggregate line chart *and* the per-core grid

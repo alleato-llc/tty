@@ -71,12 +71,15 @@ pub enum MetricKind {
     /// The current wall-clock time. A text cell (configurable format); drills
     /// into the full date. Refreshed by its own 1s timer, not the sampler.
     Clock,
+    /// System load average. A sparkline of the 1-minute load; drills into the
+    /// 1/5/15-minute triple.
+    Load,
 }
 
 impl MetricKind {
     /// Every metric that has a sampler today, in a stable order (used to offer
     /// the not-yet-added metrics in the settings editor).
-    pub const ALL: [MetricKind; 13] = [
+    pub const ALL: [MetricKind; 14] = [
         MetricKind::Cpu,
         MetricKind::CpuCores,
         MetricKind::CpuAll,
@@ -90,6 +93,7 @@ impl MetricKind {
         MetricKind::Uptime,
         MetricKind::Session,
         MetricKind::Clock,
+        MetricKind::Load,
     ];
 
     /// Whether this kind is a text uptime cell (system or session) rather than a
@@ -123,6 +127,7 @@ impl MetricKind {
             MetricKind::Uptime => "uptime",
             MetricKind::Session => "session",
             MetricKind::Clock => "clock",
+            MetricKind::Load => "load",
         }
     }
 
@@ -143,6 +148,7 @@ impl MetricKind {
             "uptime" => Some(MetricKind::Uptime),
             "session" => Some(MetricKind::Session),
             "clock" => Some(MetricKind::Clock),
+            "load" => Some(MetricKind::Load),
             _ => None,
         }
     }
@@ -164,6 +170,7 @@ impl std::fmt::Display for MetricKind {
             MetricKind::Uptime => "Uptime",
             MetricKind::Session => "Session",
             MetricKind::Clock => "Clock",
+            MetricKind::Load => "Load",
         })
     }
 }

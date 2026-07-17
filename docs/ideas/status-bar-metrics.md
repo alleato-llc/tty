@@ -86,7 +86,10 @@ right before anything wraps, so a narrow window degrades gracefully.
 Implemented today (phases 2-3): the ordered list,
 `status_bar_metrics_interval_ms`, and width-shedding are live. `metric` accepts
 `cpu`, `mem`, `net_rx`, `net_tx`, `disk_r`, `disk_w`, `net_io`, `disk_io`,
-`uptime`, `session`, and `clock` (net/disk on macOS only for now). `uptime`
+`uptime`, `session`, `clock`, and `load` (net/disk on macOS only for now).
+`load` is a sparkline of the 1-minute run-queue load (auto-scaled, since load is
+unbounded), drilling into the full 1/5/15-minute triple; it reads
+`prexp-core`'s `system_load_average()`. `uptime`
 (system, since boot) and `session` (this terminal, since launch) are **text**
 cells rather than sparklines: the bar shows an abbreviated form (`up 3d 4h`) and
 the drill-in popover the full breakdown (`3 days, 4 hours, 12 minutes`). System
@@ -272,11 +275,11 @@ source serves fdtop; tty consumes it in `metrics.rs`.
 
 **Current batch**
 
-- [ ] **Load average** — 1 / 5 / 15-minute run-queue load. The 1-minute value as
+- [x] **Load average** — 1 / 5 / 15-minute run-queue load. The 1-minute value as
   an auto-scaled sparkline (like the byte-rate cells, since load is unbounded);
   the drill-in charts the 1-minute history and shows the full 1/5/15 triple.
-  Source: `getloadavg(3)` / `sysctl(KERN_LOADAVG)` on macOS, `/proc/loadavg` on
-  Linux.
+  Source: `getloadavg(3)` on macOS, `/proc/loadavg` on Linux, via `prexp-core`'s
+  `system_load_average()`. *Shipped.*
 - [ ] **Battery** — charge %, charging state, time remaining. A bounded 0..100%
   gauge (fixed-scale sparkline like CPU/memory); the drill-in adds the charging
   state and a time-to-full/empty estimate. Source: IOKit power sources on macOS

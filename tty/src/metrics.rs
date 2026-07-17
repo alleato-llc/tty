@@ -92,6 +92,11 @@ pub struct Metrics {
     /// This terminal session's uptime in whole seconds (now − first sample),
     /// refreshed each sample.
     pub session_uptime_secs: Option<u64>,
+    /// The system load average (1, 5, 15-minute), refreshed each sample; `None`
+    /// where the platform can't report it. Drives the load cell.
+    pub load_avg: Option<[f32; 3]>,
+    /// Recent 1-minute load (oldest first), for the load cell's sparkline.
+    pub load1_history: std::collections::VecDeque<f32>,
 }
 
 impl Metrics {
@@ -231,6 +236,13 @@ impl Metrics {
             .map(|boot| now_secs.saturating_sub(boot));
         let start = *self.session_start_secs.get_or_insert(now_secs);
         self.session_uptime_secs = Some(now_secs.saturating_sub(start));
+
+        // Load average (1/5/15-minute). The 1-minute value also feeds a sparkline.
+        if let Ok(load) = source.system_load_average() {
+            let load = [load[0] as f32, load[1] as f32, load[2] as f32];
+            self.load_avg = Some(load);
+            push_capped(&mut self.load1_history, load[0]);
+        }
     }
 }
 
@@ -340,6 +352,19 @@ pub fn disk_io_label(stats: &MachineStats) -> String {
         "Disk R {} W {}",
         format_rate(stats.disk_r_bps),
         format_rate(stats.disk_w_bps),
+    )
+}
+
+/// The load cell's label from the 1-minute load, e.g. `load 1.23`.
+pub fn load_label(load1: f32) -> String {
+    format!("load {load1:.2}")
+}
+
+/// The full load triple for the drill-in, e.g. `1.23 · 0.95 · 0.80  (1 / 5 / 15 min)`.
+pub fn load_triple(load: [f32; 3]) -> String {
+    format!(
+        "{:.2} · {:.2} · {:.2}  (1 / 5 / 15 min)",
+        load[0], load[1], load[2]
     )
 }
 

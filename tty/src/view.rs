@@ -1964,6 +1964,16 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
             series: vec![],
             max: 1.0,
         },
+        // Load: a sparkline of the 1-minute load, auto-scaled to its recent peak
+        // like the rate cells. Skip until a reading exists.
+        K::Load => {
+            let load = m.load_avg?;
+            MetricRender {
+                label: mx::load_label(load[0]),
+                series: vec![(m.load1_history.clone(), accent)],
+                max: hist_max(&m.load1_history),
+            }
+        }
         K::Clock => unreachable!("clock is handled before the stats read"),
     };
     Some(render)
@@ -2089,40 +2099,55 @@ fn metric_popover_card<'a>(
             })
             .collect();
 
-        // CPU/memory are bounded 0..100 gauges: a fixed scale so the line reads
-        // as a fraction of full capacity (39% memory sits at 39% height, not the
-        // top). The open-ended rate metrics auto-scale to their own recent peak
-        // and label the axis with that peak.
+        // The y axis: CPU/memory are bounded 0..100 gauges (a fixed scale, so the
+        // line reads as a fraction of full capacity); load auto-scales to its peak
+        // with a plain numeric label; the rate metrics auto-scale and label the
+        // axis with the peak throughput.
         let bounded = kind.is_cpu() || kind == K::Mem;
-        let (y_max, y_max_label) = if bounded {
-            (Some(100.0), Some("100%".to_string()))
-        } else {
-            let peak = r
-                .series
+        let peak = || {
+            r.series
                 .iter()
                 .flat_map(|(v, _)| v.iter().copied())
-                .fold(1.0_f32, f32::max);
-            (None, Some(crate::metrics::format_rate(peak)))
+                .fold(1.0_f32, f32::max)
         };
-        let hover_format: Option<fn(f64) -> String> =
-            Some(if bounded { hover_percent } else { hover_rate });
+        let y_max: Option<f64> = bounded.then_some(100.0);
+        let y_max_label: Option<String> = Some(if bounded {
+            "100%".to_string()
+        } else if kind == K::Load {
+            format!("{:.1}", peak())
+        } else {
+            crate::metrics::format_rate(peak())
+        });
+        let hover: fn(f64) -> String = if bounded {
+            hover_percent
+        } else if kind == K::Load {
+            hover_load
+        } else {
+            hover_rate
+        };
         let chart = line_chart(
             LineChart {
                 title: kind.to_string(),
                 series,
-                y_max: y_max.map(|m: f32| m as f64),
+                y_max,
                 y_max_label,
-                hover_format,
+                hover_format: Some(hover),
             },
             chart_h,
         );
 
         let mut card = column![chart, text(r.label).size(13).color(t.ink)].spacing(8);
         // A small legend names the two overlaid lines for the combined metrics
-        // (single-series metrics carry their identity in the title/label already).
+        // (single-series metrics carry their identity in the title/label already);
+        // load shows its full 1/5/15-minute triple.
         match kind {
             K::NetIo => card = card.push(legend_row(&[("Down", t.accent), ("Up", t.warn)])),
             K::DiskIo => card = card.push(legend_row(&[("Read", t.accent), ("Write", t.warn)])),
+            K::Load => {
+                let triple =
+                    crate::metrics::load_triple(state.metrics.load_avg.unwrap_or_default());
+                card = card.push(text(triple).size(12).color(t.muted));
+            }
             _ => {}
         }
         card.into()
@@ -2533,6 +2558,9 @@ fn hover_percent(v: f64) -> String {
 }
 fn hover_rate(v: f64) -> String {
     crate::metrics::format_rate(v as f32)
+}
+fn hover_load(v: f64) -> String {
+    format!("{v:.2}")
 }
 
 /// A row of colored-dot + label legend entries for a multi-series drill-in.
