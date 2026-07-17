@@ -16,6 +16,9 @@ use crate::history::crypto::Cipher;
 use crate::message::Message;
 use crate::state::{Term, Tty};
 
+mod util;
+use util::*;
+
 /// The `⌘F` matches in `term`'s buffer for `query` (empty when there's no active
 /// query) — shared by the find bar's "N of M" label and the per-pane `scroll_to`.
 fn current_matches(term: &Term, query: &str) -> Vec<(usize, usize, usize)> {
@@ -992,30 +995,6 @@ fn scrollback_panel_view<'a>(state: &'a Tty, base: Element<'a, Message>) -> Elem
 
 /// A short "how long ago" label for [`scrollback_panel_view`]'s "Oldest line" stat
 /// and the settings archive viewer's rows (whose entries are typically days old).
-fn format_age(d: std::time::Duration) -> String {
-    let secs = d.as_secs();
-    if secs < 60 {
-        format!("{secs}s ago")
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86_400)
-    }
-}
-
-/// Shorten a command for display inside a fixed-size dialog — a full command
-/// line can be arbitrarily long. Cuts on a char boundary, appends `…`.
-fn elide(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max_chars).collect();
-    out.push('…');
-    out
-}
-
 /// The body of the active settings section.
 fn settings_body(state: &Tty) -> Element<'_, Message> {
     match state.settings_section {
@@ -2165,13 +2144,6 @@ fn status_bar_view(state: &Tty) -> Element<'_, Message> {
 }
 
 /// The vertical component of a wheel `ScrollDelta`, for panning the status bar.
-fn scroll_delta_y(delta: iced::mouse::ScrollDelta) -> f32 {
-    match delta {
-        iced::mouse::ScrollDelta::Lines { y, .. } => y,
-        iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-    }
-}
-
 /// The furthest the status-bar metric window can scroll: the number of
 /// renderable cells minus how many currently fit (0 when everything fits). Shared
 /// by the view (to clamp the window) and `update` (to clamp the scroll offset).
@@ -2824,13 +2796,6 @@ fn core_groups(
 /// A core cell's sparkline color: Performance (and ungrouped) cores grade by
 /// load (calm → alarm); Efficiency cores use the accent hue so the two clusters
 /// read apart at a glance (their load still shows in the sparkline height + %).
-fn core_color(kind: prexp_core::system::CpuKind, cur: f32) -> iced::Color {
-    match kind {
-        prexp_core::system::CpuKind::Efficiency => theme::tokens().accent,
-        _ => load_color(cur),
-    }
-}
-
 /// The uptime drill-in's body: the full duration breakdown (the "full view" to
 /// the cell's abbreviated one), under the metric name and over a note saying what
 /// it counts from.
@@ -2890,17 +2855,6 @@ fn clock_body(state: &Tty) -> Element<'_, Message> {
 }
 
 /// Clip a process name to `max` chars for the compact cell (an `…` when cut).
-fn truncate_name(name: &str, max: usize) -> String {
-    if name.chars().count() > max {
-        format!(
-            "{}…",
-            name.chars().take(max.saturating_sub(1)).collect::<String>()
-        )
-    } else {
-        name.to_string()
-    }
-}
-
 /// The Processes drill-in. Normally a clickable header row (re-sort by clicking a
 /// column) over a virtualized, scrollable `rime` table of every process, ordered
 /// by the active sort; the bar cell shows only the busiest process, this is the
@@ -3192,18 +3146,6 @@ fn back_row(label: &str) -> Element<'static, Message> {
 }
 
 /// A short label for a file-descriptor kind, for the process detail's fd list.
-fn resource_kind_label(kind: &prexp_core::models::ResourceKind) -> &'static str {
-    use prexp_core::models::ResourceKind as R;
-    match kind {
-        R::File => "file",
-        R::Socket => "sock",
-        R::Pipe => "pipe",
-        R::Device => "dev",
-        R::Kqueue => "kq",
-        R::Unknown => "?",
-    }
-}
-
 /// The aggregate CPU line chart: overall CPU% over its retained history on a
 /// fixed 0..100 gauge, with the hover readout. Shared by the `Cpu` drill-in
 /// (via the generic branch) and the `CpuAll` combined body.
@@ -3392,16 +3334,6 @@ fn with_resize_edges(index: usize, card: Element<'_, Message>) -> Element<'_, Me
 /// Hover-readout formatters for [`metric_popover_card`]'s chart, as plain `fn`
 /// pointers `rime`'s `LineChart` can hold: a percentage for CPU/memory, a
 /// throughput rate for the network/disk series.
-fn hover_percent(v: f64) -> String {
-    format!("{}%", v.round() as u32)
-}
-fn hover_rate(v: f64) -> String {
-    crate::metrics::format_rate(v as f32)
-}
-fn hover_load(v: f64) -> String {
-    format!("{v:.2}")
-}
-
 /// A row of colored-dot + label legend entries for a multi-series drill-in.
 fn legend_row<'a>(items: &[(&str, iced::Color)]) -> Element<'a, Message> {
     let t = theme::tokens();
@@ -3548,56 +3480,6 @@ fn status_bar_metrics_editor(state: &Tty) -> Element<'_, Message> {
 }
 
 /// Grade a 0..=100 load into the theme's calm / caution / alarm colors.
-fn load_color(percent: f32) -> iced::Color {
-    let t = theme::tokens();
-    if percent >= 85.0 {
-        t.danger
-    } else if percent >= 60.0 {
-        t.warn
-    } else {
-        t.success
-    }
-}
-
-/// A graded cell's alert level against its warn/alarm thresholds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Grade {
-    Calm,
-    Warn,
-    Alarm,
-}
-
-/// Grade `value` against `warn`/`alarm` cutoffs. Normal metrics alarm when the
-/// value climbs *past* the cutoffs (CPU, memory); `inverted` metrics alarm when
-/// it *falls below* them (battery — low charge is the concern).
-fn grade(value: f32, warn: f32, alarm: f32, inverted: bool) -> Grade {
-    if inverted {
-        if value <= alarm {
-            Grade::Alarm
-        } else if value <= warn {
-            Grade::Warn
-        } else {
-            Grade::Calm
-        }
-    } else if value >= alarm {
-        Grade::Alarm
-    } else if value >= warn {
-        Grade::Warn
-    } else {
-        Grade::Calm
-    }
-}
-
-/// The theme color for a [`Grade`]: calm / caution / alarm.
-fn grade_color(g: Grade) -> iced::Color {
-    let t = theme::tokens();
-    match g {
-        Grade::Alarm => t.danger,
-        Grade::Warn => t.warn,
-        Grade::Calm => t.success,
-    }
-}
-
 fn status_text(state: &Tty) -> (String, String) {
     let Some(tab) = state.tabs.get(state.active) else {
         return (String::new(), String::new());
