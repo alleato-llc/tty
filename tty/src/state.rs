@@ -991,7 +991,6 @@ impl Tty {
         self.settings.save();
     }
 
-
     /// Whether the floating (auto-hide) status bar should show right now: the
     /// pointer sits within [`STATUS_BAR_REVEAL_ZONE`] of the window's bottom
     /// edge. Only consulted when `settings.status_bar_autohide()` is on.
@@ -1489,7 +1488,6 @@ impl Tty {
             true
         }
     }
-
 
     /// Change the max-scrollback setting (clamped), persist it, and apply live to
     /// every open pane — main strip and detached windows alike — so a lowered cap

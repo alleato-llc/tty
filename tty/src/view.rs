@@ -18,8 +18,8 @@ mod util;
 use metrics::{metric_pane_content, metric_popover_card, place_metric_popover};
 use scrollback::{age_from_epoch_ms, scrollback_panel_view};
 use settings::{passphrase_prompt_view, settings_body};
-use status_bar::{status_bar_metrics_editor, status_bar_view};
 pub use status_bar::status_bar_scroll_max;
+use status_bar::{status_bar_metrics_editor, status_bar_view};
 use util::*;
 
 /// The `⌘F` matches in `term`'s buffer for `query` (empty when there's no active
@@ -703,4 +703,3 @@ fn detached_view<'a>(
         &status,
     )
 }
-

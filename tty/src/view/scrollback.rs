@@ -95,7 +95,10 @@ fn command_target(c: &ScrollbackCommand) -> crate::state::HistoryRowTarget {
     }
 }
 
-pub(super) fn scrollback_panel_view<'a>(state: &'a Tty, base: Element<'a, Message>) -> Element<'a, Message> {
+pub(super) fn scrollback_panel_view<'a>(
+    state: &'a Tty,
+    base: Element<'a, Message>,
+) -> Element<'a, Message> {
     let Some(term) = state.active_term() else {
         return base;
     };
@@ -306,4 +309,3 @@ pub(super) fn scrollback_panel_view<'a>(state: &'a Tty, base: Element<'a, Messag
 
     modal_sized(base, content, Message::ToggleScrollbackPanel, 700.0)
 }
-

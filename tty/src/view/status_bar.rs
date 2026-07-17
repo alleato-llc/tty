@@ -386,7 +386,6 @@ fn status_text(state: &Tty) -> (String, String) {
     )
 }
 
-
 #[cfg(test)]
 #[path = "status_bar_tests.rs"]
 mod tests;

@@ -18,7 +18,6 @@ use crate::state::Tty;
 
 use super::util::*;
 
-
 /// The renderable data for one metric cell, resolved from the current sample:
 /// a label, one or more history series (each with its color) that share the
 /// sparkline, and the sparkline's max (100 for percentages, auto-scaled for
@@ -37,7 +36,10 @@ pub(super) struct MetricRender {
 /// Percentage metrics (CPU/memory) grade their color by load and scale to 100;
 /// rate metrics (network/disk) use a neutral accent and auto-scale to their
 /// own recent peak. Disk I/O returns two series (read + write) on one scale.
-pub(super) fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<MetricRender> {
+pub(super) fn metric_render(
+    cfg: crate::settings::ResolvedMetric,
+    state: &Tty,
+) -> Option<MetricRender> {
     use crate::metrics as mx;
     use crate::settings::MetricKind as K;
 
@@ -212,7 +214,6 @@ fn clock_label(state: &Tty) -> String {
 fn hist_max(history: &std::collections::VecDeque<f32>) -> f32 {
     history.iter().copied().fold(1.0, f32::max)
 }
-
 
 /// The rendered view for a metric `kind` — the chart / table / readout that fills
 /// a drill-in popover *or* a graduated metric pane. Pure content: no card frame,
@@ -1172,4 +1173,3 @@ fn legend_row<'a>(items: &[(&str, iced::Color)]) -> Element<'a, Message> {
     }
     r.into()
 }
-
