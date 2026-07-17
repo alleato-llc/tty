@@ -31,7 +31,7 @@ pub const MIN_EDIT_HOLD_SECS: f32 = 1.5;
 pub const MAX_EDIT_HOLD_SECS: f32 = 5.0;
 
 /// A custom terminal palette as hex strings (so it round-trips through JSON cleanly).
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
     /// The 16 ANSI colors (0–7 normal, 8–15 bright).
     pub ansi: Vec<String>,
@@ -42,7 +42,7 @@ pub struct Palette {
 
 /// One `output_line_overrides` entry — e.g. `{ pattern: "tail *", max_lines: 200 }` to
 /// let a `tail -f` capture more than the global default before it stops growing.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OutputLineOverride {
     pub pattern: String,
     pub max_lines: usize,
@@ -293,7 +293,7 @@ pub struct ResolvedMetric {
     pub alarm: f64,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     /// The built-in theme name (e.g. `"Dracula"`, `"Nord"`); absent reads as Dracula.
     #[serde(default)]

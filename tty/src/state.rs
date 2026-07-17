@@ -384,6 +384,50 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Re-read `tty.toml` and adopt it if it changed on disk since we last wrote it —
+    /// the **live-reload** path for a hand-edit made in another editor. Called when a
+    /// window regains focus (the moment the user switches back to tty). No-op when the
+    /// file matches what's already in memory (including right after our own GUI save).
+    /// Does not write back: we're adopting the file, not re-serializing it.
+    pub fn reload_settings_if_changed(&mut self) -> bool {
+        // Like `Settings::save`, never touch the real config file under test — a test
+        // run must not read whoever-ran-`cargo test`'s settings into the fixture.
+        if cfg!(test) {
+            return false;
+        }
+        self.adopt_settings(Settings::load())
+    }
+
+    /// Adopt `next` as the live settings if it differs from what's in memory, rebuilding
+    /// the render-derived state (theme, font) and pushing the live-applicable settings
+    /// (the scrollback cap) to open panes. Returns whether anything changed. Does not
+    /// save — the caller is reconciling *from* disk, not *to* it.
+    pub(crate) fn adopt_settings(&mut self, next: Settings) -> bool {
+        if next == self.settings {
+            return false;
+        }
+        self.settings = next;
+        // Rebuild the render-derived state the way `Tty::new` does.
+        self.theme = Theme::from_settings(&self.settings);
+        self.font = self
+            .settings
+            .font_family
+            .as_deref()
+            .map(named_font)
+            .unwrap_or(Font::MONOSPACE);
+        self.font_size = self.settings.font_size.unwrap_or(DEFAULT_FONT_SIZE);
+        // The scrollback cap has to reach every open pane (mirrors `set_max_scrollback`).
+        // Opacity, status-bar flags, metrics, etc. are read from `settings` at render
+        // time, so adopting the struct is enough for them.
+        let cap = self.settings.max_scrollback();
+        for tab in self.tabs.iter().chain(self.detached.values()) {
+            for term in tab.terms() {
+                term.screen.lock().set_max_scrollback(cap);
+            }
+        }
+        true
+    }
+
     /// Pick a named built-in theme. Selecting one drops any custom palette so the
     /// theme's own colors take over. The synthetic "Custom" entry (shown while a custom
     /// palette is active) isn't a real theme, so re-selecting it is a no-op.

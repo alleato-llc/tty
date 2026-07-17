@@ -74,8 +74,8 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 - **Hand-editable config (`tty.toml`)** — the GUI is primary, but the file is yours to
   edit: a round-trip save (via `toml_edit`) preserves your comments and layout, unset
   options are omitted (no null noise), a legacy `tty.settings.json` migrates on first
-  run, and a malformed file is backed up rather than reset. (Live-reload on external
-  edit is the one piece still to come.)
+  run, a malformed file is backed up rather than reset, and an external hand-edit is
+  **live-reloaded** when a tty window regains focus.
 - Embeddable: `cathode` (engine) + `phosphor` (widget) also power fed-ide's panel.
 
 ---
@@ -140,12 +140,11 @@ tier is complete.
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.
-- **Config file round-trip** — ✦§ — *format + round-trip shipped:* the GUI reads/writes
-  a human-readable `tty.toml` (`toml_edit` + serde), and a save merges into the on-disk
-  document so hand-added comments and layout survive; a legacy `tty.settings.json` is
-  migrated on first run, and a malformed file is backed up rather than reset. *Remaining:*
-  **live-reload on external change** (re-read when the file is edited outside the app).
-  (GUI stays the primary path.)
+- **Config file round-trip** — ✦§ — **shipped.** The GUI reads/writes a human-readable
+  `tty.toml` (`toml_edit` + serde); a save merges into the on-disk document so hand-added
+  comments and layout survive; a legacy `tty.settings.json` is migrated on first run; a
+  malformed file is backed up rather than reset; and an external hand-edit is **live-
+  reloaded** when a window regains focus. (GUI stays the primary path.)
 
 ### Rendering / fonts
 - **Full grapheme clustering** — combining marks, ZWJ emoji sequences, skin-tone

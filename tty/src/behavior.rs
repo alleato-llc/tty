@@ -127,6 +127,41 @@ fn cmd() -> Modifiers {
 }
 
 #[test]
+fn adopt_settings_applies_external_changes_and_no_ops_when_unchanged() {
+    use crate::settings::Settings;
+    let mut tty = headless(1);
+    // A hand-edit changes the theme, font, and scrollback cap on disk.
+    let edited = Settings {
+        theme: Some("Nord".into()),
+        font_size: Some(20.0),
+        max_scrollback: Some(500),
+        ..Default::default()
+    };
+    assert!(
+        tty.adopt_settings(edited.clone()),
+        "a real change is adopted"
+    );
+    assert_eq!(tty.settings.theme.as_deref(), Some("Nord"));
+    assert_eq!(tty.font_size, 20.0);
+    // The cap reached the open pane, not just the settings struct.
+    assert_eq!(
+        tty.tabs[0]
+            .focused()
+            .unwrap()
+            .screen
+            .lock()
+            .max_scrollback(),
+        500,
+    );
+    // Re-adopting the same settings is a no-op (this is what makes reload-on-focus
+    // cheap and idempotent right after our own save).
+    assert!(
+        !tty.adopt_settings(edited),
+        "unchanged settings are a no-op"
+    );
+}
+
+#[test]
 fn closing_a_tab_keeps_at_least_one_then_signals_exit() {
     let mut tty = headless(2);
     // Closing one of two leaves one and reports "keep running".

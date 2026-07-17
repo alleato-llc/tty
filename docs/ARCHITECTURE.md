@@ -341,7 +341,11 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   user's comments (full-line and inline) and key order survive a GUI write; unset
   `Option`s are simply omitted (TOML has no null). `load()` migrates a legacy
   `tty.settings.json` on first run and, on a parse error, backs the file up to
-  `tty.toml.bak` instead of silently resetting every setting. `window_opacity()`
+  `tty.toml.bak` instead of silently resetting every setting. `reload_settings_if_changed`
+  (called from the `WindowFocused` handler) **live-reloads** an external hand-edit:
+  it re-reads the file, and `adopt_settings` swaps it in and rebuilds the derived state
+  (theme, font, per-pane scrollback cap) only when it actually differs — a no-op right
+  after the app's own save, since in-memory and on-disk then match. `window_opacity()`
   drives a uniform per-surface fade —
   the `focused_opacity` while focused (floored at `MIN_FOCUSED_OPACITY`, so active
   transparency tops out at 50% and stays readable) and the `unfocused_opacity`

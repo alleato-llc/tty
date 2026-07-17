@@ -430,6 +430,11 @@ impl TerminalScreen {
         }
     }
 
+    /// The current scrollback cap (see [`Self::set_max_scrollback`]).
+    pub fn max_scrollback(&self) -> usize {
+        self.max_scrollback
+    }
+
     /// Drop every buffered (off-screen) scrollback line. The live on-screen grid and
     /// cursor are untouched — this is "clear history," not the shell's own `clear`
     /// (which resets the visible screen instead).

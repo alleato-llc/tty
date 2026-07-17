@@ -507,6 +507,11 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             // unfocused-opacity fade) and routes the keyboard to that window's tab.
             state.focused = true;
             state.focus_window(id);
+            // Live-reload: if tty.toml was hand-edited in another app while we were
+            // away, adopt it now (no-op when unchanged / right after our own save).
+            if state.reload_settings_if_changed() {
+                tracing::info!("reloaded settings from tty.toml (external change)");
+            }
         }
         Message::WindowMoved(id, pos) => crate::detach_drag::on_moved(state, id, pos),
         Message::WindowResizedAt(id, size) => {

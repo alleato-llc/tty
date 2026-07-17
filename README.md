@@ -116,9 +116,10 @@ nears the bottom edge so the grid gets the full height; turn it off to pin it, o
 (up to 95%, when it loses focus). A **Keys** section lists every keyboard shortcut
 for reference. Settings persist to a hand-editable `tty.toml` in the config dir
 (`~/.config/tty/` or the platform equivalent). You can edit it directly — the GUI
-does a round-trip save, so your comments and layout survive. A malformed file is
-backed up rather than overwritten, and an existing `tty.settings.json` from an older
-build is migrated automatically on first launch.
+does a round-trip save, so your comments and layout survive, and an edit you make in
+another editor is picked up live the moment you switch back to a tty window. A
+malformed file is backed up rather than overwritten, and an existing
+`tty.settings.json` from an older build is migrated automatically on first launch.
 
 A dedicated **Metrics** section (above History) configures **machine stats in the
 status bar** (off until you add one): CPU, memory, and network / disk throughput
