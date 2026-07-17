@@ -12,6 +12,7 @@ use crate::state::{Term, Tty};
 
 mod metrics;
 mod popover;
+mod procs;
 mod scrollback;
 mod settings;
 mod settings_history;
