@@ -115,6 +115,8 @@ fn populated() -> Tty {
         status_metric_press: None,
         status_metric_drag: None,
         status_metric_drop: None,
+        proc_sort: (crate::state::ProcSortColumn::Cpu, true),
+        proc_table_scroll: 0.0,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -1189,6 +1191,70 @@ fn status_bar_scrolled_view() {
     assert!(
         matches,
         "snapshot `tty-status-bar-scrolled` changed — delete its PNG to re-baseline"
+    );
+}
+
+/// Seed a deterministic process list for the Processes snapshots.
+fn seed_processes(tty: &mut Tty) {
+    let p = |pid, name: &str, cpu: f32, mem: f32| crate::metrics::ProcInfo {
+        pid,
+        name: name.to_string(),
+        cpu_percent: cpu,
+        mem_percent: mem,
+    };
+    tty.metrics.processes = vec![
+        p(412, "Google Chrome", 92.0, 31.0),
+        p(88, "rustc", 45.0, 12.0),
+        p(1, "Terminal", 4.0, 30.0),
+        p(233, "zsh", 1.0, 1.0),
+        p(700, "Spotify", 8.0, 9.0),
+        p(9, "kernel_task", 12.0, 5.0),
+    ];
+}
+
+#[test]
+fn status_bar_procs_view() {
+    // The Processes cell: the busiest process by CPU% (`↑ Google Chrome 92%`).
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-status-bar-procs.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-status-bar-procs` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn metric_detail_procs_view() {
+    // The Processes drill-in: the clickable header (CPU active, ▾) over the
+    // scrollable table, sorted by CPU% descending.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("procs", "sparkline")];
+    seed_metric_sample(&mut tty);
+    seed_processes(&mut tty);
+    tty.metric_details = vec![crate::state::MetricPopover::new(
+        crate::settings::MetricKind::Procs,
+    )];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-metric-detail-procs.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-metric-detail-procs` changed — delete its PNG to re-baseline"
     );
 }
 

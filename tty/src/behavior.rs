@@ -99,6 +99,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         status_metric_press: None,
         status_metric_drag: None,
         status_metric_drop: None,
+        proc_sort: (crate::state::ProcSortColumn::Cpu, true),
+        proc_table_scroll: 0.0,
         metric_details: Vec::new(),
         metric_detail_resize: None,
         metric_detail_move_drag: None,
@@ -365,6 +367,33 @@ fn status_bar_quick_tap_opens_popover_not_edit() {
     assert!(tty.status_metric_press.is_none());
     assert_eq!(tty.metric_details.len(), 1, "the tap opened a popover");
     assert_eq!(tty.metric_details[0].kind, crate::settings::MetricKind::Mem);
+}
+
+#[test]
+fn proc_sort_toggles_direction_and_switches_column() {
+    use crate::state::ProcSortColumn as Col;
+    let mut tty = headless(1);
+    // Default is CPU descending.
+    assert_eq!(tty.proc_sort, (Col::Cpu, true));
+    // Re-selecting the active column flips direction.
+    let _ = update(&mut tty, Message::SetProcSort(Col::Cpu));
+    assert_eq!(tty.proc_sort, (Col::Cpu, false));
+    // A new numeric column sorts descending; a scroll offset resets on re-sort.
+    tty.proc_table_scroll = 120.0;
+    let _ = update(&mut tty, Message::SetProcSort(Col::Mem));
+    assert_eq!(tty.proc_sort, (Col::Mem, true));
+    assert_eq!(
+        tty.proc_table_scroll, 0.0,
+        "re-sort scrolls back to the top"
+    );
+    // The name column sorts ascending by default.
+    let _ = update(&mut tty, Message::SetProcSort(Col::Name));
+    assert_eq!(tty.proc_sort, (Col::Name, false));
+    // Scroll clamps non-negative.
+    let _ = update(&mut tty, Message::ProcTableScroll(-5.0));
+    assert_eq!(tty.proc_table_scroll, 0.0);
+    let _ = update(&mut tty, Message::ProcTableScroll(40.0));
+    assert_eq!(tty.proc_table_scroll, 40.0);
 }
 
 #[test]

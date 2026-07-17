@@ -223,6 +223,10 @@ pub enum Message {
     ExitStatusBarEdit,
     /// Nudge the edit-mode long-press hold duration by a seconds delta.
     SetStatusBarEditHold(f32),
+    /// Re-sort the Processes drill-in table by this column (a header click).
+    SetProcSort(crate::state::ProcSortColumn),
+    /// Scroll the Processes drill-in table to this pixel offset.
+    ProcTableScroll(f32),
     /// Clock cell format toggles: 24-hour, show-seconds, show-date.
     SetClock24h(bool),
     SetClockSeconds(bool),

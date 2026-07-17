@@ -7,9 +7,9 @@ use rime::theme;
 use rime::widgets::{
     button, caption, color_field, context_menu, dialog, labeled, line_chart, modal_sized,
     rename_bar, rename_field_id, section, select, shortcut_row, slider, sparkline, stat,
-    status_bar_content, stepper, table, tabs, text_field, toggle, tooltip, window_shell, LineChart,
-    MenuItem, Series, SparkSeries, Sparkline, Tab, TabBarStyle, TableColumn, TableMetrics,
-    TooltipPosition,
+    status_bar_content, stepper, table, tabs, text_field, toggle, tooltip, window_shell, CellAlign,
+    LineChart, MenuItem, Series, SparkSeries, Sparkline, Tab, TabBarStyle, TableColumn,
+    TableMetrics, TooltipPosition,
 };
 
 use crate::history::crypto::Cipher;
@@ -2181,6 +2181,25 @@ fn metric_render(cfg: crate::settings::ResolvedMetric, state: &Tty) -> Option<Me
                 alert: None,
             }
         }
+        // Processes: a text cell showing the busiest process (by CPU%); the
+        // drill-in is the scrollable, sortable table. Skip until sampled.
+        K::Procs => {
+            let top = m.processes.iter().max_by(|a, b| {
+                a.cpu_percent
+                    .partial_cmp(&b.cpu_percent)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })?;
+            MetricRender {
+                label: format!(
+                    "↑ {} {}%",
+                    truncate_name(&top.name, 16),
+                    top.cpu_percent.round() as i32
+                ),
+                series: vec![],
+                max: 1.0,
+                alert: None,
+            }
+        }
         K::Clock => unreachable!("clock is handled before the stats read"),
     };
     // A graded cell past its warn/alarm threshold carries the alert color so the
@@ -2299,7 +2318,9 @@ fn metric_popover_card<'a>(
     // where the platform reports no per-core history.
     let has_cores = kind.is_cpu() && has_per_core_cpu(state);
 
-    let body: Element<'a, Message> = if kind == K::Clock {
+    let body: Element<'a, Message> = if kind == K::Procs {
+        procs_body(state, chart_h)
+    } else if kind == K::Clock {
         clock_body(state)
     } else if kind.is_uptime() {
         uptime_body(state, kind)
@@ -2606,6 +2627,125 @@ fn clock_body(state: &Tty) -> Element<'_, Message> {
             .color(t.muted),
     ]
     .spacing(8)
+    .into()
+}
+
+/// Clip a process name to `max` chars for the compact cell (an `…` when cut).
+fn truncate_name(name: &str, max: usize) -> String {
+    if name.chars().count() > max {
+        format!(
+            "{}…",
+            name.chars().take(max.saturating_sub(1)).collect::<String>()
+        )
+    } else {
+        name.to_string()
+    }
+}
+
+/// The Processes drill-in: a clickable header row (re-sort by clicking a column)
+/// over a virtualized, scrollable `rime` table of every process, ordered by the
+/// active sort. The bar cell shows only the busiest process; this is the list.
+fn procs_body(state: &Tty, chart_h: f32) -> Element<'_, Message> {
+    use crate::state::ProcSortColumn as Col;
+    let t = theme::tokens();
+    let procs = &state.metrics.processes;
+    if procs.is_empty() {
+        return column![
+            text("Processes").size(14).color(t.ink),
+            text("Collecting…").size(12).color(t.muted),
+        ]
+        .spacing(8)
+        .into();
+    }
+
+    let (sort_col, desc) = state.proc_sort;
+    // Row order: indices into `procs` sorted by the active column/direction.
+    let mut order: Vec<usize> = (0..procs.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (pa, pb) = (&procs[a], &procs[b]);
+        let cmp = match sort_col {
+            Col::Name => pa.name.to_lowercase().cmp(&pb.name.to_lowercase()),
+            Col::Cpu => pa
+                .cpu_percent
+                .partial_cmp(&pb.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            Col::Mem => pa
+                .mem_percent
+                .partial_cmp(&pb.mem_percent)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        };
+        if desc {
+            cmp.reverse()
+        } else {
+            cmp
+        }
+    });
+
+    // Column widths (must match the header row and the table below); `CELL_PAD`
+    // in the table is 8px, so the header cells pad to match.
+    const NUM_W: f32 = 64.0;
+    let arrow = move |c: Col| -> &'static str {
+        if sort_col == c {
+            if desc {
+                " ▾"
+            } else {
+                " ▴"
+            }
+        } else {
+            ""
+        }
+    };
+    let header_cell = |label: &str, col: Col, width: Length, right: bool| -> Element<'_, Message> {
+        let color = if sort_col == col { t.ink } else { t.muted };
+        let txt = text(format!("{label}{}", arrow(col))).size(11).color(color);
+        let mut c = container(txt).width(width).padding([0, 8]);
+        if right {
+            c = c.align_x(iced::alignment::Horizontal::Right);
+        }
+        mouse_area(c)
+            .on_press(Message::SetProcSort(col))
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into()
+    };
+    let header = row![
+        header_cell("PROCESS", Col::Name, Length::Fill, false),
+        header_cell("CPU", Col::Cpu, Length::Fixed(NUM_W), true),
+        header_cell("MEM", Col::Mem, Length::Fixed(NUM_W), true),
+    ]
+    .align_y(iced::Alignment::Center);
+
+    // The virtualized body. The cell closure owns the sorted order and borrows the
+    // process list.
+    let rows = order.len();
+    let cell = move |row: usize, col: usize| -> String {
+        let p = &procs[order[row]];
+        match col {
+            0 => p.name.clone(),
+            1 => format!("{}%", p.cpu_percent.round() as i32),
+            _ => format!("{}%", p.mem_percent.round() as i32),
+        }
+    };
+    let columns = vec![
+        TableColumn::fill("").align(CellAlign::Left),
+        TableColumn::fixed("", NUM_W).align(CellAlign::Right),
+        TableColumn::fixed("", NUM_W).align(CellAlign::Right),
+    ];
+    let body = table(rows, columns, cell)
+        .metrics(TableMetrics {
+            row_height: 22.0,
+            header_height: 0.0,
+        })
+        .offset(state.proc_table_scroll)
+        .on_scroll(Message::ProcTableScroll);
+
+    column![
+        text(format!("Processes — {}", rows)).size(14).color(t.ink),
+        header,
+        container(body)
+            .height(Length::Fixed(chart_h))
+            .width(Length::Fill),
+    ]
+    .spacing(6)
     .into()
 }
 

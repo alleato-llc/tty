@@ -180,6 +180,13 @@ Thin glue, mirroring `fed`'s module shape:
   (`system_load_average()` — `getloadavg(3)` / `/proc/loadavg`) and the **battery**
   (`system_battery()` — IOKit power sources / `/sys/class/power_supply`, hidden with no
   battery). The `Clock` cell is the live wall time (its own 1s tick, no sampler).
+  For the **Processes** cell, `sample_processes()` folds a per-pid CPU% from
+  `cpu_time_ns` deltas and a memory% from `phys`/total over `prexp-core`'s light
+  `process_summaries()` (every pid, *no* fd enumeration); it runs only while a
+  Processes cell is shown, since it walks the whole table. The cell shows the
+  busiest process; `procs_body` renders the drill-in — a clickable header (re-sort
+  by column) over a virtualized, scrollable `rime` `table` (`proc_sort` /
+  `proc_table_scroll`).
   Network / disk have macOS samplers only for now (via `prexp-ffi` — `sysctl
   NET_RT_IFLIST2` + IOKit `IOBlockStorageDriver`); on other platforms those reads error
   and are dropped, so the metric simply shows no rate. A failed CPU/memory read is

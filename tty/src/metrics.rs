@@ -105,6 +105,26 @@ pub struct Metrics {
     pub battery: Option<prexp_core::system::BatteryInfo>,
     /// Recent battery charge percentage (oldest first), for its sparkline.
     pub battery_history: std::collections::VecDeque<f32>,
+    /// Previous cumulative per-process CPU time (pid → ns), and the instant read,
+    /// for folding per-process CPU% from the delta. Only populated while a
+    /// Processes cell is shown (see [`Self::sample_processes`]).
+    prev_proc_cpu: std::collections::HashMap<i32, u64>,
+    prev_proc_instant: Option<std::time::Instant>,
+    /// The current per-process list (unsorted; the view sorts per the active
+    /// column). Empty until sampled.
+    pub processes: Vec<ProcInfo>,
+}
+
+/// One process's live resource use, for the Processes widget.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProcInfo {
+    pub pid: i32,
+    pub name: String,
+    /// CPU% over the last interval (can exceed 100 for a multi-threaded process,
+    /// like `top`).
+    pub cpu_percent: f32,
+    /// Physical memory as a percentage of total RAM.
+    pub mem_percent: f32,
 }
 
 impl Metrics {
@@ -259,6 +279,54 @@ impl Metrics {
             self.battery = Some(bat);
             push_capped(&mut self.battery_history, bat.percent as f32);
         }
+    }
+
+    /// Sample the whole process table for the Processes widget: fold each
+    /// process's CPU% from its cumulative-CPU-time delta and its memory% from the
+    /// total. Uses `prexp-core`'s light `process_summaries` (no fd enumeration).
+    /// Call only while a Processes cell is shown — it walks every pid. Reads
+    /// `mem_total` from the last [`Self::sample`], so call it after.
+    pub fn sample_processes(&mut self) {
+        let source = NativeSource::new();
+        let summaries = match source.process_summaries() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("processes: read failed, skipping: {e}");
+                return;
+            }
+        };
+        let now = std::time::Instant::now();
+        let elapsed_ns = self
+            .prev_proc_instant
+            .map(|p| now.duration_since(p).as_nanos())
+            .filter(|n| *n > 0);
+        let mem_total = self.latest.as_ref().map_or(0, |s| s.mem_total);
+
+        let mut next_prev = std::collections::HashMap::with_capacity(summaries.len());
+        let mut procs = Vec::with_capacity(summaries.len());
+        for s in &summaries {
+            let cpu_percent = match (self.prev_proc_cpu.get(&s.pid), elapsed_ns) {
+                (Some(&prev), Some(el)) => {
+                    (s.cpu_time_ns.saturating_sub(prev) as f64 / el as f64 * 100.0) as f32
+                }
+                _ => 0.0,
+            };
+            let mem_percent = if mem_total > 0 {
+                (s.memory_phys as f64 / mem_total as f64 * 100.0) as f32
+            } else {
+                0.0
+            };
+            next_prev.insert(s.pid, s.cpu_time_ns);
+            procs.push(ProcInfo {
+                pid: s.pid,
+                name: s.name.clone(),
+                cpu_percent,
+                mem_percent,
+            });
+        }
+        self.prev_proc_cpu = next_prev;
+        self.prev_proc_instant = Some(now);
+        self.processes = procs;
     }
 }
 

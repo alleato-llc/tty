@@ -307,6 +307,10 @@ pub struct Tty {
     /// reorder is committed on release. Both `None` when not dragging.
     pub status_metric_drag: Option<usize>,
     pub status_metric_drop: Option<usize>,
+    /// The Processes drill-in's sort column + descending flag, and its table
+    /// scroll offset (px). A header click re-sorts; the body scrolls.
+    pub proc_sort: (ProcSortColumn, bool),
+    pub proc_table_scroll: f32,
     /// The metric drill-in popovers currently open (a click on a status-bar
     /// sparkline opens one), each with its own layout. Empty when none are open.
     /// In the default one-at-a-time mode this holds 0 or 1; with
@@ -374,6 +378,14 @@ impl MetricPopover {
             }
         })
     }
+}
+
+/// A sortable column of the Processes drill-in table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcSortColumn {
+    Name,
+    Cpu,
+    Mem,
 }
 
 /// Which edge or corner of the metric popover a resize drag grabbed. The card
@@ -650,6 +662,8 @@ impl Tty {
             status_metric_press: None,
             status_metric_drag: None,
             status_metric_drop: None,
+            proc_sort: (ProcSortColumn::Cpu, true),
+            proc_table_scroll: 0.0,
         };
         tty.new_tab();
         tty
@@ -984,6 +998,24 @@ impl Tty {
         } else {
             self.status_metric_press.take().map(|(idx, _)| idx)
         }
+    }
+
+    /// Re-sort the Processes drill-in by `column`: clicking a new column sorts by
+    /// it (descending for the numeric columns, ascending for the name); clicking
+    /// the active column flips the direction.
+    pub fn set_proc_sort(&mut self, column: ProcSortColumn) {
+        if self.proc_sort.0 == column {
+            self.proc_sort.1 = !self.proc_sort.1;
+        } else {
+            let descending = column != ProcSortColumn::Name;
+            self.proc_sort = (column, descending);
+        }
+        self.proc_table_scroll = 0.0;
+    }
+
+    /// Set the Processes table's scroll offset (px), clamped non-negative.
+    pub fn set_proc_scroll(&mut self, offset: f32) {
+        self.proc_table_scroll = offset.max(0.0);
     }
 
     /// Leave drag-to-reorder edit mode (Escape or a press on empty bar space).

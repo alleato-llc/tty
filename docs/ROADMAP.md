@@ -155,7 +155,9 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
   keeps several popovers open at once, a fixed 0..100% gauge for the bounded
   metrics, text **Uptime** / **Session** cells (boot time via
   `system_boot_time_secs()`), a **Clock** cell, a **Load** cell
-  (`system_load_average()`), a **Battery** gauge (`system_battery()`), **swap** in
+  (`system_load_average()`), a **Battery** gauge (`system_battery()`), a **Processes**
+  cell (busiest process; drill-in a scrollable, sortable table via the light
+  `process_summaries()`), **swap** in
   the memory drill-in (`MemoryInfo.swap_*`), configurable per-cell **warn/alarm
   thresholds** (past which the whole cell recolors), **scroll-to-page** through
   shed cells, and a press-hold **drag-to-reorder** edit mode with an insertion

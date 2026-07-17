@@ -302,6 +302,8 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::StatusMetricDragOver(idx) => state.drag_status_metric_over(idx),
         Message::ExitStatusBarEdit => state.exit_status_bar_edit(),
         Message::SetStatusBarEditHold(delta) => state.step_status_bar_edit_hold(delta),
+        Message::SetProcSort(col) => state.set_proc_sort(col),
+        Message::ProcTableScroll(offset) => state.set_proc_scroll(offset),
         Message::SetClock24h(on) => state.set_clock_24h(on),
         Message::SetClockSeconds(on) => state.set_clock_seconds(on),
         Message::SetClockDate(on) => state.set_clock_date(on),
@@ -315,7 +317,19 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::StatusBarMetricThreshold(idx, warn, delta) => {
             state.step_status_bar_metric_threshold(idx, warn, delta)
         }
-        Message::SampleMetrics => state.metrics.sample(),
+        Message::SampleMetrics => {
+            state.metrics.sample();
+            // The process table is heavier (walks every pid), so only poll it
+            // while a Processes cell is actually shown.
+            if state
+                .settings
+                .status_bar_metrics()
+                .iter()
+                .any(|m| m.kind == crate::settings::MetricKind::Procs)
+            {
+                state.metrics.sample_processes();
+            }
+        }
         Message::CloseMetricDetail => {
             // Click-away / Escape: close every open popover and drop any drag.
             state.metric_details.clear();

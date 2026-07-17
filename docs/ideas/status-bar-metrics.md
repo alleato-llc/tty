@@ -299,6 +299,12 @@ source serves fdtop; tty consumes it in `metrics.rs`.
   the drill-in charts the 1-minute history and shows the full 1/5/15 triple.
   Source: `getloadavg(3)` on macOS, `/proc/loadavg` on Linux, via `prexp-core`'s
   `system_load_average()`. *Shipped.*
+- [x] **Processes** — a top-processes widget. The cell shows the busiest process
+  (`↑ Chrome 92%`); the drill-in is a scrollable, re-sortable `rime` table of every
+  process (click the PROCESS / CPU / MEM header to sort). Per-process CPU% is folded
+  from `cpu_time_ns` deltas, memory% from `phys` / total; read via `prexp-core`'s
+  light `process_summaries()` (no fd enumeration), sampled only while the cell is
+  shown. *Shipped.*
 - [x] **Battery** — charge %, charging state, time remaining. A bounded 0..100%
   gauge (fixed-scale sparkline like CPU/memory, colored by charge — low = alarm);
   the drill-in adds the charging state and a time-to-full/empty estimate. Source:
