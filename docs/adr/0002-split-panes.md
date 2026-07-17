@@ -69,3 +69,15 @@ the common case is unchanged.
   holds.
 - Persistence (Option C) remains out of scope. The complementary bet — be excellent
   *under* tmux — still stands.
+
+## Update — panes carry a content enum
+
+The pane content was later generalized from `Term` to a `Pane` enum
+(`pane_grid::State<Pane>`, `Pane = Term(Term) | Metric(MetricKind)`) so a status-bar
+metric drill-in can be "graduated" into a real pane. This preserved every decision
+above: the split/focus/resize/close/maximize machinery is generic over the pane
+content, and terminal operations filter through `Pane::as_term` (`Tab::terms()`), so
+a `Metric` pane is transparent to them (no PTY, never reaps). New non-terminal pane
+kinds now slot into the enum without touching the layout code. See
+`docs/ideas/status-bar-metrics.md` and `ARCHITECTURE.md` for the metric-pane
+specifics (promote/replace flows, maximize, the focus-highlight toggle).

@@ -18,8 +18,8 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 - **Split panes** — `⌥⌘`+arrows split the focused pane in any direction, `⌃⌘`+arrows move
   focus, drag a divider to resize, `⌘W` closes the focused pane (→ tab → quit). Or
   right-click a pane (split / close pane) or a tab (new tab / split / close tab). Each
-  pane is an independent shell; built on iced's `pane_grid`. (Option B below — splits
-  only, no persistence.)
+  pane is an independent shell — or a graduated metric view (see Machine stats); built
+  on iced's `pane_grid`. (Option B below — splits only, no persistence.)
 - Full ANSI rendering: 16 / 256 / truecolor + bold, dim, italic, underline, inverse.
 - Scrollback + mouse select / `⌘C` copy.
 - **Configurable scrollback** — a global max-lines setting (applies live to
@@ -161,8 +161,17 @@ feature count. All land in `cathode`/`phosphor`, so **fed-ide inherits every one
   the memory drill-in (`MemoryInfo.swap_*`), configurable per-cell **warn/alarm
   thresholds** (past which the whole cell recolors), **scroll-to-page** through
   shed cells, and a press-hold **drag-to-reorder** edit mode with an insertion
-  bar. Remaining: the Linux net/disk samplers, the peek line, the full mini-fdtop
-  overlay. Design sketch: [`ideas/status-bar-metrics.md`](ideas/status-bar-metrics.md).
+  bar. The Processes cell since grew a per-process **detail drill-in** (open file
+  descriptors + a live CPU chart via `snapshot_pid`, kept only while viewed) with
+  right-click **copy path / PID / name** and **CPU-hog coloring** (the CPU% cell
+  grades amber/red). And a drill-in can now **graduate into a pane**: the ⊞
+  control splits it off — or *replaces* an existing pane (ending that shell after
+  a prompt) — into a maximizable metric pane in the `pane_grid` (panes carry a
+  `Pane` = `Term | Metric` content enum); it's gated by a setting and housed, with
+  the rest of the metric config, in a dedicated **Metrics** settings section, plus
+  a **highlight-focused-pane** toggle. Remaining: the Linux net/disk samplers, the
+  peek line, the full mini-fdtop overlay. Design sketch:
+  [`ideas/status-bar-metrics.md`](ideas/status-bar-metrics.md).
 - **Profiles** — § — named tab presets (shell + command + cwd + theme). Keep it light.
 - **Command palette (`⌘K`)** — § — new tab, theme, settings, search — one fuzzy entry.
 - **Quick-open recent dirs / `ssh` hosts** — small launcher conveniences.
