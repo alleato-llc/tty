@@ -71,8 +71,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 - **reorder tabs**: drag a tab sideways across the strip and it moves live to the slot
   under the pointer — for pane-tabs, drag onto **any part of another pane** to move the tab
   into that split (while a drag is in flight every pane becomes a drop zone)
-- **detach a pane-tab**: right-click → **Detach tab** — it opens in its own window and
-  docks back onto the main strip when reattached
+- **detach a pane-tab**: right-click → **Detach tab** — it opens in its own window and, on
+  reattach, returns to its original tab group (or docks onto the main strip as a new tab if
+  that group is gone)
 - **rename a tab**: right-click → **Rename tab…**, type a name (Enter commits, blank
   reverts to the shell/program title, Esc cancels)
 - **detach a tab into its own window**: right-click → **Detach Tab**, or drag a tab down

@@ -88,6 +88,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         focused_window: None,
         detached: std::collections::HashMap::new(),
         detach_origin: std::collections::HashMap::new(),
+        pane_tab_origin: std::collections::HashMap::new(),
         tab_drag: None,
         pane_tab_drag: None,
         pane_tab_hover: None,
@@ -1835,33 +1836,55 @@ fn reattach_window_docks_the_tab_back_at_its_origin() {
 }
 
 #[test]
-fn detaching_a_pane_tab_moves_it_into_its_own_window_and_reattaches() {
+fn detaching_a_pane_tab_restores_into_its_origin_group_on_reattach() {
     let mut tty = headless(1);
     let win = main_win(&tty);
     let pane = tty.tabs[0].focus;
     grow_pane_group(&mut tty, pane, &["b"]); // group is [sh0, b]
 
     let _task = tty.detach_pane_tab(win, pane, 1); // detach "b"
-    assert_eq!(
-        pane_tab_labels(&tty, pane),
-        ["sh0"],
-        "the source group keeps its other tab"
-    );
+    assert_eq!(pane_tab_labels(&tty, pane), ["sh0"]);
     assert_eq!(
         tty.detached.len(),
         1,
         "the pane-tab lives in its own window"
     );
 
-    // Reattach docks it onto the main strip as a top-level tab.
+    // Reattach drops it back into the *same* group, not a new top-level tab.
     let dwin = *tty.detached.keys().next().unwrap();
     tty.reattach_window(dwin);
+    assert_eq!(tty.tabs.len(), 1, "no stray top-level tab was created");
     assert_eq!(
-        tty.tabs.len(),
-        2,
-        "the detached pane-tab is now a top-level tab"
+        pane_tab_labels(&tty, pane),
+        ["sh0", "b"],
+        "the tab returned to its origin group at its old index"
     );
     assert!(tty.detached.is_empty());
+}
+
+#[test]
+fn a_detached_pane_tab_whose_group_is_gone_docks_as_a_new_tab() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::single(screen_term("r")),
+    );
+    let right = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, right, &["b"]); // right group is [r, b]
+
+    tty.detach_pane_tab(win, right, 1); // detach "b"; right group is now [r]
+    let dwin = *tty.detached.keys().next().unwrap();
+    // Destroy the origin group: close the right pane's remaining tab, closing the pane.
+    tty.close_pane_tab(win, right, 0);
+    assert_eq!(tty.tabs[0].panes.len(), 1, "the origin pane is gone");
+
+    // With its group gone, the detached tab falls back to a top-level tab.
+    tty.reattach_window(dwin);
+    assert!(tty.detached.is_empty());
+    assert_eq!(tty.tabs.len(), 2, "it docked onto the main strip instead");
 }
 
 #[test]

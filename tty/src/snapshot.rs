@@ -104,6 +104,7 @@ fn populated() -> Tty {
         focused_window: None,
         detached: std::collections::HashMap::new(),
         detach_origin: std::collections::HashMap::new(),
+        pane_tab_origin: std::collections::HashMap::new(),
         tab_drag: None,
         pane_tab_drag: None,
         pane_tab_hover: None,

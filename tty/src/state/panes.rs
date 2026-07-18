@@ -6,8 +6,8 @@
 use iced::widget::pane_grid;
 
 use super::{
-    drain_pane, reap_tab_panes, spawn_term, MenuKind, Pane, PaneTabDrag, Tab, Term, Tty,
-    DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE, TAB_TEAR_THRESHOLD,
+    drain_pane, reap_tab_panes, spawn_term, MenuKind, Pane, PaneTabDrag, PaneTabOrigin, Tab, Term,
+    Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE, TAB_TEAR_THRESHOLD,
 };
 use crate::message::Message;
 
@@ -645,6 +645,7 @@ impl Tty {
         for win in &dead_windows {
             self.detached.remove(win);
             self.detach_origin.remove(win);
+            self.pane_tab_origin.remove(win);
             self.window_bounds.remove(win);
         }
 
@@ -673,14 +674,20 @@ impl Tty {
         } else {
             self.active = self.active.min(self.tabs.len() - 1);
         }
-        Some(self.open_detached_window(tab, idx))
+        Some(self.open_detached_window(tab, idx, None))
     }
 
     /// Open a new OS window hosting `tab`, recording `origin` as the main-strip index it
-    /// docks back to on reattach. Returns the window-open + position-sync task (both
-    /// windows' positions feed the drag-dock band). The single detach primitive behind
-    /// both the top-level [`detach_tab`](Self::detach_tab) and a pane-tab tear-off.
-    fn open_detached_window(&mut self, tab: Tab, origin: usize) -> iced::Task<Message> {
+    /// docks back to on reattach (and `pane_origin`, for a pane-tab detach, so reattach can
+    /// restore it into its source group). Returns the window-open + position-sync task (both
+    /// windows' positions feed the drag-dock band). The single detach primitive behind both
+    /// the top-level [`detach_tab`](Self::detach_tab) and a pane-tab detach.
+    fn open_detached_window(
+        &mut self,
+        tab: Tab,
+        origin: usize,
+        pane_origin: Option<PaneTabOrigin>,
+    ) -> iced::Task<Message> {
         let size = iced::Size::new(720.0, 600.0);
         let (id, open) = iced::window::open(iced::window::Settings {
             size,
@@ -690,6 +697,9 @@ impl Tty {
         });
         self.detached.insert(id, tab);
         self.detach_origin.insert(id, origin);
+        if let Some(po) = pane_origin {
+            self.pane_tab_origin.insert(id, po);
+        }
         crate::detach_drag::on_opened(self, id, size);
         let open = open.then(move |id| {
             iced::window::position(id).map(move |p| Message::WindowPosition(id, p))
@@ -740,21 +750,69 @@ impl Tty {
         let mut tab = Tab::new(term);
         tab.untracked = untracked;
         let origin = self.tabs.len();
-        Some(self.open_detached_window(tab, origin))
+        let pane_origin = PaneTabOrigin { window, pane, idx };
+        Some(self.open_detached_window(tab, origin, Some(pane_origin)))
     }
 
-    /// Dock a detached window's tab back into the main strip at its origin index.
+    /// Dock a detached window's tab back in. A window detached from a *pane-tab* restores
+    /// into its origin tab group when that group still exists; otherwise (and for a normal
+    /// tab detach) the tab docks onto the main strip at its origin index.
     pub fn reattach_window(&mut self, window: iced::window::Id) {
-        if let Some(tab) = self.detached.remove(&window) {
-            let at = self
-                .detach_origin
-                .remove(&window)
-                .unwrap_or(usize::MAX)
-                .min(self.tabs.len());
-            self.tabs.insert(at, tab);
-            self.active = at;
-            self.window_bounds.remove(&window);
+        let Some(tab) = self.detached.remove(&window) else {
+            return;
+        };
+        self.window_bounds.remove(&window);
+        let origin_idx = self.detach_origin.remove(&window).unwrap_or(usize::MAX);
+        // A pane-tab restores into its source group if it's still there; on failure the
+        // owned tab comes back so it can dock as a top-level tab instead.
+        let tab = match self.pane_tab_origin.remove(&window) {
+            Some(po) => match self.restore_pane_tab(tab, po) {
+                Ok(()) => return,
+                Err(tab) => tab,
+            },
+            None => tab,
+        };
+        let at = origin_idx.min(self.tabs.len());
+        self.tabs.insert(at, tab);
+        self.active = at;
+    }
+
+    /// Try to move a detached `tab`'s terminals back into pane-tab origin `po`. Succeeds only
+    /// when the origin pane still exists as a terminal group in `po`'s current tab; returns
+    /// the tab back in `Err` so the caller can dock it normally when it doesn't.
+    fn restore_pane_tab(&mut self, mut tab: Tab, po: PaneTabOrigin) -> Result<(), Tab> {
+        // The origin group must still be a terminal group in the origin window's tab.
+        let origin_ok = self
+            .tab_for(po.window)
+            .and_then(|t| t.panes.get(po.pane))
+            .and_then(Pane::group)
+            .is_some();
+        if !origin_ok {
+            return Err(tab);
         }
+        // Take every terminal out of the detached tab (all its panes, in order).
+        let mut terms: Vec<Term> = Vec::new();
+        for (_pane, content) in tab.panes.iter_mut() {
+            if let Pane::Term(g) = content {
+                terms.append(&mut g.tabs);
+            }
+        }
+        if terms.is_empty() {
+            return Err(tab);
+        }
+        let Some(t) = self.tab_for_mut(po.window) else {
+            return Err(tab);
+        };
+        let Some(g) = t.panes.get_mut(po.pane).and_then(Pane::group_mut) else {
+            return Err(tab);
+        };
+        let at = po.idx.min(g.tabs.len());
+        for (k, term) in terms.into_iter().enumerate() {
+            g.tabs.insert(at + k, term);
+        }
+        g.active = at;
+        t.focus = po.pane;
+        Ok(())
     }
 
     /// While a tab tear-off is armed, dragging the pointer over a *different* tab
@@ -803,6 +861,7 @@ impl Tty {
         }
         self.detached.remove(&window);
         self.detach_origin.remove(&window);
+        self.pane_tab_origin.remove(&window);
         self.window_bounds.remove(&window);
         Some(window)
     }

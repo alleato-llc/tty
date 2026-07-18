@@ -160,6 +160,7 @@ impl Tty {
             focused_window: None,
             detached: HashMap::new(),
             detach_origin: HashMap::new(),
+            pane_tab_origin: HashMap::new(),
             tab_drag: None,
             pane_tab_drag: None,
             pane_tab_hover: None,

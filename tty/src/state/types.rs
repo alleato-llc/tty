@@ -359,6 +359,9 @@ pub struct Tty {
     pub detached: HashMap<iced::window::Id, Tab>,
     /// The main-strip index each detached tab came from, so reattach drops it back there.
     pub detach_origin: HashMap<iced::window::Id, usize>,
+    /// For a window detached from a *pane-tab*: where to restore it on reattach (its origin
+    /// tab group). Absent for a normal top-level tab detach.
+    pub pane_tab_origin: HashMap<iced::window::Id, PaneTabOrigin>,
     /// An armed tab tear-off: the pressed tab index + the pointer at press. A drag past
     /// [`TAB_TEAR_THRESHOLD`] on release detaches it.
     pub tab_drag: Option<(usize, iced::Point)>,
@@ -695,6 +698,16 @@ pub struct PaneTabDrag {
     pub window: iced::window::Id,
     pub pane: pane_grid::Pane,
     pub reorder: rime::widgets::Reorder,
+}
+
+/// Where a detached pane-tab came from, so reattach can drop it back into the same tab
+/// group. Recorded when a pane-tab detaches; consumed on reattach (which restores into the
+/// origin group if it still exists, else docks the tab onto the main strip).
+#[derive(Debug, Clone, Copy)]
+pub struct PaneTabOrigin {
+    pub window: iced::window::Id,
+    pub pane: pane_grid::Pane,
+    pub idx: usize,
 }
 
 /// What a "Rename tab…" action is targeting: a window-level tab (by strip index), or a

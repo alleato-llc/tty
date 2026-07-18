@@ -167,9 +167,9 @@ Thin glue, mirroring `fed`'s module shape:
   horizontal-move bookkeeping is the shared `rime::widgets::Reorder` tracker + `reorder_slice`
   (the window-level strip uses the same `reorder_slice`). A pane-tab **detaches** into its own
   window via its context menu (`detach_pane_tab`, deliberate only — never a drag-off, so a
-  mis-aimed move can't tear the tab out), reusing the top-level
-  `open_detached_window`/`reattach_window` machinery, so it docks back onto the main strip as
-  a top-level tab. `reap_dead` drops dead tabs from each group, closes a group that
+  mis-aimed move can't tear the tab out), recording a `PaneTabOrigin`. On reattach,
+  `restore_pane_tab` drops it back into that origin group when it still exists; otherwise it
+  falls back to the top-level `reattach_window` dock (a new main-strip tab). `reap_dead` drops dead tabs from each group, closes a group that
   empties, then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
