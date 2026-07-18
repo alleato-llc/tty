@@ -1,27 +1,36 @@
-//! The **Env view** — a popover (like the metric charts): non-modal, drag it by the
-//! title bar, border-resize it, and it stays open beside the terminal so it tracks the
-//! shell as commands run. A masked, filterable list of the active pane's environment;
-//! click a row to copy `NAME=value`. Data comes from [`crate::env`].
+//! The **Env view** — a popover (like the metric charts): non-modal, drag it by
+//! anywhere on the card, border-resize it, and it stays open beside the terminal so
+//! it tracks the shell as commands run. A masked, filterable list of the active
+//! pane's environment; click a row to copy `NAME=value`. Data comes from
+//! [`crate::env`]; the draggable/resizable chrome is [`rime::widgets::popover`].
 
 use iced::widget::{column, container, mouse_area, row, scrollable, stack, text, Space};
 use iced::{Border, Element, Font, Length, Padding};
 use rime::theme;
-use rime::widgets::{button, section, stat, text_field, toggle};
+use rime::widgets::{button, popover, section, stat, text_field, toggle};
 
 use crate::message::Message;
-use crate::state::{ResizeEdge, Tty};
+use crate::state::Tty;
 
 /// Longest revealed value shown inline (the full value is still what a click copies).
 const MAX_VALUE_CHARS: usize = 120;
 
 /// Place the Env popover over `base` (no scrim — the terminal stays live behind it).
+/// The whole card is a drag handle (press-and-drag the body to move it) exactly like
+/// the metric popovers; inner controls (buttons, fields, rows, resize strips) capture
+/// their own presses first. `opaque` stops a press on the card leaking to the terminal.
 pub(super) fn place_env_popover<'a>(
     state: &'a Tty,
     base: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let (x, y) = state.env_effective_pos();
     let (w, h) = state.env_size;
-    let placed = container(with_resize_edges(card(state, w, h)))
+    let floating = popover(
+        card(state, w, h),
+        Message::EnvMoveStart,
+        Message::EnvResizeStart,
+    );
+    let placed = container(floating)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(iced::alignment::Horizontal::Left)
@@ -91,10 +100,10 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
         scrollable(list).height(Length::Fill).into()
     };
 
-    // The title bar doubles as the drag handle (press-and-drag to move the popover);
-    // the reveal toggle + close × keep their own hit areas.
+    // The whole card is the drag handle (see `place_env_popover`); the reveal toggle +
+    // close × keep their own hit areas.
     let title_bar = row![
-        mouse_area(section("Environment")).on_press(Message::EnvMoveStart),
+        section("Environment"),
         Space::new().width(Length::Fill),
         toggle("Reveal values", state.env_reveal, Message::ToggleEnvReveal),
         button::ghost("×", Message::ToggleEnvView),
@@ -153,50 +162,6 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
             ..container::background(t.surface)
         })
         .into()
-}
-
-/// Invisible border strips that resize the card by dragging its right/bottom edge or
-/// corner — the same treatment as the metric popovers, keyed to `EnvResizeStart`.
-fn with_resize_edges(card: Element<'_, Message>) -> Element<'_, Message> {
-    use iced::alignment::{Horizontal::Right, Vertical::Bottom};
-    use iced::mouse::Interaction;
-    const EDGE: f32 = 8.0;
-    const CORNER: f32 = 16.0;
-
-    let strip = |edge: ResizeEdge, w: Length, h: Length, cursor: Interaction| {
-        mouse_area(Space::new().width(w).height(h))
-            .on_press(Message::EnvResizeStart(edge))
-            .interaction(cursor)
-    };
-    let right = container(strip(
-        ResizeEdge::Right,
-        Length::Fixed(EDGE),
-        Length::Fill,
-        Interaction::ResizingHorizontally,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(Right);
-    let bottom = container(strip(
-        ResizeEdge::Bottom,
-        Length::Fill,
-        Length::Fixed(EDGE),
-        Interaction::ResizingVertically,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_y(Bottom);
-    let corner = container(strip(
-        ResizeEdge::Corner,
-        Length::Fixed(CORNER),
-        Length::Fixed(CORNER),
-        Interaction::ResizingDiagonallyDown,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(Right)
-    .align_y(Bottom);
-    stack![card, right, bottom, corner].into()
 }
 
 fn elide(s: &str, max: usize) -> String {

@@ -468,26 +468,12 @@ pub enum ProcSortColumn {
 /// Which edge or corner of the metric popover a resize drag grabbed. The card
 /// is anchored at its top-left, so only the right edge, bottom edge, and
 /// bottom-right corner resize; each maps to which axes the drag adjusts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResizeEdge {
-    /// Drag the right edge: width only.
-    Right,
-    /// Drag the bottom edge: height only.
-    Bottom,
-    /// Drag the bottom-right corner: both axes.
-    Corner,
-}
-
-impl ResizeEdge {
-    /// `(adjust_width, adjust_height)` — which axes this grab resizes.
-    pub fn axes(self) -> (bool, bool) {
-        match self {
-            Self::Right => (true, false),
-            Self::Bottom => (false, true),
-            Self::Corner => (true, true),
-        }
-    }
-}
+///
+/// The popover chrome (the draggable, border-resizable card) lives in rime as
+/// [`rime::widgets::popover`] / [`rime::widgets::resize_edges`]; this is rime's
+/// [`rime::widgets::ResizeEdge`], re-exported here so the state, messages, and the
+/// resize math (`.axes()`) can name it without a `rime::` prefix everywhere.
+pub use rime::widgets::ResizeEdge;
 
 /// What a launch should do about encrypted history — the pure decision core
 /// behind `Tty::new` + `startup_history_task`, kept side-effect-free so the

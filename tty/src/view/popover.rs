@@ -108,10 +108,13 @@ pub(super) fn metric_popover_card<'a>(
             },
             ..container::background(t.surface)
         });
-    // Border-resize strips and the top-right controls (expand, plus a close "×"
-    // when popovers are pinned) overlay the card.
+    // Border-resize strips (from rime's popover chrome) and the top-right controls
+    // (expand, plus a close "×" when popovers are pinned) overlay the card. The
+    // controls stack *above* the strips so their buttons win the hit test.
     iced::widget::stack![
-        with_resize_edges(index, card.into()),
+        rime::widgets::resize_edges(card, move |edge| Message::MetricDetailResizeStart(
+            index, edge
+        )),
         popover_controls(
             index,
             kind,
@@ -205,70 +208,4 @@ pub(super) fn place_metric_popover<'a>(
                 .into()
         }
     }
-}
-
-/// One invisible resize strip for [`with_resize_edges`]: a transparent hit area
-/// of the given size whose press starts a drag-resize from `edge` (tracked
-/// through `PointerMoved`, ended by `PointerReleased`), showing the matching
-/// resize cursor on hover. It carries no paint of its own; the card's own border
-/// is the visible edge the user grabs.
-fn resize_strip<'a>(
-    index: usize,
-    edge: crate::state::ResizeEdge,
-    width: Length,
-    height: Length,
-    cursor: iced::mouse::Interaction,
-) -> Element<'a, Message> {
-    mouse_area(iced::widget::Space::new().width(width).height(height))
-        .on_press(Message::MetricDetailResizeStart(index, edge))
-        .interaction(cursor)
-        .into()
-}
-
-/// Overlay thin invisible resize strips along the card's right and bottom edges
-/// and its bottom-right corner, so the popover resizes by dragging its borders
-/// (each with the matching resize cursor) rather than a separate grip. The strips
-/// stack over the card; `iced`'s `stack` sizes to its first child, so they span
-/// exactly the card, not the window. `index` is the popover the drag addresses.
-fn with_resize_edges(index: usize, card: Element<'_, Message>) -> Element<'_, Message> {
-    use crate::state::ResizeEdge;
-    use iced::alignment::{Horizontal::Right, Vertical::Bottom};
-    use iced::mouse::Interaction;
-
-    const EDGE: f32 = 8.0;
-    const CORNER: f32 = 16.0;
-
-    let right = container(resize_strip(
-        index,
-        ResizeEdge::Right,
-        Length::Fixed(EDGE),
-        Length::Fill,
-        Interaction::ResizingHorizontally,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(Right);
-    let bottom = container(resize_strip(
-        index,
-        ResizeEdge::Bottom,
-        Length::Fill,
-        Length::Fixed(EDGE),
-        Interaction::ResizingVertically,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_y(Bottom);
-    let corner = container(resize_strip(
-        index,
-        ResizeEdge::Corner,
-        Length::Fixed(CORNER),
-        Length::Fixed(CORNER),
-        Interaction::ResizingDiagonallyDown,
-    ))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(Right)
-    .align_y(Bottom);
-
-    iced::widget::stack![card, right, bottom, corner].into()
 }
