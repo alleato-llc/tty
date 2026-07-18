@@ -188,6 +188,7 @@ const deck = `
       slides.forEach((s, k) => s.classList.toggle("active", k === i));
       dots.forEach((d, k) => d.classList.toggle("on", k === i));
       countEl.textContent = i + 1 + " / " + slides.length;
+      history.replaceState(null, "", "#" + i);
     }
     document.getElementById("next")!.onclick = () => go(i + 1);
     document.getElementById("prev")!.onclick = () => go(i - 1);
@@ -203,6 +204,7 @@ const deck = `
       if (e.key === "Home") go(0);
       if (e.key === "End") go(slides.length - 1);
     });
-    go(0);
+    const start = parseInt(location.hash.slice(1), 10);
+    go(Number.isInteger(start) ? start : 0);
   </script>
 </Layout>
