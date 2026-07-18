@@ -203,6 +203,10 @@ pub struct Tty {
     /// [`crate::settings::Settings::env`].
     pub env_overlay_name: String,
     pub env_overlay_value: String,
+    /// The "set in this pane" draft in the Env popover: name + value to inject as an
+    /// `export`/`unset` at the focused shell's prompt. See [`Tty::inject_env_set`].
+    pub env_set_name: String,
+    pub env_set_value: String,
     /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
     pub show_scrollback: bool,
     /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).

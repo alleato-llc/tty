@@ -118,6 +118,8 @@ impl Tty {
             env_resize: None,
             env_overlay_name: String::new(),
             env_overlay_value: String::new(),
+            env_set_name: String::new(),
+            env_set_value: String::new(),
             show_scrollback: false,
             scrollback_query: String::new(),
             scrollback_selected: None,
@@ -627,6 +629,46 @@ impl Tty {
     pub fn remove_env_overlay(&mut self, name: &str) {
         self.settings.env.remove(name);
         self.settings.save();
+    }
+
+    /// Inject `export NAME='value'` at the focused shell's prompt (the Env popover's
+    /// "set in this pane" action). Visible on purpose — it shows in the terminal, so
+    /// the change is self-documenting. No-op unless the name is valid (so the value
+    /// quotes cleanly) and the shell is at a prompt. Clears the draft on success.
+    pub fn inject_env_set(&mut self) {
+        let bytes = crate::env::export_command(self.env_set_name.trim(), &self.env_set_value);
+        if let Some(bytes) = bytes {
+            if self.inject_env(bytes) {
+                self.env_set_name.clear();
+                self.env_set_value.clear();
+            }
+        }
+    }
+
+    /// Inject `unset NAME` at the focused shell's prompt.
+    pub fn inject_env_unset(&mut self) {
+        if let Some(bytes) = crate::env::unset_command(self.env_set_name.trim()) {
+            if self.inject_env(bytes) {
+                self.env_set_name.clear();
+                self.env_set_value.clear();
+            }
+        }
+    }
+
+    /// Write env-edit bytes to the focused pane, but only when the shell is at a prompt
+    /// (OSC 133) — never into a running foreground program. Returns whether it was sent.
+    fn inject_env(&mut self, bytes: Vec<u8>) -> bool {
+        let Some(win) = self.main_window else {
+            return false;
+        };
+        if self
+            .active_term()
+            .is_some_and(|t| t.screen.lock().command_running())
+        {
+            return false;
+        }
+        self.write_focused(win, &bytes);
+        true
     }
 
     /// The Env popover's current top-left position, defaulting to centered until the

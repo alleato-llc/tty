@@ -103,7 +103,10 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   stays open beside the terminal) listing the focused pane's environment variables;
   click one to copy `NAME=value`, toggle **Reveal values** to unmask. It reads what the
   shell captures each prompt (same shell integration as above), so it tracks the shell
-  across commands — read-only for now
+  across commands. **Edit** two ways: **set/unset in this pane** (types a visible
+  `export`/`unset` at the prompt, only when the shell's at a prompt), or add to the
+  **new-shells** list in Shell settings (an `[env]` overlay applied to every shell tty
+  starts, no running shell touched)
 
 ## Customize
 

@@ -130,6 +130,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::EnvOverlayValueChanged(s) => state.env_overlay_value = s,
         Message::EnvOverlayAdd => state.add_env_overlay(),
         Message::EnvOverlayRemove(name) => state.remove_env_overlay(&name),
+        Message::EnvSetNameChanged(s) => state.env_set_name = s,
+        Message::EnvSetValueChanged(s) => state.env_set_value = s,
+        Message::EnvInjectSet => state.inject_env_set(),
+        Message::EnvInjectUnset => state.inject_env_unset(),
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {

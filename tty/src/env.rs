@@ -33,6 +33,30 @@ pub fn read(path: &Path) -> Vec<EnvVar> {
     std::fs::read(path).map(|b| parse(&b)).unwrap_or_default()
 }
 
+/// A valid env-var name: a leading letter/underscore then letters/digits/underscores.
+/// Anything else is rejected so a name can't smuggle shell syntax into an injected
+/// command.
+fn is_valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The bytes to type at a bash/zsh prompt to set `name` to `value` — single-quote
+/// wrapped with embedded quotes escaped (`'\''`), so the value is inert data and can't
+/// break out into shell code. `None` for an invalid `name`.
+pub fn export_command(name: &str, value: &str) -> Option<Vec<u8>> {
+    is_valid_name(name).then(|| {
+        let escaped = value.replace('\'', "'\\''");
+        format!("export {name}='{escaped}'\n").into_bytes()
+    })
+}
+
+/// The bytes to type to unset `name`. `None` for an invalid `name`.
+pub fn unset_command(name: &str) -> Option<Vec<u8>> {
+    is_valid_name(name).then(|| format!("unset {name}\n").into_bytes())
+}
+
 #[cfg(test)]
 #[path = "env_tests.rs"]
 mod tests;

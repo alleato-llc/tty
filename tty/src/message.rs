@@ -136,6 +136,12 @@ pub enum Message {
     EnvOverlayValueChanged(String),
     EnvOverlayAdd,
     EnvOverlayRemove(String),
+    /// The Env popover's "set in this pane" editor: draft name / value changed, or
+    /// inject an `export` / `unset` at the focused shell's prompt.
+    EnvSetNameChanged(String),
+    EnvSetValueChanged(String),
+    EnvInjectSet,
+    EnvInjectUnset,
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.

@@ -72,7 +72,8 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   environment variables (masked by default, reveal toggle, filter, click a row to copy
   `NAME=value`). The shell-integration hook captures `env` to a per-session file each
   prompt (gated by an `.on` flag), so it tracks the shell across commands with no
-  polling. Read-only for now (see the follow-up below).
+  polling. **Editable** two ways: set/unset in this pane (a visible inject at the prompt)
+  and a persistent new-shells `[env]` overlay in Shell settings.
 - **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
   clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
@@ -146,13 +147,13 @@ tier is complete.
   prompt-jump, failed-command flagging, output copy, a **jump-to-next-*failed*-command**
   (`⌘⇧↑`/`⌘⇧↓`), and an opt-in **persistent prompt gutter** (a dot per prompt, red on
   failure).
-- **Env editing** — the **Env view** ships read-only (see above); the edit half is the
-  natural follow-up: **set/unset for the active pane** by injecting a visible
-  `export`/`unset` at the prompt (gated on being at a prompt via OSC 133; zsh/bash
-  syntax; single-quote-escaped), and a **new-session overlay** — vars tty applies to
-  every shell it spawns (`CommandBuilder::env`, persisted in `tty.toml`), which needs no
-  injection and no running shell. A silent live-apply (a `precmd`-drained control file)
-  is possible but deliberately deferred as over-engineered for the common case.
+- **Env editing** — **shipped** (both halves): **set/unset in the active pane** from the
+  Env popover (a visible `export`/`unset` injected at the prompt, single-quote-escaped,
+  gated on being at a prompt via OSC 133, zsh/bash), and a **new-shells overlay** (an
+  `[env]` map in `tty.toml`, applied at spawn, no running shell touched). A *silent*
+  live-apply (a `precmd`-drained control file) stays deliberately deferred — the visible
+  inject is self-documenting and enough for the common case. Follow-ups if wanted: fish/csh
+  inject syntax, and per-row edit/unset buttons in the popover.
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.

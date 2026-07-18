@@ -406,6 +406,14 @@ impl TerminalScreen {
         std::mem::take(&mut self.pending_command_completions)
     }
 
+    /// Whether a command is currently running — the OSC 133 `C` (output start) mark has
+    /// fired with no `D` (finished) yet. The host checks this before injecting input
+    /// (the Env view's set/unset) so it never types into a foreground program. Always
+    /// `false` without shell integration.
+    pub fn command_running(&self) -> bool {
+        self.pending_mark.is_some_and(|m| m.output_start.is_some())
+    }
+
     /// The global line id of the row the cursor is on right now — how an OSC 133 mark
     /// captures a position it can find again after the line scrolls (see
     /// [`Self::lines_scrolled`]).

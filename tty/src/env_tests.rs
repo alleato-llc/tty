@@ -43,3 +43,33 @@ fn read_missing_file_is_empty_not_an_error() {
     let vars = read(std::path::Path::new("/definitely/not/here/env"));
     assert!(vars.is_empty());
 }
+
+#[test]
+fn export_command_single_quote_escapes_the_value() {
+    assert_eq!(
+        export_command("FOO", "bar baz").unwrap(),
+        b"export FOO='bar baz'\n"
+    );
+    // A value containing a single quote is escaped so it can't break out.
+    assert_eq!(
+        export_command("MSG", "it's \"here\"").unwrap(),
+        b"export MSG='it'\\''s \"here\"'\n"
+    );
+}
+
+#[test]
+fn unset_command_is_simple() {
+    assert_eq!(unset_command("FOO").unwrap(), b"unset FOO\n");
+}
+
+#[test]
+fn invalid_names_are_rejected() {
+    // A name that could smuggle shell syntax must produce nothing.
+    assert!(export_command("FOO; rm -rf /", "x").is_none());
+    assert!(export_command("", "x").is_none());
+    assert!(export_command("1FOO", "x").is_none());
+    assert!(export_command("FO-O", "x").is_none());
+    assert!(unset_command("$(evil)").is_none());
+    // Legit names pass.
+    assert!(export_command("_FOO2", "x").is_some());
+}

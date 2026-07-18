@@ -63,6 +63,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         env_resize: None,
         env_overlay_name: String::new(),
         env_overlay_value: String::new(),
+        env_set_name: String::new(),
+        env_set_value: String::new(),
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,
@@ -300,6 +302,33 @@ fn copy_last_command_output_returns_the_newest_commands_output() {
         tty.last_command_output(win).as_deref(),
         Some("a.txt\nb.txt")
     );
+}
+
+#[test]
+fn env_inject_is_gated_while_a_command_runs() {
+    use cathode::parser::TermParser;
+    let mut tty = headless(1);
+    // A command is running (OSC 133 C, no D yet).
+    {
+        let mut s = tty.tabs[0].focused().unwrap().screen.lock();
+        TermParser::new().process(b"\x1b]133;A\x07$ sleep 9\r\n\x1b]133;C\x07", &mut s);
+        assert!(s.command_running());
+    }
+    tty.env_set_name = "FOO".into();
+    tty.env_set_value = "bar".into();
+    tty.inject_env_set();
+    // Blocked (would type into the running program) → draft kept, nothing sent.
+    assert_eq!(tty.env_set_name, "FOO", "inject is blocked mid-command");
+
+    // The command finishes (D) → back at a prompt.
+    {
+        let mut s = tty.tabs[0].focused().unwrap().screen.lock();
+        TermParser::new().process(b"\x1b]133;D;0\x07", &mut s);
+        assert!(!s.command_running());
+    }
+    tty.inject_env_set();
+    // Now it's sent and the draft clears (the write itself no-ops on a pty-less test term).
+    assert!(tty.env_set_name.is_empty(), "inject proceeds at a prompt");
 }
 
 #[test]

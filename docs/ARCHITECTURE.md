@@ -277,8 +277,13 @@ Thin glue, mirroring `fed`'s module shape:
   dragged by its title bar (`EnvMoveStart` → `env_move_drag`) and border-resized
   (`EnvResizeStart` → `env_resize`), both tracked through `PointerMoved`/`PointerReleased`
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
-  filterable list; click a row to copy `NAME=value`. Read-only for now — no editing back
-  into the shell. Needs shell integration; nothing without it.
+  filterable list; click a row to copy `NAME=value`. **Editing** has two scopes: the
+  popover's footer **sets/unsets in *this* pane** by injecting a visible `export`/`unset`
+  at the prompt (`env::export_command` single-quote-escapes the value; `is_valid_name`
+  rejects a name that could smuggle shell syntax; gated on `screen.command_running()` so it
+  never types into a foreground program), while the **Shell** settings' "new shells" list
+  (`settings.env`, applied at spawn) is a persistent overlay that touches no running shell.
+  Reading needs shell integration; the overlay works without it.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the
   full key-derivation pipeline and its open refinement options are surveyed in
   `docs/history-keys.md`), opt-in

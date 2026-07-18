@@ -106,6 +106,21 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
         .align_y(iced::Alignment::Center),
         text_field("Filter…", &state.env_filter, Message::EnvFilterChanged).size(13),
         body,
+        // Set/unset in *this* pane by typing an export/unset at its prompt (visible).
+        column![
+            text("Set in this pane — types at the shell's prompt:")
+                .size(11)
+                .color(t.muted),
+            row![
+                text_field("NAME", &state.env_set_name, Message::EnvSetNameChanged).size(13),
+                text_field("value", &state.env_set_value, Message::EnvSetValueChanged).size(13),
+                button::secondary("Set", Message::EnvInjectSet),
+                button::ghost("Unset", Message::EnvInjectUnset),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(6),
     ]
     .spacing(12);
 
