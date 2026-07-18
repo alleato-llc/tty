@@ -89,6 +89,51 @@ pub fn title(state: &Tty, window: iced::window::Id) -> String {
     }
 }
 
+/// A compact tab strip for a pane that holds more than one terminal, shared by the main
+/// and detached pane closures. Returns `None` for a single-terminal pane (which renders
+/// with no strip, identical to before pane-level tabs existed).
+fn pane_tab_strip(
+    group: &crate::state::PaneTerms,
+    win: iced::window::Id,
+    pane: pane_grid::Pane,
+    highlight: bool,
+) -> Option<Element<'_, Message>> {
+    if group.tabs.len() <= 1 {
+        return None;
+    }
+    let models: Vec<Tab> = group
+        .tabs
+        .iter()
+        .map(|t| {
+            let title = t
+                .screen
+                .lock()
+                .title
+                .clone()
+                .unwrap_or_else(|| t.title.clone());
+            Tab::new(if t.activity {
+                format!("• {title}")
+            } else {
+                title
+            })
+        })
+        .collect();
+    Some(tabs(
+        models,
+        group.active_idx(),
+        None,
+        move |i| Message::SelectPaneTab(win, pane, i),
+        move |i| Message::ClosePaneTab(win, pane, i),
+        |_| Message::Ignore,
+        |_| Message::Ignore,
+        Message::NewPaneTab(win, pane),
+        TabBarStyle {
+            highlight_active: highlight,
+            text_size: 11.0,
+        },
+    ))
+}
+
 /// Render the full tabbed chrome (the main window; detached windows use
 /// [`detached_view`]).
 fn main_view(state: &Tty) -> Element<'_, Message> {
@@ -215,41 +260,10 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 .ligatures(state.settings.terminal_ligatures());
                 // A pane holding more than one shell shows a compact tab strip above the
                 // terminal (a single-terminal pane shows none, identical to before).
-                let inner: Element<'_, Message> = if group.tabs.len() > 1 {
-                    let models: Vec<Tab> = group
-                        .tabs
-                        .iter()
-                        .map(|t| {
-                            let title = t
-                                .screen
-                                .lock()
-                                .title
-                                .clone()
-                                .unwrap_or_else(|| t.title.clone());
-                            Tab::new(if t.activity {
-                                format!("• {title}")
-                            } else {
-                                title
-                            })
-                        })
-                        .collect();
-                    let strip = tabs(
-                        models,
-                        group.active_idx(),
-                        None,
-                        move |i| Message::SelectPaneTab(win, pane, i),
-                        move |i| Message::ClosePaneTab(win, pane, i),
-                        |_| Message::Ignore,
-                        |_| Message::Ignore,
-                        Message::NewPaneTab(win, pane),
-                        TabBarStyle {
-                            highlight_active: highlight,
-                            text_size: 11.0,
-                        },
-                    );
-                    column![strip, term_widget].spacing(2).into()
-                } else {
-                    term_widget.into()
+                let inner: Element<'_, Message> = match pane_tab_strip(group, win, pane, highlight)
+                {
+                    Some(strip) => column![strip, term_widget].spacing(2).into(),
+                    None => term_widget.into(),
                 };
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes (unless the highlight is off); the others get a hairline.
@@ -722,8 +736,8 @@ fn detached_view<'a>(
 
     let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
-        let term = match content {
-            crate::state::Pane::Term(g) => g.active(),
+        let group = match content {
+            crate::state::Pane::Term(g) => g,
             crate::state::Pane::Metric(kind) => {
                 return metric_pane_content(
                     state, *kind, window, pane, is_focused, maximized, multi, highlight, accent,
@@ -731,6 +745,7 @@ fn detached_view<'a>(
                 );
             }
         };
+        let term = group.active();
         let term_widget = phosphor::terminal(
             term.screen.clone(),
             style,
@@ -747,12 +762,17 @@ fn detached_view<'a>(
         .find(None)
         .prompt_gutter(state.settings.shell_integration().gutter)
         .ligatures(state.settings.terminal_ligatures());
+        // A tabbed pane shows the same compact strip here as in the main window.
+        let inner: Element<'_, Message> = match pane_tab_strip(group, window, pane, highlight) {
+            Some(strip) => column![strip, term_widget].spacing(2).into(),
+            None => term_widget.into(),
+        };
         let border_color = if is_focused && highlight {
             accent
         } else {
             hairline
         };
-        let bordered = container(term_widget).padding(6).style(move |_| {
+        let bordered = container(inner).padding(6).style(move |_| {
             let border = if multi {
                 Border {
                     color: border_color,

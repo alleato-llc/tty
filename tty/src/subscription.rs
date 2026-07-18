@@ -9,7 +9,9 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
     // Key presses become terminal input. Prefer the committed `text` for printable
     // keys (so Shift/AltGr produce the right character) and fall back to the logical
     // key for Named keys (Enter/arrows) and Ctrl combos, which `phosphor::input::to_bytes`
-    // turns into the right escape/control bytes.
+    // turns into the right escape/control bytes. Command chords also fall back to the
+    // logical key: on macOS `text` is the Option-remapped character (⌥T → "†"), so a
+    // ⌥⌘ shortcut must match the base key, not the composed glyph.
     let keys = event::listen_with(|event, status, _window| match event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
@@ -24,7 +26,9 @@ pub fn subscription(state: &Tty) -> Subscription<Message> {
                 return None;
             }
             let effective = match (&key, &text) {
-                (keyboard::Key::Character(_), Some(t)) if !t.is_empty() && !modifiers.control() => {
+                (keyboard::Key::Character(_), Some(t))
+                    if !t.is_empty() && !modifiers.control() && !modifiers.command() =>
+                {
                     keyboard::Key::Character(t.clone())
                 }
                 _ => key,
