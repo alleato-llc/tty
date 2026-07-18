@@ -867,7 +867,7 @@ fn spawn_term(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
     let mut env = if integration.autoinstall {
-        crate::shell_integration::autoinstall_env(&shell)
+        crate::shell_integration::autoinstall_env(&shell, integration.env_view)
     } else {
         Vec::new()
     };

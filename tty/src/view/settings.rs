@@ -496,7 +496,7 @@ fn shell_section(state: &Tty) -> Element<'_, Message> {
             )
             .push(
                 container(
-                    text(crate::shell_integration::ZSH_SNIPPET)
+                    text(crate::shell_integration::zsh_snippet(si.env_view))
                         .font(iced::Font::MONOSPACE)
                         .size(11)
                         .color(t.ink),

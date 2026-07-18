@@ -2,21 +2,28 @@ use super::*;
 
 #[test]
 fn snippet_emits_both_osc133_marks() {
-    // The pasteable snippet must define the C (start) and D (finish) hooks.
-    assert!(ZSH_SNIPPET.contains("133;C"));
-    assert!(ZSH_SNIPPET.contains("133;D"));
-    assert!(ZSH_SNIPPET.contains("add-zsh-hook preexec"));
-    assert!(ZSH_SNIPPET.contains("add-zsh-hook precmd"));
+    // Both snippet variants define the C (start) and D (finish) hooks.
+    for env in [false, true] {
+        let s = zsh_snippet(env);
+        assert!(s.contains("133;C"), "env={env}");
+        assert!(s.contains("133;D"), "env={env}");
+        assert!(s.contains("add-zsh-hook preexec"));
+        assert!(s.contains("add-zsh-hook precmd"));
+    }
 }
 
 #[test]
-fn snippet_captures_env_gated_on_the_flag() {
-    // The precmd also dumps env for the Env view — but only while the `.on` flag is
-    // present, so it's a no-op stat when the view is closed.
-    assert!(ZSH_SNIPPET.contains("_tty_capture_env"));
-    assert!(ZSH_SNIPPET.contains("$TTY_ENV_FILE"));
-    assert!(ZSH_SNIPPET.contains("${TTY_ENV_FILE}.on"));
-    assert!(ZSH_SNIPPET.contains("env >"));
+fn snippet_includes_env_capture_only_when_asked() {
+    // Env view on → the precmd also dumps env (gated by the `.on` flag).
+    let with = zsh_snippet(true);
+    assert!(with.contains("_tty_capture_env"));
+    assert!(with.contains("${TTY_ENV_FILE}.on"));
+    assert!(with.contains("env >"));
+    // Env view off → no env code at all in the shell.
+    let without = zsh_snippet(false);
+    assert!(!without.contains("_tty_capture_env"));
+    assert!(!without.contains("TTY_ENV_FILE"));
+    assert!(!without.contains("env >"));
 }
 
 #[test]
@@ -40,8 +47,8 @@ fn env_channel_path_is_a_fresh_user_only_dir() {
 
 #[test]
 fn autoinstall_is_zsh_only() {
-    assert!(autoinstall_env("/bin/bash").is_empty());
-    assert!(autoinstall_env("/usr/bin/fish").is_empty());
+    assert!(autoinstall_env("/bin/bash", true).is_empty());
+    assert!(autoinstall_env("/usr/bin/fish", true).is_empty());
 }
 
 #[test]
@@ -53,7 +60,7 @@ fn shell_is_zsh_matches_by_basename() {
 
 #[test]
 fn autoinstall_zsh_sets_zdotdir_to_a_real_dir() {
-    let env = autoinstall_env("/bin/zsh");
+    let env = autoinstall_env("/bin/zsh", true);
     // On a machine where the temp dir is writable this wires ZDOTDIR up; if the
     // write failed it's empty. Either is valid — but when present the dir must exist
     // and carry both startup files with the hooks.

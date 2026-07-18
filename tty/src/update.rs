@@ -286,7 +286,8 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.settings.save();
         }
         Message::CopyShellSnippet => {
-            return iced::clipboard::write(crate::shell_integration::ZSH_SNIPPET.to_string());
+            let env_view = state.settings.shell_integration().env_view;
+            return iced::clipboard::write(crate::shell_integration::zsh_snippet(env_view));
         }
         Message::MaxScrollbackStep(delta) => state.step_max_scrollback(delta),
         Message::DefaultOutputLinesStep(delta) => state.step_default_output_lines(delta),

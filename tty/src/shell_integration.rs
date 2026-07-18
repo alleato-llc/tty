@@ -1,5 +1,5 @@
 //! OSC 133 shell integration — what makes command-completion notifications possible.
-//! Two paths: the [`ZSH_SNIPPET`] a user pastes into their own rc (manual, the
+//! Two paths: the [`zsh_snippet`] a user pastes into their own rc (manual, the
 //! default), and a best-effort [`autoinstall_env`] that wires zsh up automatically by
 //! pointing it at a generated `ZDOTDIR`.
 //!
@@ -12,37 +12,57 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
-/// The zsh hooks, ready to paste into `~/.zshrc`. Kept in sync with what
-/// [`autoinstall_env`] installs.
-pub const ZSH_SNIPPET: &str = "\
-# tty shell integration — command marks (OSC 133) + env capture for the Env view\n\
-autoload -Uz add-zsh-hook\n\
-_tty_preexec() { printf '\\e]133;C\\a' }\n\
-_tty_precmd()  { printf '\\e]133;D;%s\\a' \"$?\"; _tty_capture_env }\n\
-_tty_capture_env() {\n\
-  [[ -n \"$TTY_ENV_FILE\" ]] || return\n\
-  # One baseline dump at startup, then per-prompt only while the view is open (.on).\n\
-  [[ -e \"${TTY_ENV_FILE}.on\" || ! -e \"$TTY_ENV_FILE\" ]] || return\n\
-  env > \"${TTY_ENV_FILE}.tmp\" 2>/dev/null && mv -f \"${TTY_ENV_FILE}.tmp\" \"$TTY_ENV_FILE\"\n\
-}\n\
-add-zsh-hook preexec _tty_preexec\n\
-add-zsh-hook precmd  _tty_precmd\n\
-_tty_capture_env\n";
+/// The zsh hooks to paste into `~/.zshrc` (or that [`autoinstall_env`] installs). Always
+/// the OSC 133 command marks; the **env-capture** for the Env view is included only when
+/// `env_capture` is on, so a user with the Env view disabled gets no env code in their
+/// shell — the settings preview and the copy both track the setting.
+pub fn zsh_snippet(env_capture: bool) -> String {
+    let mut s = String::from(if env_capture {
+        "# tty shell integration — command marks (OSC 133) + env capture for the Env view\n"
+    } else {
+        "# tty shell integration — command marks (OSC 133)\n"
+    });
+    s.push_str(
+        "autoload -Uz add-zsh-hook\n\
+         _tty_preexec() { printf '\\e]133;C\\a' }\n",
+    );
+    if env_capture {
+        s.push_str(
+            "_tty_precmd()  { printf '\\e]133;D;%s\\a' \"$?\"; _tty_capture_env }\n\
+             _tty_capture_env() {\n\
+             \x20 [[ -n \"$TTY_ENV_FILE\" ]] || return\n\
+             \x20 # One baseline dump at startup, then per-prompt only while the view is open (.on).\n\
+             \x20 [[ -e \"${TTY_ENV_FILE}.on\" || ! -e \"$TTY_ENV_FILE\" ]] || return\n\
+             \x20 env > \"${TTY_ENV_FILE}.tmp\" 2>/dev/null && mv -f \"${TTY_ENV_FILE}.tmp\" \"$TTY_ENV_FILE\"\n\
+             }\n",
+        );
+    } else {
+        s.push_str("_tty_precmd()  { printf '\\e]133;D;%s\\a' \"$?\" }\n");
+    }
+    s.push_str(
+        "add-zsh-hook preexec _tty_preexec\n\
+         add-zsh-hook precmd  _tty_precmd\n",
+    );
+    if env_capture {
+        s.push_str("_tty_capture_env\n");
+    }
+    s
+}
 
 /// The env vars to set on a freshly spawned shell so tty's OSC 133 hooks load
-/// automatically, or an empty vec when auto-install can't apply.
+/// automatically, or an empty vec when auto-install can't apply. `env_capture` includes
+/// the Env-view capture in the generated hooks (matching the manual snippet).
 ///
 /// zsh only: we generate a `ZDOTDIR` whose startup files source the user's real
 /// config and then add the hooks, and point the child there. Any other shell (or a
 /// failure creating the dir) returns empty — the user falls back to the manual
 /// snippet. `shell` is the child's shell path (from `$SHELL`).
-pub fn autoinstall_env(shell: &str) -> Vec<(String, String)> {
+pub fn autoinstall_env(shell: &str, env_capture: bool) -> Vec<(String, String)> {
     if !shell_is_zsh(shell) {
         return Vec::new();
     }
-    let Some(dir) = zsh_zdotdir() else {
+    let Some(dir) = zsh_zdotdir(env_capture) else {
         return Vec::new();
     };
     let prev = std::env::var("ZDOTDIR").unwrap_or_default();
@@ -77,14 +97,11 @@ fn shell_is_zsh(shell: &str) -> bool {
         .is_some_and(|name| name == "zsh")
 }
 
-/// Path to the generated zsh integration dir, created once per process (its contents
-/// are static). `None` if the files can't be written.
-fn zsh_zdotdir() -> Option<PathBuf> {
-    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-    DIR.get_or_init(build_zsh_zdotdir).clone()
-}
-
-fn build_zsh_zdotdir() -> Option<PathBuf> {
+/// Path to the generated zsh integration dir. Its `.zshrc` embeds the snippet, which
+/// depends on `env_capture`, so it's (re)written each call rather than cached — cheap
+/// (two small files, and only on an auto-install spawn) and always reflects the current
+/// Env-view setting. `None` if the files can't be written.
+fn zsh_zdotdir(env_capture: bool) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join(format!("tty-zsh-integration-{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
     let quoted = dir.to_string_lossy().replace('"', "\\\"");
@@ -102,7 +119,8 @@ fn build_zsh_zdotdir() -> Option<PathBuf> {
     let zshrc = format!(
         "export ZDOTDIR=\"$_TTY_USER_ZDOTDIR\"\n\
          [[ -f \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\n\
-         {ZSH_SNIPPET}",
+         {}",
+        zsh_snippet(env_capture),
     );
     std::fs::write(dir.join(".zshenv"), zshenv).ok()?;
     std::fs::write(dir.join(".zshrc"), zshrc).ok()?;
