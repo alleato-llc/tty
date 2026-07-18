@@ -276,11 +276,19 @@ Thin glue, mirroring `fed`'s module shape:
   work. When on, the shell-integration hook writes the shell's `env` to that per-session
   file (from `shell_integration::env_channel_path`, a `0700` temp dir): one baseline dump
   at startup, then re-dumped each prompt only while a `<file>.on` flag exists. `Tty::toggle_env_view` flips that flag on/off; `refresh_env`
-  re-reads + `env::parse`s the file each redraw while open (so it tracks the shell without
-  polling — env only changes at command boundaries). `view::env` renders it as a **popover**
-  (like the metric charts, not a modal): non-modal so the terminal stays live behind it,
-  dragged by its title bar (`EnvMoveStart` → `env_move_drag`) and border-resized
-  (`EnvResizeStart` → `env_resize`), both tracked through `PointerMoved`/`PointerReleased`
+  prefers that live capture (re-read + `env::parse`d each redraw while open, so it tracks
+  the shell without polling — env only changes at command boundaries) and **falls back**,
+  when the capture is empty (feature off, hooks not installed, or no prompt fired yet), to
+  the pane process's *launch-time* environment read straight from the kernel via
+  `prexp-core`'s `process_detail` (`KERN_PROCARGS2` / `/proc/<pid>/environ`) — so the view
+  shows real variables with zero setup. That OS read is a full process-detail scan, so
+  `active_process_env` caches it by pid (`env_os_cache`) rather than repeating it per frame;
+  the launch env is static. `env_source` (`Hook` / `Process` / `None`) records which won and
+  drives a one-line note in the card. `view::env` renders it as a **popover** built on
+  rime's shared `popover` primitive (like the metric charts, not a modal): non-modal so the
+  terminal stays live behind it, dragged by **anywhere on the card** (`EnvMoveStart` →
+  `env_move_drag`) and border-resized (`EnvResizeStart` → `env_resize`, via
+  `rime::widgets::resize_edges`), both tracked through `PointerMoved`/`PointerReleased`
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
   filterable list; click a row to copy `NAME=value`. Opened by `⌘⇧E`, the pane menu, or an
   **Env** status-bar cell — a `MetricKind::Env` "launcher" cell that renders a static

@@ -33,6 +33,18 @@ pub fn read(path: &Path) -> Vec<EnvVar> {
     std::fs::read(path).map(|b| parse(&b)).unwrap_or_default()
 }
 
+/// Build sorted [`EnvVar`]s from name/value pairs — the OS-read path (a process's
+/// launch-time environment, read from the kernel via `prexp-core`), as opposed to
+/// [`parse`]'s newline-delimited `env` text from the shell hook.
+pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Vec<EnvVar> {
+    let mut vars: Vec<EnvVar> = pairs
+        .into_iter()
+        .map(|(name, value)| EnvVar { name, value })
+        .collect();
+    vars.sort_by(|a, b| a.name.cmp(&b.name));
+    vars
+}
+
 /// A valid env-var name: a leading letter/underscore then letters/digits/underscores.
 /// Anything else is rejected so a name can't smuggle shell syntax into an injected
 /// command.

@@ -103,10 +103,14 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   stays open beside the terminal) listing the focused pane's environment variables;
   click one to copy `NAME=value`, toggle **Reveal values** to unmask. Open it with
   `⌘⇧E`, the pane menu, or an **Env** status-bar cell (add it in the Metrics settings,
-  like any other cell). It reads what the
-  shell captures each prompt (same shell integration as above), so it tracks the shell
-  across commands. **Opt-in** — off by default (a toggle in Shell settings), so a shell
-  does no env work unless you turn it on. **Edit** two ways: **set/unset in this pane** (types a visible
+  like any other cell). With **zero setup** it shows the pane process's launch-time
+  environment, read straight from the OS (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ`
+  on Linux) — no hooks required, so you always see something. Turning on the shell
+  integration (below) upgrades it to a **live** view that the shell re-reports each
+  prompt, tracking exports as they happen; the popover labels which one you're seeing.
+  The live capture is **opt-in** — off by default (a toggle in Shell settings), so a
+  shell does no env work unless you turn it on (the OS read is tty-side and touches
+  nothing in the shell). **Edit** two ways: **set/unset in this pane** (types a visible
   `export`/`unset` at the prompt, only when the shell's at a prompt — **opt-in**, off by
   default via a toggle in Shell settings since it types into your shell), or add to the
   **new-shells** list in Shell settings (an `[env]` overlay applied to every shell tty

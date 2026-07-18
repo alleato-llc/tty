@@ -110,6 +110,8 @@ impl Tty {
             scroll_target: None,
             show_env: false,
             env_vars: Vec::new(),
+            env_source: crate::state::EnvSource::None,
+            env_os_cache: None,
             env_filter: String::new(),
             env_reveal: false,
             env_pos: None,
@@ -588,6 +590,8 @@ impl Tty {
         if self.show_env {
             self.show_env = false;
             self.env_vars.clear();
+            self.env_source = EnvSource::None;
+            self.env_os_cache = None;
             if let Some(flag) = self.active_env_flag() {
                 let _ = std::fs::remove_file(flag);
             }
@@ -601,17 +605,66 @@ impl Tty {
         self.refresh_env();
     }
 
-    /// Re-read the active pane's captured env (no-op when the view is closed) — called
-    /// each redraw while open so it tracks the shell across commands.
+    /// Refresh the Env view (no-op when closed) — called each redraw while open so it
+    /// tracks the shell across commands. Prefers the **live** hook capture (the shell
+    /// dumps its env each prompt); when that's empty — the feature is off, the hooks
+    /// aren't installed, or no prompt has fired — it falls back to the pane process's
+    /// **launch-time** environment read straight from the OS, so the view shows real
+    /// variables with zero setup. The OS read is a full process-detail scan, so it's
+    /// cached per pid ([`Self::active_process_env`]) rather than repeated every frame.
     pub fn refresh_env(&mut self) {
         if !self.show_env {
             return;
         }
-        self.env_vars = self
+        let hook = self
             .active_term()
             .and_then(|t| t.env_file.as_deref())
             .map(crate::env::read)
             .unwrap_or_default();
+        if !hook.is_empty() {
+            self.env_vars = hook;
+            self.env_source = EnvSource::Hook;
+            return;
+        }
+        let os = self.active_process_env();
+        self.env_source = if os.is_empty() {
+            EnvSource::None
+        } else {
+            EnvSource::Process
+        };
+        self.env_vars = os;
+    }
+
+    /// The active pane shell's pid, if it's still running.
+    fn active_shell_pid(&self) -> Option<i32> {
+        self.active_term()
+            .and_then(|t| t.pty.as_ref())
+            .and_then(|s| s.child.process_id())
+            .map(|p| p as i32)
+    }
+
+    /// The active pane shell's launch-time environment, read from the kernel via
+    /// `prexp-core` (`KERN_PROCARGS2` on macOS, `/proc/<pid>/environ` on Linux) and
+    /// cached by pid — the read is a heavy process-detail scan and the launch env is
+    /// static, so it runs once per pid, not each redraw. Empty when there's no live pid
+    /// or the read fails (the process exited, or the OS denied it).
+    fn active_process_env(&mut self) -> Vec<crate::env::EnvVar> {
+        let Some(pid) = self.active_shell_pid() else {
+            self.env_os_cache = None;
+            return Vec::new();
+        };
+        if self.env_os_cache.as_ref().map(|(p, _)| *p) != Some(pid) {
+            use prexp_core::source::ProcessSource;
+            let vars = prexp_core::backend::NativeSource::new()
+                .process_detail(pid, "")
+                .map(|d| crate::env::from_pairs(d.environment))
+                .unwrap_or_default();
+            self.env_os_cache = Some((pid, vars));
+        }
+        self.env_os_cache
+            .as_ref()
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
     }
 
     /// The `<env_file>.on` capture-enable flag path for the active pane's shell.

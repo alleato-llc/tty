@@ -55,6 +55,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         scroll_target: None,
         show_env: false,
         env_vars: Vec::new(),
+        env_source: crate::state::EnvSource::None,
+        env_os_cache: None,
         env_filter: String::new(),
         env_reveal: false,
         env_pos: None,

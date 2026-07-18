@@ -65,6 +65,8 @@ fn populated() -> Tty {
         scroll_target: None,
         show_env: false,
         env_vars: Vec::new(),
+        env_source: crate::state::EnvSource::None,
+        env_os_cache: None,
         env_filter: String::new(),
         env_reveal: false,
         env_pos: None,
@@ -216,10 +218,12 @@ fn env_status_bar_cell_view() {
 
 #[test]
 fn env_view_view() {
-    // The Env view panel over the terminal: a filterable list with values revealed.
+    // The Env view panel over the terminal: a filterable list with values revealed,
+    // showing the launch-time source note (the OS-read fallback).
     let mut tty = populated();
     tty.show_env = true;
     tty.env_reveal = true;
+    tty.env_source = crate::state::EnvSource::Process;
     tty.settings.shell_integration.env_editing = Some(true); // show the set/unset footer
     tty.env_vars = vec![
         crate::env::EnvVar {

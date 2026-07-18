@@ -181,8 +181,14 @@ pub struct Tty {
     /// pane's shell captures its env each prompt (via the `.on` flag) and
     /// [`Tty::refresh_env`] re-reads it. See [`crate::env`].
     pub show_env: bool,
-    /// The env vars read from the active pane's capture file, sorted by name.
+    /// The env vars currently shown, sorted by name — from the live shell hook when it
+    /// has captured, else the OS launch-time read (see [`Tty::refresh_env`]).
     pub env_vars: Vec<crate::env::EnvVar>,
+    /// Where [`Tty::env_vars`] came from, so the popover can label live vs launch-time.
+    pub env_source: EnvSource,
+    /// Cache of the OS launch-time read, keyed by the pane shell's pid — that read is a
+    /// full process-detail scan, so it runs only when the pid changes, not each redraw.
+    pub env_os_cache: Option<(i32, Vec<crate::env::EnvVar>)>,
     /// The Env view's filter query.
     pub env_filter: String,
     /// Whether the Env view reveals values (off by default — env holds secrets, so
@@ -474,6 +480,20 @@ pub enum ProcSortColumn {
 /// [`rime::widgets::ResizeEdge`], re-exported here so the state, messages, and the
 /// resize math (`.axes()`) can name it without a `rime::` prefix everywhere.
 pub use rime::widgets::ResizeEdge;
+
+/// Where the Env view's current list came from, so the popover can label it and set
+/// expectations about freshness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EnvSource {
+    /// Nothing available (view closed, or the pane has no live pid and no capture).
+    #[default]
+    None,
+    /// Live: the shell-integration hook dumped the shell's env; it updates each prompt.
+    Hook,
+    /// Launch-time: read from the kernel (the process's initial environment). Static —
+    /// variables the shell exports after launch won't appear until the hook is enabled.
+    Process,
+}
 
 /// What a launch should do about encrypted history — the pure decision core
 /// behind `Tty::new` + `startup_history_task`, kept side-effect-free so the

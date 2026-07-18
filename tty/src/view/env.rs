@@ -10,7 +10,7 @@ use rime::theme;
 use rime::widgets::{button, popover, section, stat, text_field, toggle};
 
 use crate::message::Message;
-use crate::state::Tty;
+use crate::state::{EnvSource, Tty};
 
 /// Longest revealed value shown inline (the full value is still what a click copies).
 const MAX_VALUE_CHARS: usize = 120;
@@ -80,24 +80,38 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
             .push(mouse_area(line).on_press(Message::CopyText(format!("{}={}", v.name, v.value))));
     }
 
-    let body: Element<'_, Message> = if !state.settings.shell_integration().env_view {
+    let body: Element<'_, Message> = if state.env_vars.is_empty() {
         text(
-            "The Environment view is off. Turn it on in Shell settings — it captures the \
-             shell's env each prompt (and takes effect on shells started after).",
-        )
-        .size(12)
-        .color(t.muted)
-        .into()
-    } else if state.env_vars.is_empty() {
-        text(
-            "No environment captured yet. Run any command in this pane and it'll appear \
-             here (needs the shell-integration hooks).",
+            "Couldn't read this pane's environment — it shows once the shell is running. \
+             Turn on Environment view in Shell settings for live, per-prompt updates.",
         )
         .size(12)
         .color(t.muted)
         .into()
     } else {
         scrollable(list).height(Length::Fill).into()
+    };
+
+    // A one-line note on where the list came from: the live shell hook (updates each
+    // prompt) or a launch-time snapshot read from the OS (static until the hook is on).
+    // `None` (nothing to show) adds no line — the body message covers that case.
+    let source_note: Option<Element<'_, Message>> = match state.env_source {
+        EnvSource::Hook => Some(
+            text("Live — the shell reports its environment each prompt.")
+                .size(11)
+                .color(t.success)
+                .into(),
+        ),
+        EnvSource::Process => Some(
+            text(
+                "Launch-time snapshot from the OS. Turn on Environment view in Shell \
+                 settings for live updates as you export.",
+            )
+            .size(11)
+            .color(t.muted)
+            .into(),
+        ),
+        EnvSource::None => None,
     };
 
     // The whole card is the drag handle (see `place_env_popover`); the reveal toggle +
@@ -111,7 +125,7 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
     .spacing(8)
     .align_y(iced::Alignment::Center);
 
-    let content = column![
+    let mut content = column![
         title_bar,
         row![
             stat("Variables", matched.len().to_string()),
@@ -121,10 +135,14 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
                 .color(t.muted),
         ]
         .align_y(iced::Alignment::Center),
-        text_field("Filter…", &state.env_filter, Message::EnvFilterChanged).size(13),
-        body,
     ]
     .spacing(12);
+    if let Some(note) = source_note {
+        content = content.push(note);
+    }
+    let content = content
+        .push(text_field("Filter…", &state.env_filter, Message::EnvFilterChanged).size(13))
+        .push(body);
 
     // Editing types into the running shell, so it's opt-in (Shell settings). When off,
     // the view stays read-only (see + copy) and no footer shows.
