@@ -73,6 +73,12 @@ pub struct ShellIntegration {
     /// by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gutter: Option<bool>,
+    /// Allow the Env view to **edit** a running shell's env by injecting `export`/`unset`
+    /// at its prompt. Off by default — opt-in, since it types into your shell. The Env
+    /// view stays read-only (see + copy) when off. The new-shells overlay is unaffected
+    /// (it needs no injection).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_editing: Option<bool>,
 }
 
 impl ShellIntegration {
@@ -95,6 +101,7 @@ pub struct ResolvedShellIntegration {
     pub notify: bool,
     pub notify_min_seconds: u32,
     pub gutter: bool,
+    pub env_editing: bool,
 }
 
 /// A metric that can appear in the status bar. CPU, memory, and the four
@@ -979,6 +986,7 @@ impl Settings {
                 .unwrap_or(DEFAULT_NOTIFY_MIN_SECONDS)
                 .clamp(MIN_NOTIFY_MIN_SECONDS, MAX_NOTIFY_MIN_SECONDS),
             gutter: enabled && si.gutter.unwrap_or(false),
+            env_editing: enabled && si.env_editing.unwrap_or(false),
         }
     }
 

@@ -279,9 +279,11 @@ Thin glue, mirroring `fed`'s module shape:
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
   filterable list; click a row to copy `NAME=value`. **Editing** has two scopes: the
   popover's footer **sets/unsets in *this* pane** by injecting a visible `export`/`unset`
-  at the prompt (`env::export_command` single-quote-escapes the value; `is_valid_name`
-  rejects a name that could smuggle shell syntax; gated on `screen.command_running()` so it
-  never types into a foreground program), while the **Shell** settings' "new shells" list
+  at the prompt — **opt-in** via `shell_integration.env_editing` (off by default, since it
+  types into your shell; the footer is hidden when off), `env::export_command`
+  single-quote-escapes the value, `is_valid_name` rejects a name that could smuggle shell
+  syntax, and it's gated on `screen.command_running()` so it never types into a foreground
+  program — while the **Shell** settings' "new shells" list
   (`settings.env`, applied at spawn) is a persistent overlay that touches no running shell.
   Reading needs shell integration; the overlay works without it.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the

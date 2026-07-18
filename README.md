@@ -104,9 +104,10 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   click one to copy `NAME=value`, toggle **Reveal values** to unmask. It reads what the
   shell captures each prompt (same shell integration as above), so it tracks the shell
   across commands. **Edit** two ways: **set/unset in this pane** (types a visible
-  `export`/`unset` at the prompt, only when the shell's at a prompt), or add to the
+  `export`/`unset` at the prompt, only when the shell's at a prompt — **opt-in**, off by
+  default via a toggle in Shell settings since it types into your shell), or add to the
   **new-shells** list in Shell settings (an `[env]` overlay applied to every shell tty
-  starts, no running shell touched)
+  starts, no running shell touched, always available)
 
 ## Customize
 

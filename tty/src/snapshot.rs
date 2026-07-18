@@ -199,6 +199,7 @@ fn env_view_view() {
     let mut tty = populated();
     tty.show_env = true;
     tty.env_reveal = true;
+    tty.settings.shell_integration.env_editing = Some(true); // show the set/unset footer
     tty.env_vars = vec![
         crate::env::EnvVar {
             name: "EDITOR".into(),

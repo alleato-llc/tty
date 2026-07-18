@@ -305,9 +305,24 @@ fn copy_last_command_output_returns_the_newest_commands_output() {
 }
 
 #[test]
+fn env_inject_needs_the_editing_toggle() {
+    let mut tty = headless(1);
+    tty.env_set_name = "FOO".into();
+    tty.env_set_value = "bar".into();
+    // Off by default → inject is a no-op, draft kept.
+    tty.inject_env_set();
+    assert_eq!(tty.env_set_name, "FOO", "editing is opt-in");
+    // Enable it → now it sends and clears (the write no-ops on a pty-less test term).
+    tty.settings.shell_integration.env_editing = Some(true);
+    tty.inject_env_set();
+    assert!(tty.env_set_name.is_empty(), "enabled → inject proceeds");
+}
+
+#[test]
 fn env_inject_is_gated_while_a_command_runs() {
     use cathode::parser::TermParser;
     let mut tty = headless(1);
+    tty.settings.shell_integration.env_editing = Some(true);
     // A command is running (OSC 133 C, no D yet).
     {
         let mut s = tty.tabs[0].focused().unwrap().screen.lock();

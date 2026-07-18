@@ -658,6 +658,10 @@ impl Tty {
     /// Write env-edit bytes to the focused pane, but only when the shell is at a prompt
     /// (OSC 133) — never into a running foreground program. Returns whether it was sent.
     fn inject_env(&mut self, bytes: Vec<u8>) -> bool {
+        // Opt-in: editing a running shell types into it, so it's off unless enabled.
+        if !self.settings.shell_integration().env_editing {
+            return false;
+        }
         let Some(win) = self.main_window else {
             return false;
         };

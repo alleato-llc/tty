@@ -437,3 +437,28 @@ fn env_overlay_round_trips_through_toml() {
         .to_string();
     assert!(!empty.contains("env"), "no empty env block:\n{empty}");
 }
+
+#[test]
+fn env_editing_defaults_off_and_is_master_gated() {
+    // Off by default (opt-in — it types into your shell).
+    assert!(!Settings::default().shell_integration().env_editing);
+    // On when explicitly enabled...
+    let on = Settings {
+        shell_integration: ShellIntegration {
+            env_editing: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(on.shell_integration().env_editing);
+    // ...but the master switch still gates it.
+    let gated = Settings {
+        shell_integration: ShellIntegration {
+            enabled: Some(false),
+            env_editing: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(!gated.shell_integration().env_editing);
+}

@@ -472,6 +472,11 @@ fn shell_section(state: &Tty) -> Element<'_, Message> {
                 Message::SetPromptGutter(!si.gutter),
             ))
             .push(toggle(
+                "Allow editing a shell's env from the Env view (⌘⇧E) — types export/unset at the prompt",
+                si.env_editing,
+                Message::SetEnvEditing(!si.env_editing),
+            ))
+            .push(toggle(
                 "Auto-install hooks into new shells (zsh)",
                 si.autoinstall,
                 Message::SetShellIntegrationAutoinstall(!si.autoinstall),

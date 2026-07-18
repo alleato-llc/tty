@@ -112,6 +112,8 @@ pub enum Message {
     SetShellIntegrationAutoinstall(bool),
     /// Toggle the OSC 133 prompt gutter.
     SetPromptGutter(bool),
+    /// Toggle whether the Env view may edit a shell (inject export/unset).
+    SetEnvEditing(bool),
     /// Copy the manual shell-integration snippet to the clipboard.
     CopyShellSnippet,
     /// The "Copy Link" menu item was chosen — write the URL to the clipboard.
