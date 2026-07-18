@@ -256,6 +256,9 @@ pub enum Message {
     SetTabHighlight(bool),
     /// Toggle programming-ligature rendering in the terminal.
     SetTerminalLigatures(bool),
+    /// A no-op — the callbacks of the static terminal *preview* in Appearance settings all
+    /// route here so it renders (real font/theme/ligatures) but does nothing on interaction.
+    Ignore,
     /// Toggle whether a metric drill-in can graduate into a split pane.
     SetGraduateMetrics(bool),
     /// Toggle the accent border on the focused pane (multi-pane tabs).

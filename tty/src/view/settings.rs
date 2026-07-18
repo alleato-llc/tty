@@ -13,6 +13,9 @@ use rime::widgets::{
     text_field, toggle, tooltip, TooltipPosition,
 };
 
+use cathode::parser::TermParser;
+use cathode::screen::TerminalScreen;
+
 use crate::message::Message;
 use crate::state::Tty;
 
@@ -205,9 +208,59 @@ fn appearance_theme_pane(state: &Tty) -> Element<'_, Message> {
         )
         .size(12)
         .color(theme::tokens().muted),
+        caption("PREVIEW"),
+        terminal_preview(state),
     ]
     .spacing(14)
     .into()
+}
+
+/// A fully static, non-interactive terminal **preview** for the Theme pane: the real
+/// `phosphor` renderer over curated content, using the currently-selected theme / font /
+/// size / ligatures (all read at view time, so it updates live as you change them). No PTY
+/// and no input — it renders unfocused and every callback is [`Message::Ignore`].
+fn terminal_preview(state: &Tty) -> Element<'_, Message> {
+    // A prompt, colored `ls` output (exercises the ANSI palette), a code line with ligature
+    // sequences, and bold/italic/underline samples.
+    const PREVIEW: &[u8] = b"\x1b[1;32muser@host\x1b[0m:\x1b[1;34m~/project\x1b[0m$ ls --color\r\n\
+        \x1b[1;34msrc\x1b[0m  README.md  \x1b[1;31mtarget\x1b[0m  Cargo.toml\r\n\
+        $ cargo run   \x1b[90m# fn map(x) -> i32 { x != 0 && x >= 1 }\x1b[0m\r\n\
+        -> => != >= <= == === |>   \x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munderline\x1b[0m";
+    const ROWS: usize = 4;
+    let mut screen = TerminalScreen::new(56, ROWS);
+    TermParser::new().process(PREVIEW, &mut screen);
+    let screen = std::sync::Arc::new(parking_lot::Mutex::new(screen));
+
+    let widget = phosphor::terminal(
+        screen,
+        state.theme.terminal,
+        state.font,
+        state.font_size,
+        false, // unfocused: no cursor, no input grab
+        |_c, _r| Message::Ignore,
+        |_s| Message::Ignore,
+        |_b| Message::Ignore,
+        |_u| Message::Ignore,
+        |_u| Message::Ignore,
+        |_p, _l, _c| Message::Ignore,
+    )
+    .ligatures(state.settings.terminal_ligatures());
+
+    let hairline = theme::tokens().hairline;
+    let bg = state.theme.terminal.bg;
+    container(widget)
+        .padding(8)
+        .width(Length::Fill)
+        .height(Length::Fixed(ROWS as f32 * state.font_size * 1.3 + 20.0))
+        .style(move |_| container::Style {
+            border: Border {
+                color: hairline,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..container::background(bg)
+        })
+        .into()
 }
 
 /// Appearance → Tabs: how loud the active tab reads. Off swaps the accent ink for

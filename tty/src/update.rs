@@ -374,6 +374,7 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::SetTabHighlight(on) => state.set_tab_highlight(on),
         Message::SetTerminalLigatures(on) => state.set_terminal_ligatures(on),
+        Message::Ignore => {}
         Message::SetGraduateMetrics(on) => state.set_graduate_metrics(on),
         Message::SetHighlightFocusedPane(on) => state.set_highlight_focused_pane(on),
         Message::SetStatusBarAutohide(on) => state.set_status_bar_autohide(on),
