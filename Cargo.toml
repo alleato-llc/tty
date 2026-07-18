@@ -52,9 +52,9 @@ path = "../dorado/rust/crates/dorado-engine"
 # explorer's system-metrics core. tty uses only its system-level sampling
 # (`ProcessSource::cpu_ticks` / `memory_info`, native on macOS, procfs on
 # Linux) to surface machine stats in the status bar. See tty/src/metrics.rs and
-# docs/ideas/status-bar-metrics.md.
+# docs/ideas/status-bar-metrics.md. (fdtop's crates live under its `rust/` dir.)
 [workspace.dependencies.prexp-core]
-path = "../fdtop/crates/prexp-core"
+path = "../fdtop/rust/crates/prexp-core"
 
 [workspace.dependencies.chrono]
 default-features = false
