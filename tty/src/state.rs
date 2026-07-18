@@ -28,10 +28,14 @@ const ENV_EXPANDED_SIZE: (f32, f32) = (640.0, 480.0);
 
 /// Compact-height math: fixed chrome (card padding + title + spacing) plus a per-row
 /// height, plus the Add-button row when editing. The compact card shrinks to its content
-/// so a short list leaves no whitespace; a long one is capped and the list scrolls.
+/// so a short list leaves no whitespace; a long one is capped at [`ENV_COMPACT_MAX_HEIGHT`]
+/// (or the window, whichever is smaller) and the list scrolls inside it.
 const ENV_COMPACT_CHROME: f32 = 70.0;
 const ENV_ROW_HEIGHT: f32 = 24.0;
 const ENV_ADD_ROW: f32 = 46.0;
+/// The tallest the compact card grows before the list scrolls instead — so "compact"
+/// stays compact (roughly a dozen rows) rather than ballooning to fit a full environment.
+const ENV_COMPACT_MAX_HEIGHT: f32 = 420.0;
 
 /// `impl Tty` methods for the opt-in encrypted command history.
 mod encrypted_history;
@@ -804,12 +808,15 @@ impl Tty {
         if self.settings.shell_integration().env_editing {
             h += ENV_ADD_ROW;
         }
-        let cap = if self.window_height > 1.0 {
+        let window_cap = if self.window_height > 1.0 {
             (self.window_height - 80.0).max(160.0)
         } else {
             520.0
         };
-        (self.env_size.0, h.min(cap))
+        (
+            self.env_size.0,
+            h.min(window_cap).min(ENV_COMPACT_MAX_HEIGHT),
+        )
     }
 
     /// The Env popover's current top-left position, defaulting to centered until the

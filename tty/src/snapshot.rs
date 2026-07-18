@@ -243,7 +243,7 @@ fn env_view_compact_view() {
     // no filter / reveal / summary. Editing is on, so the Add button shows.
     let mut tty = populated();
     tty.show_env = true;
-    tty.env_size = (380.0, 340.0);
+    tty.env_size = (320.0, 340.0); // the compact default width
     tty.env_source = crate::state::EnvSource::Process;
     tty.settings.shell_integration.env_editing = Some(true);
     tty.env_vars = sample_env_vars();
@@ -258,6 +258,35 @@ fn env_view_compact_view() {
     assert!(
         matches,
         "snapshot `tty-env-compact` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn env_view_compact_scroll_view() {
+    // A long environment in compact: the card caps at its max height and the list
+    // scrolls, rather than the card growing to fit every variable.
+    let mut tty = populated();
+    tty.show_env = true;
+    tty.env_size = (320.0, 340.0);
+    tty.env_source = crate::state::EnvSource::Process;
+    tty.settings.shell_integration.env_editing = Some(true);
+    tty.env_vars = (0..24)
+        .map(|i| crate::env::EnvVar {
+            name: format!("VAR_{i:02}"),
+            value: format!("value-{i}"),
+        })
+        .collect();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-env-compact-scroll.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-env-compact-scroll` changed — delete its PNG to re-baseline"
     );
 }
 
