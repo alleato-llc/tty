@@ -86,6 +86,10 @@ Subsystems beyond this file: the status-bar metrics / drill-in popovers are surv
 `docs/ideas/status-bar-metrics.md`; the Env view + shell integration and the overall
 render/state architecture are in `docs/ARCHITECTURE.md`.
 
+Several workflows have on-demand **skills** — invoke the matching one when you start that
+kind of work: `ui` (+ the focused `ui-popover` / `ui-settings` / `ui-status-cell` /
+`rime-widget`), `history`, `shell-integration`, and `snapshot-testing`.
+
 ## Tabs are pane trees
 
 A tab is **not** one terminal — it's a `Tab { panes: pane_grid::State<Term>, focus }`
@@ -113,6 +117,10 @@ field under the strip; `Tab::label()` is the one place that resolves a tab's dis
 when a tab has **more than one pane** — a lone pane shows none.
 
 ## Encrypted history (tty/src/history/ + cathode::history)
+
+The **`history` skill** is the working map of this subsystem (architecture, invariants,
+startup, testing); invoke it before touching history. The load-bearing invariants below
+stay here as always-on safety rails.
 
 Opt-in persisted command history, encrypted at rest — design in
 `docs/adr/0006-encrypted-history.md` (+ `0007` key sources/async startup,
@@ -211,8 +219,8 @@ cargo clippy --all-targets -- -D warnings
 `snapshot::*` renders the chrome to a PNG (backend-specific baseline, excluded from
 the default run). Re-baseline a snapshot by deleting its backend-suffixed PNG
 (`snapshots/<name>-wgpu.png`, **not** the bare name in `matches_image`) and re-running —
-a missing baseline is written and passes. Full story in `docs/ARCHITECTURE.md`; the `ui`
-skill has the authoring + re-baseline procedure.
+a missing baseline is written and passes. Full story in `docs/ARCHITECTURE.md`; the
+`snapshot-testing` skill has the authoring + re-baseline procedure.
 
 ## App icon
 

@@ -61,35 +61,13 @@ Chrome already in rime: `button::{primary,secondary,ghost,ghost_compact,danger,i
 `modal`/`modal_sized`, `dialog`, `context_menu`, `table`, and
 **`popover`/`resize_edges`/`ResizeEdge`** (the draggable-resizable floating card).
 
-## Snapshot tests (shared)
+## Snapshot tests
 
-`snapshot::*` renders a `Tty` to a PNG and pixel-compares. Author one by copying an existing test:
-
-```rust
-#[test]
-fn my_surface_view() {
-    let mut tty = populated();
-    tty.show_x = true;                      // …set the exact state to capture…
-    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
-    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
-    let snap = sim.snapshot(&crate::state::theme(&tty)).expect("render snapshot");
-    let matches = snap.matches_image("snapshots/tty-my-surface.png").expect("write/compare");
-    assert!(matches, "snapshot `tty-my-surface` changed — delete its PNG to re-baseline");
-}
-```
-
-**Re-baseline** (after an intentional visual change):
-- The real file has a **backend suffix**: `snapshots/tty-my-surface-**wgpu**.png` (not the bare
-  name in `matches_image`). `ls tty/snapshots/ | grep <name>` to find it.
-- Delete it and re-run — a missing baseline is **written and passes**; re-run once more to
-  confirm it compares clean.
-
-**Gotchas**
-- ⚠️ **Fixed clock.** A fixture seeded from `Utc::now()` / `SystemTime::now()` bakes wall time
-  into a pixel-exact image → it flakes and **flips across midnight**. Seed a fixed anchor and
-  pin the view's clock (`Tty::clock_override`, threaded into `now_ms()` / `age_from_epoch_ms`).
-- New `Tty` field → update the `snapshot.rs` literal too (the 3-init trap).
-- Snapshots are excluded from the default run; `--ignore-default-filter` includes them.
+Any surface gets a `snapshot::*` test (render chrome → PNG, pixel-compare). The full workflow —
+authoring, the `-wgpu` re-baseline flow, the nextest setup, and the fixed-clock flake — is the
+**`snapshot-testing`** skill; invoke it when you add or re-baseline one. Two things it hammers that
+bite here: re-baseline by deleting the **`-wgpu`**-suffixed PNG (not the bare name) and re-running,
+and **never seed a fixture from `now()`** (it flips across midnight — use `Tty::clock_override`).
 
 ## Verify (from inside `tty/`)
 
