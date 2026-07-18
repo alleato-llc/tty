@@ -259,10 +259,12 @@ Thin glue, mirroring `fed`'s module shape:
   the window is unfocused and a command ran past the configured threshold,
   `notify::command_finished` posts a macOS notification via `osascript` (no crate, no app
   bundle) with a ✓/✗ from the exit code, the elided command, and a compact duration.
-  `shell_integration` owns the OSC 133 hooks: `ZSH_SNIPPET` (the pasteable manual snippet
-  shown in settings) and `autoinstall_env` — an opt-in, zsh-only, off-by-default
-  auto-install that points a new shell at a generated `ZDOTDIR` which sources the user's
-  real config and then installs the hooks. Non-zsh shells fall back to manual. All of the
+  `shell_integration` owns the OSC 133 hooks: `zsh_snippet(env_capture)` (the pasteable
+  manual snippet shown in settings — always the OSC 133 marks, plus the Env-view
+  `_tty_capture_env` only when `env_capture`, so the preview + Copy track the `env_view`
+  setting) and `autoinstall_env` — an opt-in, zsh-only, off-by-default auto-install that
+  points a new shell at a generated `ZDOTDIR` which sources the user's real config and then
+  installs the same snippet. Non-zsh shells fall back to manual. All of the
   OSC 133 features — these plus prompt-jump, flagging, output copy, and the gutter — are one
   cohesive unit gated by `shell_integration.enabled`: the resolver master-gates every
   sub-option, and `set_shell_integration_enabled` pushes the flag to every open pane's
