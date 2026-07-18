@@ -28,6 +28,7 @@ fn painted_term(title: &str, cols: usize, rows: usize, bytes: &[u8]) -> Term {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: title.into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -104,6 +105,8 @@ fn populated() -> Tty {
         detached: std::collections::HashMap::new(),
         detach_origin: std::collections::HashMap::new(),
         tab_drag: None,
+        pane_tab_drag: None,
+        pane_tab_hover: None,
         window_bounds: std::collections::HashMap::new(),
         last_detached_move: None,
         history_writer: None,
@@ -534,7 +537,7 @@ fn force_kill_confirm_view() {
 fn rename_bar_view() {
     // "Rename tab" opens a focused, prefilled field under the tab strip.
     let mut tty = populated();
-    tty.renaming = Some((0, "deploy".to_string()));
+    tty.renaming = Some((crate::state::RenameTarget::Tab(0), "deploy".to_string()));
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -622,6 +625,7 @@ fn scrollback_panel_view() {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: "zsh".into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -670,6 +674,7 @@ fn scrollback_cleared_command_row_view() {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: "zsh".into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -708,6 +713,7 @@ fn tty_with_open_scrollback_panel() -> Tty {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: "zsh".into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -793,6 +799,7 @@ fn scrollback_output_row_context_menu_view() {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: "zsh".into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -846,6 +853,7 @@ fn scrollback_command_row_context_menu_view() {
         screen: Arc::new(Mutex::new(screen)),
         pty: None,
         title: "zsh".into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -2374,6 +2382,7 @@ fn generate_landing_shots() {
             screen: Arc::new(Mutex::new(screen)),
             pty: None,
             title: "zsh".into(),
+            name: None,
             alive: Arc::new(AtomicBool::new(true)),
             dirty: Arc::new(AtomicBool::new(false)),
             activity: false,

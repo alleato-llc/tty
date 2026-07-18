@@ -65,10 +65,12 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
 - `⌥⌘T` new tab **inside the focused pane** · `⌥⌘]` / `⌥⌘[` cycle a pane's tabs · `⌥⌘W`
   close a pane's tab (a compact strip shows only when a pane has more than one) — so tabs
   work both at the window top level and within any split
-- **right-click** (or **⌃-click**) a pane for a split menu, or a **tab** for
-  new-tab / rename / **detach** / split / close-tab
+- **right-click** (or **⌃-click**) a pane for a split menu, a top-level **tab** for
+  new-tab / rename / **detach** / split / close-tab, or a **pane-tab** for
+  new-tab / rename / close-tab
 - **reorder tabs**: drag a tab sideways across the strip and it moves live to the slot
-  under the pointer
+  under the pointer — for pane-tabs, drag onto another pane's strip to **move the tab into
+  that split** (every pane shows its strip while a drag is in flight)
 - **rename a tab**: right-click → **Rename tab…**, type a name (Enter commits, blank
   reverts to the shell/program title, Esc cancels)
 - **detach a tab into its own window**: right-click → **Detach Tab**, or drag a tab down

@@ -90,6 +90,14 @@ pub enum Message {
     NewPaneTab(iced::window::Id, pane_grid::Pane),
     SelectPaneTab(iced::window::Id, pane_grid::Pane, usize),
     ClosePaneTab(iced::window::Id, pane_grid::Pane, usize),
+    /// The pointer entered pane-tab `idx` of a pane (or left the strip, `None`): tracks
+    /// hover for the close affordance and, while a pane-tab drag is armed, reorders /
+    /// moves the dragged tab there.
+    HoverPaneTab(iced::window::Id, pane_grid::Pane, Option<usize>),
+    /// Right-click a pane-tab — open its context menu (new / rename / close).
+    PaneTabRightClick(iced::window::Id, pane_grid::Pane, usize),
+    /// Begin renaming a pane-tab (its "Rename tab…" menu item).
+    StartRenamePaneTab(iced::window::Id, pane_grid::Pane, usize),
     /// Drag-resize a split divider.
     ResizeSplit(iced::window::Id, pane_grid::ResizeEvent),
     /// The cursor moved (window-relative) — tracked so a right-click can anchor a menu.

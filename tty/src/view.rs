@@ -90,27 +90,26 @@ pub fn title(state: &Tty, window: iced::window::Id) -> String {
 }
 
 /// A compact tab strip for a pane that holds more than one terminal, shared by the main
-/// and detached pane closures. Returns `None` for a single-terminal pane (which renders
-/// with no strip, identical to before pane-level tabs existed).
+/// and detached pane closures. Returns `None` for a single-terminal pane — unless a
+/// pane-tab drag is in flight (`dragging`), when every pane shows its strip so a
+/// single-terminal pane can be a drop target. `hovered` is the tab index the pointer is
+/// over *in this pane* (drives the close affordance).
 fn pane_tab_strip(
     group: &crate::state::PaneTerms,
     win: iced::window::Id,
     pane: pane_grid::Pane,
     highlight: bool,
+    hovered: Option<usize>,
+    dragging: bool,
 ) -> Option<Element<'_, Message>> {
-    if group.tabs.len() <= 1 {
+    if group.tabs.len() <= 1 && !dragging {
         return None;
     }
     let models: Vec<Tab> = group
         .tabs
         .iter()
         .map(|t| {
-            let title = t
-                .screen
-                .lock()
-                .title
-                .clone()
-                .unwrap_or_else(|| t.title.clone());
+            let title = t.label();
             Tab::new(if t.activity {
                 format!("• {title}")
             } else {
@@ -121,15 +120,18 @@ fn pane_tab_strip(
     Some(tabs(
         models,
         group.active_idx(),
-        None,
+        hovered,
         move |i| Message::SelectPaneTab(win, pane, i),
         move |i| Message::ClosePaneTab(win, pane, i),
-        |_| Message::Ignore,
-        |_| Message::Ignore,
+        move |opt| Message::HoverPaneTab(win, pane, opt),
+        move |i| Message::PaneTabRightClick(win, pane, i),
         Message::NewPaneTab(win, pane),
         TabBarStyle {
             highlight_active: highlight,
             text_size: 11.0,
+            // No raised band: the strip sits inside the pane's own border, so a fill
+            // would read as a heavy double edge. It blends into the pane instead.
+            filled: false,
         },
     ))
 }
@@ -184,6 +186,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             TabBarStyle {
                 highlight_active: state.settings.tab_highlight(),
                 text_size: 12.0,
+                filled: true,
             },
         ));
     }
@@ -222,6 +225,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
             let highlight = state.settings.highlight_focused_pane();
+            // Pane-tab hover + whether a pane-tab drag is in flight (forces every strip
+            // visible so a single-terminal pane can be a drop target). Copied out so the
+            // closure doesn't borrow `state`.
+            let pane_tab_hover = state.pane_tab_hover;
+            let pane_dragging = state.pane_tab_drag.is_some();
             pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
                 let group = match content {
@@ -259,12 +267,13 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 .prompt_gutter(prompt_gutter)
                 .ligatures(state.settings.terminal_ligatures());
                 // A pane holding more than one shell shows a compact tab strip above the
-                // terminal (a single-terminal pane shows none, identical to before).
-                let inner: Element<'_, Message> = match pane_tab_strip(group, win, pane, highlight)
-                {
-                    Some(strip) => column![strip, term_widget].spacing(2).into(),
-                    None => term_widget.into(),
-                };
+                // terminal (a single-terminal pane shows none, unless a drag is in flight).
+                let hov = pane_tab_hover.and_then(|(w, p, i)| (w == win && p == pane).then_some(i));
+                let inner: Element<'_, Message> =
+                    match pane_tab_strip(group, win, pane, highlight, hov, pane_dragging) {
+                        Some(strip) => column![strip, term_widget].spacing(2).into(),
+                        None => term_widget.into(),
+                    };
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes (unless the highlight is off); the others get a hairline.
                 let border_color = if is_focused && highlight {
@@ -497,6 +506,22 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     Message::CloseTab(state.active),
                 ));
                 items
+            }
+            MenuKind::PaneTab { window, pane, idx } => {
+                let (window, pane, idx) = (*window, *pane, *idx);
+                vec![
+                    MenuItem::shortcut("New tab", "⌥⌘T", Message::NewPaneTab(window, pane)),
+                    MenuItem::action(
+                        "Rename tab…",
+                        Message::StartRenamePaneTab(window, pane, idx),
+                    ),
+                    MenuItem::separator(),
+                    MenuItem::shortcut(
+                        "Close tab",
+                        "⌥⌘W",
+                        Message::ClosePaneTab(window, pane, idx),
+                    ),
+                ]
             }
             MenuKind::Pane => {
                 let mut items = split_items();
@@ -733,6 +758,8 @@ fn detached_view<'a>(
     let size = state.font_size;
     let multi = tab.panes.len() > 1;
     let highlight = state.settings.highlight_focused_pane();
+    let pane_tab_hover = state.pane_tab_hover;
+    let pane_dragging = state.pane_tab_drag.is_some();
 
     let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
@@ -763,10 +790,12 @@ fn detached_view<'a>(
         .prompt_gutter(state.settings.shell_integration().gutter)
         .ligatures(state.settings.terminal_ligatures());
         // A tabbed pane shows the same compact strip here as in the main window.
-        let inner: Element<'_, Message> = match pane_tab_strip(group, window, pane, highlight) {
-            Some(strip) => column![strip, term_widget].spacing(2).into(),
-            None => term_widget.into(),
-        };
+        let hov = pane_tab_hover.and_then(|(w, p, i)| (w == window && p == pane).then_some(i));
+        let inner: Element<'_, Message> =
+            match pane_tab_strip(group, window, pane, highlight, hov, pane_dragging) {
+                Some(strip) => column![strip, term_widget].spacing(2).into(),
+                None => term_widget.into(),
+            };
         let border_color = if is_focused && highlight {
             accent
         } else {

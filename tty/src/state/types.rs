@@ -29,6 +29,10 @@ pub struct Term {
     /// `None` only in tests (a screen-only tab with no shell behind it).
     pub pty: Option<PtySession>,
     pub title: String,
+    /// A user-set name for this terminal's pane-tab (via "Rename tab…"), overriding the
+    /// program/shell title in the strip. `None` falls back to the live title. Only shown
+    /// when a pane holds more than one terminal.
+    pub name: Option<String>,
     /// Cleared by the read thread when the PTY closes (the shell exited), so the UI
     /// can reap the tab.
     pub alive: Arc<AtomicBool>,
@@ -41,6 +45,22 @@ pub struct Term {
     /// (`$TTY_ENV_FILE`, from `shell_integration::env_channel_path`). `None` when shell
     /// integration is off. The view creates a `<path>.on` flag to switch capture on.
     pub env_file: Option<std::path::PathBuf>,
+}
+
+impl Term {
+    /// The pane-tab's display label: a user-set `name`, else the live program/shell
+    /// title, else the spawn title. (The window-level strip uses [`Tab::label`] instead;
+    /// this is for the per-terminal tabs inside a pane.)
+    pub fn label(&self) -> String {
+        if let Some(name) = &self.name {
+            return name.clone();
+        }
+        self.screen
+            .lock()
+            .title
+            .clone()
+            .unwrap_or_else(|| self.title.clone())
+    }
 }
 
 /// What a single pane holds. A pane is usually a terminal, but a metric drill-in
@@ -326,8 +346,9 @@ pub struct Tty {
     /// When `Some`, a right-click context menu is open: its kind (tab vs pane, which
     /// picks the item set) and the point to anchor it at. Both act on the active tab.
     pub menu: Option<(MenuKind, iced::Point)>,
-    /// When `Some`, a tab is being renamed: its index and the in-progress draft text.
-    pub renaming: Option<(usize, String)>,
+    /// When `Some`, a tab is being renamed: its target (a window-level tab or a pane's
+    /// terminal tab) and the in-progress draft text.
+    pub renaming: Option<(RenameTarget, String)>,
 
     // ---- multi-window: detachable tabs (ADR 0003) ----
     /// The main window's id (the tabbed strip). Set once in `boot`.
@@ -341,6 +362,13 @@ pub struct Tty {
     /// An armed tab tear-off: the pressed tab index + the pointer at press. A drag past
     /// [`TAB_TEAR_THRESHOLD`] on release detaches it.
     pub tab_drag: Option<(usize, iced::Point)>,
+    /// An armed pane-tab drag: which pane's tab is being dragged. As the pointer crosses
+    /// other pane-tabs (reported by [`Message::HoverPaneTab`]) the tab reorders within its
+    /// group or moves to another group in the same window. Cleared on pointer release.
+    pub pane_tab_drag: Option<PaneTabDrag>,
+    /// Which pane-tab the pointer is over (window, pane, index), so the strip shows its
+    /// close affordance. `None` when the pointer is off every pane-tab strip.
+    pub pane_tab_hover: Option<(iced::window::Id, pane_grid::Pane, usize)>,
     /// Each window's last-known outer bounds (for the drag-to-dock heuristic).
     pub window_bounds: HashMap<iced::window::Id, iced::Rectangle>,
     /// The most recent detached-window move + when, debounced by `detach_drag`.
@@ -659,10 +687,38 @@ impl PassphrasePrompt {
 /// (copy/clear/delete), or a settings archive-viewer row's (copy, or delete behind
 /// a confirmation dialog). The first two target the active tab's focused pane for
 /// splits.
+/// An in-flight pane-tab drag. `window`/`pane` track which group the dragged tab
+/// currently lives in (updated as it crosses into another group); `reorder` is the
+/// shared [`rime::widgets::Reorder`] tracker holding its index within that group.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneTabDrag {
+    pub window: iced::window::Id,
+    pub pane: pane_grid::Pane,
+    pub reorder: rime::widgets::Reorder,
+}
+
+/// What a "Rename tab…" action is targeting: a window-level tab (by strip index), or a
+/// single terminal tab inside a pane's group (by window, pane, and index within it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenameTarget {
+    Tab(usize),
+    PaneTab {
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: usize,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuKind {
     Tab,
     Pane,
+    /// A right-clicked terminal tab inside a pane group: new / rename / close that tab.
+    PaneTab {
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: usize,
+    },
     Link(String),
     ScrollbackRow(HistoryRowTarget),
     /// The full archive address of the row — Copy uses its `command`, Delete

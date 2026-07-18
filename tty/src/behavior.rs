@@ -27,6 +27,7 @@ pub(crate) fn screen_term(title: &str) -> Term {
         screen: Arc::new(Mutex::new(TerminalScreen::new(80, 24))),
         pty: None,
         title: title.into(),
+        name: None,
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
@@ -88,6 +89,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         detached: std::collections::HashMap::new(),
         detach_origin: std::collections::HashMap::new(),
         tab_drag: None,
+        pane_tab_drag: None,
+        pane_tab_hover: None,
         window_bounds: std::collections::HashMap::new(),
         last_detached_move: None,
         history_writer: None,
@@ -1532,6 +1535,130 @@ fn splitting_adds_a_focused_pane_to_the_tab() {
     assert_eq!(tty.tabs[0].panes.len(), 2, "a split adds a pane");
     assert_eq!(tty.tabs.len(), 1, "splitting stays within one tab");
     assert_ne!(tty.tabs[0].focus, first, "focus moves to the new pane");
+}
+
+/// The labels of a pane's terminal tabs, for asserting order after a reorder/move.
+fn pane_tab_labels(tty: &Tty, pane: iced::widget::pane_grid::Pane) -> Vec<String> {
+    tty.tabs[0]
+        .panes
+        .get(pane)
+        .and_then(crate::state::Pane::group)
+        .map(|g| g.tabs.iter().map(Term::label).collect())
+        .unwrap_or_default()
+}
+
+/// Grow the focused pane into a group with the given extra tab labels (bypassing the
+/// shell spawn in `new_pane_tab`).
+fn grow_pane_group(tty: &mut Tty, pane: iced::widget::pane_grid::Pane, extra: &[&str]) {
+    if let Some(g) = tty.tabs[0]
+        .panes
+        .get_mut(pane)
+        .and_then(crate::state::Pane::group_mut)
+    {
+        for label in extra {
+            g.tabs.push(screen_term(label));
+        }
+    }
+}
+
+#[test]
+fn dragging_a_pane_tab_reorders_within_its_group() {
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let pane = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, pane, &["b", "c"]); // group is [sh0, b, c]
+    assert_eq!(pane_tab_labels(&tty, pane), ["sh0", "b", "c"]);
+
+    // Press tab 0 (arms the drag), then drag the pointer across to tab 2.
+    tty.select_pane_tab(win, pane, 0);
+    tty.hover_pane_tab(win, pane, Some(2));
+    assert_eq!(pane_tab_labels(&tty, pane), ["b", "c", "sh0"]);
+    assert_eq!(
+        tty.tabs[0]
+            .panes
+            .get(pane)
+            .and_then(crate::state::Pane::group)
+            .unwrap()
+            .active,
+        2,
+        "the dragged tab stays active in its new slot"
+    );
+
+    // Release ends the drag; a later hover no longer moves anything.
+    tty.pane_tab_drag = None;
+    tty.hover_pane_tab(win, pane, Some(0));
+    assert_eq!(pane_tab_labels(&tty, pane), ["b", "c", "sh0"]);
+}
+
+#[test]
+fn dragging_a_pane_tab_moves_it_to_another_group() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let left = tty.tabs[0].focus;
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::single(screen_term("r")),
+    );
+    let right = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, left, &["a2"]); // left is [sh0, a2]; right is [r]
+
+    // Drag left's tab 0 (sh0) onto right's tab slot 0.
+    tty.select_pane_tab(win, left, 0);
+    tty.hover_pane_tab(win, right, Some(0));
+    assert_eq!(pane_tab_labels(&tty, left), ["a2"], "source loses the tab");
+    assert_eq!(
+        pane_tab_labels(&tty, right),
+        ["sh0", "r"],
+        "target gains it at the drop index"
+    );
+    assert_eq!(tty.tabs[0].focus, right, "focus follows the moved tab");
+
+    // Moving the *last* tab out of the left pane closes that pane.
+    tty.select_pane_tab(win, left, 0);
+    tty.hover_pane_tab(win, right, Some(0));
+    assert_eq!(tty.tabs[0].panes.len(), 1, "an emptied source pane closes");
+    assert_eq!(pane_tab_labels(&tty, right), ["a2", "sh0", "r"]);
+}
+
+#[test]
+fn renaming_a_pane_tab_sets_its_label() {
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let pane = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, pane, &["b"]); // [sh0, b]
+
+    tty.start_rename_pane_tab(win, pane, 1);
+    assert!(tty.renaming.is_some(), "the rename editor is open");
+    tty.set_rename_draft("logs".to_string());
+    tty.commit_rename();
+    assert_eq!(pane_tab_labels(&tty, pane), ["sh0", "logs"]);
+
+    // An empty draft clears the override (back to the shell title).
+    tty.start_rename_pane_tab(win, pane, 1);
+    tty.set_rename_draft("   ".to_string());
+    tty.commit_rename();
+    assert_eq!(pane_tab_labels(&tty, pane), ["sh0", "b"]);
+}
+
+#[test]
+fn right_clicking_a_pane_tab_opens_its_menu_without_arming_a_drag() {
+    use crate::state::MenuKind;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let pane = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, pane, &["b"]);
+
+    tty.open_pane_tab_menu(win, pane, 1);
+    assert!(
+        matches!(tty.menu, Some((MenuKind::PaneTab { idx: 1, .. }, _))),
+        "the pane-tab menu targets the clicked tab"
+    );
+    assert!(
+        tty.pane_tab_drag.is_none(),
+        "a right-click doesn't arm a reorder drag"
+    );
 }
 
 #[test]

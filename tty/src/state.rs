@@ -161,6 +161,8 @@ impl Tty {
             detached: HashMap::new(),
             detach_origin: HashMap::new(),
             tab_drag: None,
+            pane_tab_drag: None,
+            pane_tab_hover: None,
             window_bounds: HashMap::new(),
             last_detached_move: None,
             history_writer: None,
@@ -199,11 +201,30 @@ impl Tty {
         tty
     }
 
-    /// Begin renaming tab `idx`, seeding the draft with its current label and closing the
-    /// context menu. The view focuses the rename field.
+    /// Begin renaming window-level tab `idx`, seeding the draft with its current label and
+    /// closing the context menu. The view focuses the rename field.
     pub fn start_rename(&mut self, idx: usize) {
         if let Some(tab) = self.tabs.get(idx) {
-            self.renaming = Some((idx, tab.label()));
+            self.renaming = Some((RenameTarget::Tab(idx), tab.label()));
+            self.menu = None;
+        }
+    }
+
+    /// Begin renaming a terminal tab inside a pane group, seeded with its current label.
+    pub fn start_rename_pane_tab(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: usize,
+    ) {
+        if let Some(term) = self
+            .tab_for(window)
+            .and_then(|t| t.panes.get(pane))
+            .and_then(Pane::group)
+            .and_then(|g| g.tabs.get(idx))
+        {
+            let target = RenameTarget::PaneTab { window, pane, idx };
+            self.renaming = Some((target, term.label()));
             self.menu = None;
         }
     }
@@ -215,13 +236,29 @@ impl Tty {
         }
     }
 
-    /// Commit the rename: a non-empty draft becomes the tab's name; an empty one clears
+    /// Commit the rename: a non-empty draft becomes the target's name; an empty one clears
     /// the override (back to the program/shell title).
     pub fn commit_rename(&mut self) {
-        if let Some((idx, draft)) = self.renaming.take() {
-            if let Some(tab) = self.tabs.get_mut(idx) {
-                let name = draft.trim();
-                tab.title = (!name.is_empty()).then(|| name.to_string());
+        let Some((target, draft)) = self.renaming.take() else {
+            return;
+        };
+        let name = draft.trim();
+        let name = (!name.is_empty()).then(|| name.to_string());
+        match target {
+            RenameTarget::Tab(idx) => {
+                if let Some(tab) = self.tabs.get_mut(idx) {
+                    tab.title = name;
+                }
+            }
+            RenameTarget::PaneTab { window, pane, idx } => {
+                if let Some(term) = self
+                    .tab_for_mut(window)
+                    .and_then(|t| t.panes.get_mut(pane))
+                    .and_then(Pane::group_mut)
+                    .and_then(|g| g.tabs.get_mut(idx))
+                {
+                    term.name = name;
+                }
             }
         }
     }
@@ -1079,6 +1116,7 @@ fn spawn_term(
         screen,
         pty: Some(session),
         title,
+        name: None,
         alive,
         dirty,
         activity: false,

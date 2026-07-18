@@ -155,9 +155,15 @@ Thin glue, mirroring `fed`'s module shape:
   `toggle_maximize_pane`, `write_focused`/`write_pane`, `resize_pane`,
   `new_tab`/`close_tab`, `zoom`/`reset_zoom`. Pane-level tabs add
   `new_pane_tab`/`select_pane_tab`/`close_pane_tab`/`cycle_pane_tab` (plus the
-  focused-pane wrappers `new_focused_pane_tab`/`close_focused_pane_tab`). `reap_dead`
-  drops dead tabs from each group, closes a group that empties, then any tab with no
-  live pane, then exits when none remain.
+  focused-pane wrappers `new_focused_pane_tab`/`close_focused_pane_tab`), a per-terminal
+  custom `Term::name` (right-click a pane-tab → "Rename tab…", stored via `RenameTarget::
+  PaneTab`), and drag-to-reorder: a tab press arms `pane_tab_drag`, and as the pointer
+  crosses other pane-tabs (`hover_pane_tab`) the tab reorders within its group or moves
+  to another group in the same window (`reorder_or_move_pane_tab`/`move_pane_tab_across`,
+  closing a source group that empties). The horizontal-move bookkeeping is the shared
+  `rime::widgets::Reorder` tracker + `reorder_slice` (the window-level strip uses the same
+  `reorder_slice`). `reap_dead` drops dead tabs from each group, closes a group that
+  empties, then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
   split / `⌃⌘`+arrows move focus. `⌥⌘T` opens a new tab **inside the focused pane**,
@@ -397,8 +403,9 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   setting). Other panes carry the
   **Highlight active tab** and **Highlight the focused pane** toggles (the latter
   gates the accent border in the pane-grid closures; the rime `tabs` strip takes a
-  `TabBarStyle { highlight_active, text_size }`, so accent-ink vs. subtler emphasis
-  is host-tunable); the status-bar chrome — **Disable status bar** (drops it
+  `TabBarStyle { highlight_active, text_size, filled }`, so accent-ink vs. subtler
+  emphasis and the raised-band background are host-tunable — the in-pane tab strip
+  sets `filled: false` so it blends into the pane rather than reading as a second bar); the status-bar chrome — **Disable status bar** (drops it
   entirely; wins over auto-hide) and **auto-hide status bar** (on by default; when
   on, `main_view` drops the bar from the column and floats it back over the bottom
   edge via a `stack` only while `status_bar_revealed()` — the pointer within

@@ -6,8 +6,8 @@
 use iced::widget::pane_grid;
 
 use super::{
-    drain_pane, reap_tab_panes, spawn_term, Pane, Tab, Term, Tty, DEFAULT_FONT_SIZE, MAX_FONT_SIZE,
-    MIN_FONT_SIZE, TAB_TEAR_THRESHOLD,
+    drain_pane, reap_tab_panes, spawn_term, MenuKind, Pane, PaneTabDrag, Tab, Term, Tty,
+    DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE, TAB_TEAR_THRESHOLD,
 };
 use crate::message::Message;
 
@@ -164,7 +164,9 @@ impl Tty {
         }
     }
 
-    /// Select tab `idx` in `pane`'s group and focus that pane.
+    /// Select tab `idx` in `pane`'s group and focus that pane. Fired on the tab *press*, so
+    /// it also arms a drag (mirroring the window strip's tab press): a release without the
+    /// pointer crossing another tab is just a plain select.
     pub fn select_pane_tab(&mut self, window: iced::window::Id, pane: pane_grid::Pane, idx: usize) {
         if let Some(t) = self.tab_for_mut(window) {
             if let Some(g) = t.panes.get_mut(pane).and_then(Pane::group_mut) {
@@ -174,6 +176,139 @@ impl Tty {
             }
             t.focus = pane;
         }
+        let mut reorder = rime::widgets::Reorder::default();
+        reorder.begin(idx);
+        self.pane_tab_drag = Some(PaneTabDrag {
+            window,
+            pane,
+            reorder,
+        });
+    }
+
+    /// Pointer moved onto pane-tab `idx` of `pane` (or off the strip, `None`). Tracks hover
+    /// for the close affordance and, while a drag is armed, reorders within the group or
+    /// moves the dragged tab into this group.
+    pub fn hover_pane_tab(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: Option<usize>,
+    ) {
+        match idx {
+            Some(i) => {
+                self.pane_tab_hover = Some((window, pane, i));
+                self.reorder_or_move_pane_tab(window, pane, i);
+            }
+            None => {
+                if matches!(self.pane_tab_hover, Some((w, p, _)) if w == window && p == pane) {
+                    self.pane_tab_hover = None;
+                }
+            }
+        }
+    }
+
+    /// While a pane-tab drag is armed and the pointer entered pane-tab `target` of
+    /// `dst_pane`: reorder within the same group, or move the dragged tab across groups
+    /// (same window only — a cross-window drag would be a detach, not handled here).
+    fn reorder_or_move_pane_tab(
+        &mut self,
+        window: iced::window::Id,
+        dst_pane: pane_grid::Pane,
+        target: usize,
+    ) {
+        let Some(mut drag) = self.pane_tab_drag else {
+            return;
+        };
+        if drag.window != window {
+            return;
+        }
+        if drag.pane == dst_pane {
+            if let Some((from, to)) = drag.reorder.drag_to(target) {
+                if let Some(g) = self
+                    .tab_for_mut(window)
+                    .and_then(|t| t.panes.get_mut(dst_pane))
+                    .and_then(Pane::group_mut)
+                {
+                    rime::widgets::reorder_slice(&mut g.tabs, from, to);
+                    g.active = to;
+                }
+            }
+        } else {
+            self.move_pane_tab_across(&mut drag, dst_pane, target);
+        }
+        self.pane_tab_drag = Some(drag);
+    }
+
+    /// Move the dragged tab out of its source group and into `dst_pane`'s group at
+    /// `target`, closing the source pane if it empties. Updates `drag` to follow the tab
+    /// into its new home.
+    fn move_pane_tab_across(
+        &mut self,
+        drag: &mut PaneTabDrag,
+        dst_pane: pane_grid::Pane,
+        target: usize,
+    ) {
+        let window = drag.window;
+        let src_pane = drag.pane;
+        let Some(from) = drag.reorder.anchor() else {
+            return;
+        };
+        let Some(t) = self.tab_for_mut(window) else {
+            return;
+        };
+        // Take the terminal out of the source group.
+        let taken = t
+            .panes
+            .get_mut(src_pane)
+            .and_then(Pane::group_mut)
+            .and_then(|g| {
+                (from < g.tabs.len()).then(|| {
+                    let term = g.tabs.remove(from);
+                    g.active = g.active.min(g.tabs.len().saturating_sub(1));
+                    term
+                })
+            });
+        let Some(term) = taken else {
+            return;
+        };
+        // Insert into the destination group (or, if it isn't a terminal group, put it
+        // back where it came from — a metric pane can't hold shell tabs).
+        let Some(g) = t.panes.get_mut(dst_pane).and_then(Pane::group_mut) else {
+            if let Some(g) = t.panes.get_mut(src_pane).and_then(Pane::group_mut) {
+                let at = from.min(g.tabs.len());
+                g.tabs.insert(at, term);
+            }
+            return;
+        };
+        let at = target.min(g.tabs.len());
+        g.tabs.insert(at, term);
+        g.active = at;
+        t.focus = dst_pane;
+        // A source group that emptied leaves a stale pane behind — close it.
+        if t.panes
+            .get(src_pane)
+            .and_then(Pane::group)
+            .is_some_and(|g| g.tabs.is_empty())
+        {
+            t.panes.close(src_pane);
+        }
+        drag.pane = dst_pane;
+        let mut reorder = rime::widgets::Reorder::default();
+        reorder.begin(at);
+        drag.reorder = reorder;
+    }
+
+    /// Open the pane-tab context menu (new / rename / close): select the tab, then anchor
+    /// at the cursor. Right-click isn't a drag, so the drag armed by the select is cleared.
+    pub fn open_pane_tab_menu(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: usize,
+    ) {
+        self.select_pane_tab(window, pane, idx);
+        self.pane_tab_drag = None;
+        self.menu = Some((MenuKind::PaneTab { window, pane, idx }, self.pointer));
     }
 
     /// Add a shell tab to the *focused* pane (the `⌥⌘T` chord).
@@ -584,8 +719,7 @@ impl Tty {
         if from == target || from >= self.tabs.len() || target >= self.tabs.len() {
             return;
         }
-        let tab = self.tabs.remove(from);
-        self.tabs.insert(target, tab);
+        rime::widgets::reorder_slice(&mut self.tabs, from, target);
         self.active = target;
         self.tab_drag = Some((target, start));
     }
