@@ -132,6 +132,113 @@ impl Tty {
         self.split_with(window, dir, Pane::Metric(kind));
     }
 
+    /// Add a new shell tab to `pane`'s tab group (a single-terminal pane becomes a two-tab
+    /// group), make it active, and focus the pane. New shell starts in the pane's active
+    /// terminal's cwd, like a split.
+    pub fn new_pane_tab(&mut self, window: iced::window::Id, pane: pane_grid::Pane) {
+        let tab = self.tab_for(window);
+        let cwd = tab
+            .and_then(|t| t.panes.get(pane))
+            .and_then(Pane::as_term)
+            .and_then(|t| t.screen.lock().cwd.clone());
+        let pane_tag = tab.map(Tab::label).unwrap_or_else(|| "Tab".to_string());
+        let untracked = tab.is_some_and(|t| t.untracked);
+        if let Some(term) = spawn_term(
+            80,
+            24,
+            cwd.as_deref(),
+            self.settings.max_scrollback(),
+            &pane_tag,
+            self.history_id_floor,
+            untracked,
+            self.settings.shell_integration(),
+            &self.settings.env,
+        ) {
+            if let Some(t) = self.tab_for_mut(window) {
+                if let Some(g) = t.panes.get_mut(pane).and_then(Pane::group_mut) {
+                    g.tabs.push(term);
+                    g.active = g.tabs.len() - 1;
+                }
+                t.focus = pane;
+            }
+        }
+    }
+
+    /// Select tab `idx` in `pane`'s group and focus that pane.
+    pub fn select_pane_tab(&mut self, window: iced::window::Id, pane: pane_grid::Pane, idx: usize) {
+        if let Some(t) = self.tab_for_mut(window) {
+            if let Some(g) = t.panes.get_mut(pane).and_then(Pane::group_mut) {
+                if idx < g.tabs.len() {
+                    g.active = idx;
+                }
+            }
+            t.focus = pane;
+        }
+    }
+
+    /// Add a shell tab to the *focused* pane (the `⌥⌘T` chord).
+    pub fn new_focused_pane_tab(&mut self, window: iced::window::Id) {
+        if let Some(pane) = self.tab_for(window).map(|t| t.focus) {
+            self.new_pane_tab(window, pane);
+        }
+    }
+
+    /// Close the focused pane's active tab — but only when the pane holds more than one
+    /// (so `⌥⌘W` doesn't step on `⌘W`, which closes the whole pane).
+    pub fn close_focused_pane_tab(&mut self, window: iced::window::Id) {
+        let target = self.tab_for(window).and_then(|t| {
+            let pane = t.focus;
+            t.panes
+                .get(pane)
+                .and_then(Pane::group)
+                .filter(|g| g.tabs.len() > 1)
+                .map(|g| (pane, g.active_idx()))
+        });
+        if let Some((pane, idx)) = target {
+            self.close_pane_tab(window, pane, idx);
+        }
+    }
+
+    /// Cycle the focused pane's tab group by `delta` (wrapping). No-op for a single-tab pane.
+    pub fn cycle_pane_tab(&mut self, window: iced::window::Id, delta: isize) {
+        if let Some(t) = self.tab_for_mut(window) {
+            let focus = t.focus;
+            if let Some(g) = t.panes.get_mut(focus).and_then(Pane::group_mut) {
+                let n = g.tabs.len();
+                if n > 1 {
+                    let cur = g.active_idx() as isize;
+                    g.active = (cur + delta).rem_euclid(n as isize) as usize;
+                }
+            }
+        }
+    }
+
+    /// Close tab `idx` in `pane`'s group (dropping its terminal + PTY). If it was the last
+    /// tab, close the whole pane and focus a sibling.
+    pub fn close_pane_tab(&mut self, window: iced::window::Id, pane: pane_grid::Pane, idx: usize) {
+        if let Some(t) = self.tab_for_mut(window) {
+            let empty = if let Some(g) = t.panes.get_mut(pane).and_then(Pane::group_mut) {
+                if idx < g.tabs.len() {
+                    g.tabs.remove(idx); // drops the Term (and its PtySession)
+                    if g.active > idx {
+                        g.active -= 1;
+                    }
+                    g.active = g.active.min(g.tabs.len().saturating_sub(1));
+                }
+                g.tabs.is_empty()
+            } else {
+                false
+            };
+            if empty {
+                if let Some((_removed, sibling)) = t.panes.close(pane) {
+                    t.focus = sibling;
+                }
+            } else {
+                t.focus = pane;
+            }
+        }
+    }
+
     /// Place `content` as a new pane split off `window`'s focused pane toward `dir`,
     /// and focus it. (The spawn-free core of [`split_focused`], so a metric pane or a
     /// pty-less test pane can be inserted directly.)

@@ -1,4 +1,4 @@
-use iced::widget::{container, mouse_area, opaque, pane_grid, row, text, Column};
+use iced::widget::{column, container, mouse_area, opaque, pane_grid, row, text, Column};
 use iced::{Border, Element, Length};
 
 use rime::theme;
@@ -179,8 +179,8 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             let highlight = state.settings.highlight_focused_pane();
             pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
-                let term = match content {
-                    crate::state::Pane::Term(g) => g.active(),
+                let group = match content {
+                    crate::state::Pane::Term(g) => g,
                     // A graduated metric view (CPU chart, process table, …).
                     crate::state::Pane::Metric(kind) => {
                         return metric_pane_content(
@@ -189,6 +189,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                         );
                     }
                 };
+                let term = group.active();
                 // A `⌘F` match wins; otherwise the focused pane honors an OSC 133
                 // prompt-jump target (`⌘↑`/`⌘↓`). Non-focused panes never prompt-jump.
                 let scroll_to = search
@@ -212,6 +213,44 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 .scroll_to(scroll_to)
                 .prompt_gutter(prompt_gutter)
                 .ligatures(state.settings.terminal_ligatures());
+                // A pane holding more than one shell shows a compact tab strip above the
+                // terminal (a single-terminal pane shows none, identical to before).
+                let inner: Element<'_, Message> = if group.tabs.len() > 1 {
+                    let models: Vec<Tab> = group
+                        .tabs
+                        .iter()
+                        .map(|t| {
+                            let title = t
+                                .screen
+                                .lock()
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| t.title.clone());
+                            Tab::new(if t.activity {
+                                format!("• {title}")
+                            } else {
+                                title
+                            })
+                        })
+                        .collect();
+                    let strip = tabs(
+                        models,
+                        group.active_idx(),
+                        None,
+                        move |i| Message::SelectPaneTab(win, pane, i),
+                        move |i| Message::ClosePaneTab(win, pane, i),
+                        |_| Message::Ignore,
+                        |_| Message::Ignore,
+                        Message::NewPaneTab(win, pane),
+                        TabBarStyle {
+                            highlight_active: highlight,
+                            text_size: 11.0,
+                        },
+                    );
+                    column![strip, term_widget].spacing(2).into()
+                } else {
+                    term_widget.into()
+                };
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes (unless the highlight is off); the others get a hairline.
                 let border_color = if is_focused && highlight {
@@ -219,7 +258,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 } else {
                     hairline
                 };
-                let bordered = container(term_widget).padding(6).style(move |_| {
+                let bordered = container(inner).padding(6).style(move |_| {
                     let border = if multi {
                         Border {
                             color: border_color,

@@ -130,6 +130,13 @@ impl Pane {
     }
 
     /// The tab group this pane holds, or `None` for a non-terminal pane.
+    pub fn group(&self) -> Option<&PaneTerms> {
+        match self {
+            Pane::Term(g) => Some(g),
+            _ => None,
+        }
+    }
+
     pub fn group_mut(&mut self) -> Option<&mut PaneTerms> {
         match self {
             Pane::Term(g) => Some(g),

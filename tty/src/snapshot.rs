@@ -372,6 +372,39 @@ fn prompt_gutter_view() {
 }
 
 #[test]
+fn pane_tabs_view() {
+    // A single pane holding two shell tabs: the compact in-pane tab strip renders above the
+    // terminal, with the active tab accented.
+    let mut tty = populated();
+    let focus = tty.tabs[0].focus;
+    if let Some(g) = tty.tabs[0]
+        .panes
+        .get_mut(focus)
+        .and_then(crate::state::Pane::group_mut)
+    {
+        g.tabs.push(painted_term(
+            "build",
+            56,
+            6,
+            b"$ cargo build\r\n\x1b[32m   Compiling\x1b[0m tty\r\n$ ",
+        ));
+        g.active = 0;
+    }
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-pane-tabs.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-pane-tabs` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn split_pane_view() {
     use iced::widget::pane_grid::Direction;
     // Split the active tab into two side-by-side panes (the new one, on the right, takes

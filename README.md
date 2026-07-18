@@ -62,6 +62,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   to encrypted history — marked ○ in the strip) · `⌘1`–`⌘9` jump to tab
 - `⌥⌘`+arrows split the focused pane (←/→/↑/↓) · `⌃⌘`+arrows move focus between panes ·
   drag a divider to resize
+- `⌥⌘T` new tab **inside the focused pane** · `⌥⌘]` / `⌥⌘[` cycle a pane's tabs · `⌥⌘W`
+  close a pane's tab (a compact strip shows only when a pane has more than one) — so tabs
+  work both at the window top level and within any split
 - **right-click** (or **⌃-click**) a pane for a split menu, or a **tab** for
   new-tab / rename / **detach** / split / close-tab
 - **reorder tabs**: drag a tab sideways across the strip and it moves live to the slot

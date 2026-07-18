@@ -29,6 +29,9 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 state.focus_pane(win, pane);
             }
         }
+        Message::NewPaneTab(win, pane) => state.new_pane_tab(win, pane),
+        Message::SelectPaneTab(win, pane, idx) => state.select_pane_tab(win, pane, idx),
+        Message::ClosePaneTab(win, pane, idx) => state.close_pane_tab(win, pane, idx),
         Message::ResizeSplit(win, e) => state.resize_split(win, e.split, e.ratio),
         Message::PointerMoved(p) => {
             state.pointer = p;
@@ -762,6 +765,25 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                 // lowercase character + SHIFT).
                 s if is_main && mods.shift() && s.eq_ignore_ascii_case("t") => {
                     state.new_tab_with(true);
+                    return iced::Task::none();
+                }
+                // ⌥⌘T / ⌥⌘W add / close a tab in the *focused pane's* tab group (a split
+                // slot with its own tabs); ⌥⌘] / ⌥⌘[ cycle it. Works in any window. Checked
+                // before the plain ⌘T / ⌘W arms, which don't test ⌥.
+                s if mods.alt() && s.eq_ignore_ascii_case("t") => {
+                    state.new_focused_pane_tab(win);
+                    return iced::Task::none();
+                }
+                s if mods.alt() && s.eq_ignore_ascii_case("w") => {
+                    state.close_focused_pane_tab(win);
+                    return iced::Task::none();
+                }
+                "]" if mods.alt() => {
+                    state.cycle_pane_tab(win, 1);
+                    return iced::Task::none();
+                }
+                "[" if mods.alt() => {
+                    state.cycle_pane_tab(win, -1);
                     return iced::Task::none();
                 }
                 // Tab/settings/find chrome lives only in the main window, so a detached

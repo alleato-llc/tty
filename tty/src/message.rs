@@ -85,6 +85,11 @@ pub enum Message {
     /// Focus the pane that was clicked. (Keyboard split / focus-move / close are chords
     /// handled directly in `update::handle_key`, like the other ⌘ shortcuts.)
     FocusPane(iced::window::Id, pane_grid::Pane),
+    /// Pane-tab (a tab group inside a split pane): add a shell tab to the pane, select the
+    /// tab at an index, or close the tab at an index.
+    NewPaneTab(iced::window::Id, pane_grid::Pane),
+    SelectPaneTab(iced::window::Id, pane_grid::Pane, usize),
+    ClosePaneTab(iced::window::Id, pane_grid::Pane, usize),
     /// Drag-resize a split divider.
     ResizeSplit(iced::window::Id, pane_grid::ResizeEvent),
     /// The cursor moved (window-relative) — tracked so a right-click can anchor a menu.

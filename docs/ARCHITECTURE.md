@@ -134,25 +134,35 @@ Thin glue, mirroring `fed`'s module shape:
 
 - **`state`** — `Tty { tabs: Vec<Tab>, active, theme, font, font_size, … }`. A `Tab` is
   a `pane_grid::State<Pane>` split tree plus its focused `Pane`. `Pane` is the
-  per-pane content enum (the extension point): `Pane::Term(Term)` for a shell, or
+  per-pane content enum (the extension point): `Pane::Term(PaneTerms)` for a shell, or
   `Pane::Metric(MetricKind)` for a metric drill-in "graduated" from a floating
   popover into a real pane (via `promote_metric_to_pane` to split off a new pane, or
   `replace_pane` to take over an existing one — the "Replace a pane…" pick mode
   (`pane_replace_pending`) dims the grid and routes the next `FocusPane` there,
   confirming first (`pane_replace_confirm`) when the target is a live terminal) —
   no PTY, reads the shared
-  `Metrics`, never reaps. A `Term` is a `screen` + an `Option<PtySession>` (`None`
+  `Metrics`, never reaps. A `PaneTerms` is a `Vec<Term>` + an `active` index: a shell
+  pane holds **one-or-more terminal tabs** sharing that split slot (so tabs nest inside
+  splits, not just at the window top level), collapsing to a plain terminal when there's
+  one. `active()`/`active_mut()` reach the visible `Term`; `terms()` exposes them all.
+  A `Term` is a `screen` + an `Option<PtySession>` (`None`
   only in tests) + an `alive` flag the read loop clears on shell exit. Terminal
-  operations filter to `Pane::as_term` (and `Tab::terms()/terms_mut()`), so a metric
+  operations filter to `Pane::as_term` (the active tab of the group) and
+  `Tab::terms()/terms_mut()` (every tab of every group), so a metric
   pane is transparent to keystrokes/resize/reaping while sharing the generic
   split/focus/resize/maximize machinery. Methods target the active tab's focused
   pane: `split_focused`/`split_with`/`focus_dir`/`close_focused_pane`/`close_pane`,
   `toggle_maximize_pane`, `write_focused`/`write_pane`, `resize_pane`,
-  `new_tab`/`close_tab`, `zoom`/`reset_zoom`. `reap_dead` drops dead terminal panes,
-  then any tab with no live pane, then exits when none remain.
+  `new_tab`/`close_tab`, `zoom`/`reset_zoom`. Pane-level tabs add
+  `new_pane_tab`/`select_pane_tab`/`close_pane_tab`/`cycle_pane_tab` (plus the
+  focused-pane wrappers `new_focused_pane_tab`/`close_focused_pane_tab`). `reap_dead`
+  drops dead tabs from each group, closes a group that empties, then any tab with no
+  live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows
-  split / `⌃⌘`+arrows move focus. `⌘F` opens the scrollback find bar (`Enter`/`⇧Enter`
+  split / `⌃⌘`+arrows move focus. `⌥⌘T` opens a new tab **inside the focused pane**,
+  `⌥⌘W` closes the focused pane's tab (only when it has more than one, so `⌘W` still
+  closes the whole pane), and `⌥⌘]`/`⌥⌘[` cycle a pane's tabs. `⌘F` opens the scrollback find bar (`Enter`/`⇧Enter`
   step to the next/previous match, driving `phosphor`'s `.scroll_to`), `⌘↑`/`⌘↓`
   **prompt-jump** to the previous/next OSC 133 command prompt (`jump_to_prompt` sets a
   `scroll_target` the focused pane feeds to the same `.scroll_to`, reset to the live
@@ -166,7 +176,8 @@ Thin glue, mirroring `fed`'s module shape:
   lean `detached_view` (the tab's `pane_grid` + a Reattach button + a status bar) and every
   other window to `main_view` — the `rime` `tabs` strip (shown only with >1 tab, matching
   fed / fed-ide), a `pane_grid` over the active tab's panes (the closure matches the
-  `Pane`: a `phosphor` terminal, or `metric_pane_content` — a header with maximize/close
+  `Pane`: a `phosphor` terminal — preceded by a compact `rime` `tabs` strip when the
+  pane's group holds >1 terminal — or `metric_pane_content`, a header with maximize/close
   over `metric_body`, the same body a drill-in popover renders; the focused one's border
   turns accent only when the tab has >1 pane), and a `rime` `status_bar`. A right-click (or `⌃`-click, macOS's secondary-click) opens a `rime`
   `context_menu` at the tracked pointer — a pane menu (split + close pane), a tab menu
