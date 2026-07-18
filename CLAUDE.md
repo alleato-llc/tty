@@ -61,6 +61,31 @@ iced 0.14 has no runtime window-opacity action, so the fade is uniform per-surfa
 opacity is clamped to `settings::MIN_OPACITY` (a 95% transparency cap) so the window
 can never fade to invisible.
 
+## Working in the app
+
+tty is one iced 0.14 Elm loop: `Message` (`message.rs`) → `update()` (`update.rs`, mutates
+state) → `view()` (`view.rs` + one `view/*.rs` per surface, `&Tty` → `Element`). The whole
+app state is `struct Tty` in `state/types.rs`, with methods in `state.rs` (+
+`state/{metrics,panes,scrollback,encrypted_history}.rs`); persisted config is `Settings`
+(`settings.rs`). Tests: `behavior::*` drives `update()` with pty-less tabs; `snapshot::*`
+renders chrome to a PNG.
+
+Adding or changing a UI surface — a popover/drill-in, a status-bar cell, a settings
+toggle, a widget — follows one repeatable procedure: **invoke the `ui` skill** for the
+step-by-step (the wiring loop, the tty/rime boundary, popover/modal chrome, the settings
+round-trip, snapshot re-baselining). Two traps worth knowing up front:
+
+- **`Tty` is built by a full struct literal in three places** — `Tty::new` (`state.rs`),
+  `behavior.rs`, and `populated()` (`snapshot.rs`). A new field must be added to all three
+  or it won't compile (`error[E0063]: missing field`).
+- **Snapshot fixtures must use a fixed clock.** A fixture seeded from `now()` bakes wall
+  time into a pixel-exact image and flips across midnight; seed a fixed anchor and pin
+  `Tty::clock_override` (threaded into `now_ms()` / `age_from_epoch_ms`).
+
+Subsystems beyond this file: the status-bar metrics / drill-in popovers are surveyed in
+`docs/ideas/status-bar-metrics.md`; the Env view + shell integration and the overall
+render/state architecture are in `docs/ARCHITECTURE.md`.
+
 ## Tabs are pane trees
 
 A tab is **not** one terminal — it's a `Tab { panes: pane_grid::State<Term>, focus }`
@@ -184,7 +209,10 @@ cargo clippy --all-targets -- -D warnings
 
 `behavior::*` tests drive `tty::state`/`update` with pty-less tabs (no shell);
 `snapshot::*` renders the chrome to a PNG (backend-specific baseline, excluded from
-the default run). Full story in `docs/ARCHITECTURE.md`.
+the default run). Re-baseline a snapshot by deleting its backend-suffixed PNG
+(`snapshots/<name>-wgpu.png`, **not** the bare name in `matches_image`) and re-running —
+a missing baseline is written and passes. Full story in `docs/ARCHITECTURE.md`; the `ui`
+skill has the authoring + re-baseline procedure.
 
 ## App icon
 
