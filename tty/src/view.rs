@@ -180,7 +180,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
                 let term = match content {
-                    crate::state::Pane::Term(term) => term,
+                    crate::state::Pane::Term(g) => g.active(),
                     // A graduated metric view (CPU chart, process table, …).
                     crate::state::Pane::Metric(kind) => {
                         return metric_pane_content(
@@ -684,7 +684,7 @@ fn detached_view<'a>(
     let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
         let term = match content {
-            crate::state::Pane::Term(term) => term,
+            crate::state::Pane::Term(g) => g.active(),
             crate::state::Pane::Metric(kind) => {
                 return metric_pane_content(
                     state, *kind, window, pane, is_focused, maximized, multi, highlight, accent,

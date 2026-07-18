@@ -49,26 +49,90 @@ pub struct Term {
 /// non-terminal pane kinds slot in here without touching the split/resize/focus
 /// machinery, which is generic over the pane content.
 pub enum Pane {
-    /// A shell terminal (the common case) — owns the PTY + screen.
-    Term(Term),
+    /// One or more shell terminals as tabs — a "tab group". The common case is a group of
+    /// one (rendered with no strip, identical to a plain terminal); adding a pane-tab grows
+    /// the `Vec`. Each terminal owns its own PTY + screen.
+    Term(PaneTerms),
     /// A live metric view (CPU chart, process table, …), keyed by its kind. It has
     /// no PTY and never reaps; its data is read from the shared `Metrics`.
     Metric(crate::settings::MetricKind),
 }
 
+/// The terminals in a [`Pane::Term`] tab group. A group of one is the default; `active`
+/// indexes the visible/focused terminal (clamped defensively, since reaping a dead tab can
+/// shift indices).
+pub struct PaneTerms {
+    pub tabs: Vec<Term>,
+    pub active: usize,
+}
+
+impl PaneTerms {
+    /// A group holding a single terminal (no strip).
+    pub fn single(term: Term) -> Self {
+        Self {
+            tabs: vec![term],
+            active: 0,
+        }
+    }
+
+    /// The active-tab index, clamped into range.
+    pub fn active_idx(&self) -> usize {
+        self.active.min(self.tabs.len().saturating_sub(1))
+    }
+
+    /// The active (visible/focused) terminal.
+    pub fn active(&self) -> &Term {
+        &self.tabs[self.active_idx()]
+    }
+
+    pub fn active_mut(&mut self) -> &mut Term {
+        let i = self.active_idx();
+        &mut self.tabs[i]
+    }
+}
+
 impl Pane {
-    /// The terminal this pane holds, or `None` for a non-terminal pane. Terminal
-    /// operations (keystrokes, resize, reaping) filter through this.
+    /// A single-terminal pane (the common case): `Pane::Term` wrapping a one-tab group.
+    pub fn single(term: Term) -> Self {
+        Pane::Term(PaneTerms::single(term))
+    }
+
+    /// The **active** terminal this pane holds, or `None` for a non-terminal pane. Terminal
+    /// operations that act on "the current terminal" (keystrokes, resize) filter through this.
     pub fn as_term(&self) -> Option<&Term> {
         match self {
-            Pane::Term(t) => Some(t),
+            Pane::Term(g) => Some(g.active()),
             _ => None,
         }
     }
 
     pub fn as_term_mut(&mut self) -> Option<&mut Term> {
         match self {
-            Pane::Term(t) => Some(t),
+            Pane::Term(g) => Some(g.active_mut()),
+            _ => None,
+        }
+    }
+
+    /// **Every** terminal in this pane (all tabs of a group), for draining/reaping which
+    /// must touch each PTY. Empty for a non-terminal pane.
+    pub fn terms(&self) -> &[Term] {
+        match self {
+            Pane::Term(g) => &g.tabs,
+            _ => &[],
+        }
+    }
+
+    pub fn terms_mut(&mut self) -> &mut [Term] {
+        match self {
+            Pane::Term(g) => &mut g.tabs,
+            _ => &mut [],
+        }
+    }
+
+    /// The tab group this pane holds, or `None` for a non-terminal pane.
+    pub fn group_mut(&mut self) -> Option<&mut PaneTerms> {
+        match self {
+            Pane::Term(g) => Some(g),
             _ => None,
         }
     }
@@ -95,7 +159,7 @@ pub struct Tab {
 impl Tab {
     /// A new tab wrapping a single shell pane.
     pub fn new(term: Term) -> Self {
-        let (panes, focus) = pane_grid::State::new(Pane::Term(term));
+        let (panes, focus) = pane_grid::State::new(Pane::single(term));
         Self {
             panes,
             focus,
@@ -110,14 +174,15 @@ impl Tab {
         self.panes.get(self.focus).and_then(Pane::as_term)
     }
 
-    /// The terminals in this tab (skipping any non-terminal panes).
+    /// Every terminal in this tab — all tabs of every pane group (skipping non-terminal
+    /// panes). Used for draining/reaping, which must reach each PTY, not just the active one.
     pub fn terms(&self) -> impl Iterator<Item = &Term> {
-        self.panes.iter().filter_map(|(_, p)| p.as_term())
+        self.panes.iter().flat_map(|(_, p)| p.terms())
     }
 
-    /// The terminals in this tab, mutably (skipping any non-terminal panes).
+    /// Every terminal in this tab, mutably (all tabs of every pane group).
     pub fn terms_mut(&mut self) -> impl Iterator<Item = &mut Term> {
-        self.panes.iter_mut().filter_map(|(_, p)| p.as_term_mut())
+        self.panes.iter_mut().flat_map(|(_, p)| p.terms_mut())
     }
 
     /// The tab's display label: a user-set name wins, else the focused pane's program
@@ -127,22 +192,24 @@ impl Tab {
             return name.clone();
         }
         match self.panes.get(self.focus) {
-            Some(Pane::Term(term)) => term
-                .screen
-                .lock()
-                .title
-                .clone()
-                .unwrap_or_else(|| term.title.clone()),
+            Some(Pane::Term(g)) => {
+                let term = g.active();
+                term.screen
+                    .lock()
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| term.title.clone())
+            }
             Some(Pane::Metric(kind)) => kind.to_string(),
             None => String::new(),
         }
     }
 
-    /// Whether any pane in this tab keeps it open: a live shell, or a metric pane
-    /// (which never exits on its own).
+    /// Whether any pane in this tab keeps it open: a live shell (any tab of any group), or a
+    /// metric pane (which never exits on its own).
     pub(super) fn has_live_pane(&self) -> bool {
         self.panes.iter().any(|(_, p)| match p {
-            Pane::Term(t) => t.alive.load(Ordering::Relaxed),
+            Pane::Term(g) => g.tabs.iter().any(|t| t.alive.load(Ordering::Relaxed)),
             Pane::Metric(_) => true,
         })
     }

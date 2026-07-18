@@ -116,7 +116,7 @@ impl Tty {
             self.settings.shell_integration(),
             &self.settings.env,
         ) {
-            self.split_with(window, dir, Pane::Term(term));
+            self.split_with(window, dir, Pane::single(term));
         }
     }
 

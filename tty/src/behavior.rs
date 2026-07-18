@@ -1527,7 +1527,7 @@ fn splitting_adds_a_focused_pane_to_the_tab() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("split")),
+        crate::state::Pane::single(screen_term("split")),
     );
     assert_eq!(tty.tabs[0].panes.len(), 2, "a split adds a pane");
     assert_eq!(tty.tabs.len(), 1, "splitting stays within one tab");
@@ -1544,7 +1544,7 @@ fn focus_dir_moves_between_neighbours() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("right")),
+        crate::state::Pane::single(screen_term("right")),
     );
     let right = tty.tabs[0].focus;
     tty.focus_dir(win, Direction::Left);
@@ -1565,7 +1565,7 @@ fn closing_a_pane_keeps_the_tab_until_the_last_pane() {
     tty.split_with(
         win,
         Direction::Down,
-        crate::state::Pane::Term(screen_term("lower")),
+        crate::state::Pane::single(screen_term("lower")),
     );
     assert_eq!(tty.tabs[0].panes.len(), 2);
     assert!(
@@ -1591,7 +1591,7 @@ fn right_click_focuses_the_pane_and_opens_the_menu_at_the_pointer() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("right")),
+        crate::state::Pane::single(screen_term("right")),
     );
     let right = tty.tabs[0].focus;
     tty.focus_dir(win, Direction::Left);
@@ -1716,7 +1716,7 @@ fn os_close_of_a_detached_window_reattaches_but_cmd_w_last_pane_does_not() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("b")),
+        crate::state::Pane::single(screen_term("b")),
     );
     let tab = tty.tabs.remove(0);
     tty.active = 0;
@@ -1934,7 +1934,7 @@ fn focus_pane_message_focuses_on_a_plain_click_opens_menu_on_ctrl_click() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("right")),
+        crate::state::Pane::single(screen_term("right")),
     );
     let (first, _) = tty.tabs[0].panes.iter().next().unwrap();
     let first = *first;
@@ -1959,7 +1959,7 @@ fn resize_split_message_adjusts_the_divider_ratio() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(screen_term("right")),
+        crate::state::Pane::single(screen_term("right")),
     );
     let split = *tty.tabs[0].panes.layout().splits().next().unwrap();
     let _ = update(
@@ -2017,7 +2017,7 @@ fn close_pane_message_closes_a_pane_or_exits_on_the_last() {
     tty.split_with(
         main_win(&tty),
         Direction::Down,
-        crate::state::Pane::Term(screen_term("lower")),
+        crate::state::Pane::single(screen_term("lower")),
     );
     tty.menu = Some((MenuKind::Pane, iced::Point::ORIGIN));
     let _ = update(&mut tty, Message::ClosePane);

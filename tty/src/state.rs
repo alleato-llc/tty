@@ -963,18 +963,32 @@ fn drain_pane(
 /// on the last pane, so an all-dead tab keeps a single dead pane for the caller's
 /// `retain`/`has_live_pane` check). Re-points focus at a survivor if it was reaped.
 fn reap_tab_panes(tab: &mut Tab) {
+    // First, within each tab group, drop dead terminals and keep `active` pointing at a
+    // live one (a single-terminal pane just empties, same as before). Only terminals reap;
+    // metric panes never exit on their own.
+    for (_, pane) in tab.panes.iter_mut() {
+        let Some(g) = pane.group_mut() else { continue };
+        let active = g.active_idx();
+        let dead_before = g.tabs[..active]
+            .iter()
+            .filter(|t| !t.alive.load(Ordering::Relaxed))
+            .count();
+        g.tabs.retain(|t| t.alive.load(Ordering::Relaxed));
+        if !g.tabs.is_empty() {
+            // The active tab shifts left by however many dead tabs preceded it; if the
+            // active tab itself died, this lands on the next surviving tab.
+            g.active = active.saturating_sub(dead_before).min(g.tabs.len() - 1);
+        }
+    }
+    // Then close any pane whose group emptied out (every tab died).
     loop {
-        // Only terminals reap (a dead shell); metric panes never exit on their own.
-        let dead = tab
+        let empty = tab
             .panes
             .iter()
-            .find(|(_, p)| {
-                p.as_term()
-                    .is_some_and(|t| !t.alive.load(Ordering::Relaxed))
-            })
+            .find(|(_, p)| matches!(p, Pane::Term(g) if g.tabs.is_empty()))
             .map(|(p, _)| *p);
-        let Some(dead) = dead else { break };
-        if tab.panes.close(dead).is_none() {
+        let Some(empty) = empty else { break };
+        if tab.panes.close(empty).is_none() {
             break;
         }
     }

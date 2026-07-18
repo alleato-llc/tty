@@ -381,7 +381,7 @@ fn split_pane_view() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(painted_term(
+        crate::state::Pane::single(painted_term(
             "zsh",
             28,
             6,
@@ -2280,7 +2280,7 @@ fn generate_landing_shots() {
     tty.split_with(
         win,
         Direction::Right,
-        crate::state::Pane::Term(painted_term(
+        crate::state::Pane::single(painted_term(
             "zsh",
             28,
             6,
