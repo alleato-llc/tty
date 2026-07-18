@@ -375,6 +375,67 @@ fn prompt_gutter_view() {
 }
 
 #[test]
+fn cross_group_drag_moves_a_tab_through_the_widget_tree() {
+    // The end-to-end proof that "move a tab to another pane group" works through the real
+    // view: a pane-tab drag forces every pane's strip visible, and moving the cursor onto
+    // a *different* pane's strip (here a single-terminal pane, which shows its strip only
+    // during the drag) emits a HoverPaneTab for that pane — which reorder_or_move applies
+    // as a cross-group move. Guards the mouse_area on_enter-during-drag + force-visible
+    // wiring, not just the state logic.
+    use iced::widget::pane_grid::Direction;
+    let mut tty = populated();
+    let win = tty.main_window.unwrap();
+    let left = tty.tabs[0].focus;
+    if let Some(g) = tty.tabs[0]
+        .panes
+        .get_mut(left)
+        .and_then(crate::state::Pane::group_mut)
+    {
+        g.tabs.push(painted_term("build", 40, 6, b"$ "));
+    }
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::single(painted_term("right", 40, 6, b"$ ")),
+    );
+    let right = tty.tabs[0].focus;
+    // Press the left pane's first tab: arms the drag (both strips now render).
+    tty.select_pane_tab(win, left, 0);
+
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let _ = sim.snapshot(&crate::state::theme(&tty)); // force a layout pass
+                                                      // Drag the pointer onto the right pane's strip tab (its geometry, from the probe).
+    let pos = iced::Point::new(545.0, 52.0);
+    sim.point_at(pos);
+    let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position: pos,
+    })]);
+    let messages: Vec<_> = sim.into_messages().collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::HoverPaneTab(w, p, Some(_)) if *w == win && *p == right)),
+        "dragging onto the right pane's strip must emit a move-hover for it, got {messages:?}"
+    );
+
+    // Applying that hover moves the dragged "zsh" tab out of the left group into the right.
+    tty.hover_pane_tab(win, right, Some(0));
+    let right_labels: Vec<String> = tty.tabs[0]
+        .panes
+        .get(right)
+        .and_then(crate::state::Pane::group)
+        .unwrap()
+        .tabs
+        .iter()
+        .map(Term::label)
+        .collect();
+    assert!(
+        right_labels.iter().any(|l| l == "zsh"),
+        "the dragged tab landed in the right group: {right_labels:?}"
+    );
+}
+
+#[test]
 fn pane_tabs_view() {
     // A single pane holding two shell tabs: the compact in-pane tab strip renders above the
     // terminal, with the active tab accented.
