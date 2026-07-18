@@ -194,6 +194,27 @@ fn failed_command_marker_view() {
 }
 
 #[test]
+fn env_status_bar_cell_view() {
+    // The "Env" launcher cell in the status bar — a text cell (no sampler); clicking it
+    // opens the Env popover. Bar pinned visible so the cell renders.
+    let mut tty = populated();
+    tty.settings.status_bar_metrics = vec![metric("env", "sparkline")];
+    tty.settings.status_bar_autohide = Some(false);
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-env-status-cell.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-env-status-cell` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
 fn env_view_view() {
     // The Env view panel over the terminal: a filterable list with values revealed.
     let mut tty = populated();

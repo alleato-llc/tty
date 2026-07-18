@@ -101,7 +101,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   wire it up for new shells
 - **Env view (`⌘⇧E`)** — a movable, resizable popover (like the metric charts, so it
   stays open beside the terminal) listing the focused pane's environment variables;
-  click one to copy `NAME=value`, toggle **Reveal values** to unmask. It reads what the
+  click one to copy `NAME=value`, toggle **Reveal values** to unmask. Open it with
+  `⌘⇧E`, the pane menu, or an **Env** status-bar cell (add it in the Metrics settings,
+  like any other cell). It reads what the
   shell captures each prompt (same shell integration as above), so it tracks the shell
   across commands. **Opt-in** — off by default (a toggle in Shell settings), so a shell
   does no env work unless you turn it on. **Edit** two ways: **set/unset in this pane** (types a visible

@@ -152,12 +152,16 @@ pub enum MetricKind {
     /// Top processes by resource use. The cell shows the busiest process; the
     /// drill-in is a scrollable, re-sortable process table.
     Procs,
+    /// A launcher cell for the **Env view** — not a sampled metric: it renders a
+    /// static label and, on click, opens the Env popover (`⌘⇧E`) instead of a
+    /// drill-in. Lives in the status-bar list so it's addable/reorderable like a cell.
+    Env,
 }
 
 impl MetricKind {
     /// Every metric that has a sampler today, in a stable order (used to offer
     /// the not-yet-added metrics in the settings editor).
-    pub const ALL: [MetricKind; 16] = [
+    pub const ALL: [MetricKind; 17] = [
         MetricKind::Cpu,
         MetricKind::CpuCores,
         MetricKind::CpuAll,
@@ -174,6 +178,7 @@ impl MetricKind {
         MetricKind::Load,
         MetricKind::Battery,
         MetricKind::Procs,
+        MetricKind::Env,
     ];
 
     /// Whether this kind is a text uptime cell (system or session) rather than a
@@ -231,6 +236,7 @@ impl MetricKind {
             MetricKind::Load => "load",
             MetricKind::Battery => "battery",
             MetricKind::Procs => "procs",
+            MetricKind::Env => "env",
         }
     }
 
@@ -254,6 +260,7 @@ impl MetricKind {
             "load" => Some(MetricKind::Load),
             "battery" => Some(MetricKind::Battery),
             "procs" => Some(MetricKind::Procs),
+            "env" => Some(MetricKind::Env),
             _ => None,
         }
     }
@@ -278,6 +285,7 @@ impl std::fmt::Display for MetricKind {
             MetricKind::Load => "Load",
             MetricKind::Battery => "Battery",
             MetricKind::Procs => "Processes",
+            MetricKind::Env => "Env",
         })
     }
 }

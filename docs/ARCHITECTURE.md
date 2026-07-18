@@ -282,7 +282,11 @@ Thin glue, mirroring `fed`'s module shape:
   dragged by its title bar (`EnvMoveStart` → `env_move_drag`) and border-resized
   (`EnvResizeStart` → `env_resize`), both tracked through `PointerMoved`/`PointerReleased`
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
-  filterable list; click a row to copy `NAME=value`. **Editing** has two scopes: the
+  filterable list; click a row to copy `NAME=value`. Opened by `⌘⇧E`, the pane menu, or an
+  **Env** status-bar cell — a `MetricKind::Env` "launcher" cell that renders a static
+  label (short-circuiting the sampler like `Clock`) and, on click, opens the popover
+  instead of a drill-in (special-cased in the `PointerReleased` handler). **Editing** has
+  two scopes: the
   popover's footer **sets/unsets in *this* pane** by injecting a visible `export`/`unset`
   at the prompt — **opt-in** via `shell_integration.env_editing` (off by default, since it
   types into your shell; the footer is hidden when off), `env::export_command`

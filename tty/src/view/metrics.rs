@@ -51,6 +51,16 @@ pub(super) fn metric_render(
             alert: None,
         });
     }
+    // Env is a launcher cell, not a sampled metric — a static text label, no sampler
+    // needed. Its click opens the Env popover (see the `PointerReleased` handler).
+    if cfg.kind == K::Env {
+        return Some(MetricRender {
+            label: "env".to_string(),
+            series: vec![],
+            max: 1.0,
+            alert: None,
+        });
+    }
 
     let stats = state.metrics.latest.as_ref()?;
     let m = &state.metrics;
@@ -190,6 +200,7 @@ pub(super) fn metric_render(
             }
         }
         K::Clock => unreachable!("clock is handled before the stats read"),
+        K::Env => unreachable!("env is handled before the stats read"),
     };
     // A graded cell past its warn/alarm threshold carries the alert color so the
     // label recolors, not just the sparkline.

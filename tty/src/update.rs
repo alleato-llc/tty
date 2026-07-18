@@ -605,7 +605,8 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
             state.metric_detail_move_drag = None;
             state.env_resize = None;
             state.env_move_drag = None;
-            // A metric drag commits its reorder; a quick tap opens the drill-in.
+            // A metric drag commits its reorder; a quick tap opens the drill-in — or,
+            // for the Env launcher cell, the Env popover.
             if let Some(idx) = state.release_status_metric() {
                 if let Some(key) = state
                     .settings
@@ -613,7 +614,11 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                     .get(idx)
                     .map(|c| c.metric.clone())
                 {
-                    state.open_metric_detail(&key);
+                    if key == "env" {
+                        state.toggle_env_view();
+                    } else {
+                        state.open_metric_detail(&key);
+                    }
                 }
             }
             if let Some(task) = state.finish_tab_drag() {
