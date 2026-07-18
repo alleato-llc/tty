@@ -25,7 +25,7 @@ pub(super) fn place_env_popover<'a>(
     base: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let (x, y) = state.env_effective_pos();
-    let (w, h) = state.env_size;
+    let (w, h) = state.env_view_size();
     let floating = popover(
         card(state, w, h),
         Message::EnvMoveStart,
@@ -142,9 +142,10 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
             Message::ToggleEnvReveal,
         ));
     }
+    // Same glyph control cluster as the metric drill-ins: expand `+` / restore `−`, close.
     title_bar = title_bar
         .push(button::ghost_compact(
-            if expanded { "Collapse" } else { "Expand" },
+            if expanded { "−" } else { "+" },
             Message::ToggleEnvExpanded,
         ))
         .push(button::ghost_compact("×", Message::ToggleEnvView));

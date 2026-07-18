@@ -291,9 +291,10 @@ Thin glue, mirroring `fed`'s module shape:
   `rime::widgets::resize_edges`), both tracked through `PointerMoved`/`PointerReleased`
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. Like the
   metric drill-ins it has a **compact ↔ expanded** toggle (`env_expanded`,
-  `ToggleEnvExpanded`, snapping `env_size` between two defaults): it opens compact — a
-  masked list + Add — and `Expand` adds the filter, the Reveal-values toggle, and the source
-  note (values only unmask when expanded). Click a row to copy `NAME=value`. Opened by
+  `ToggleEnvExpanded`, sharing their `+` / `−` glyph controls): it opens compact — a masked
+  list + Add, its height shrunk to the content by `env_view_size` so a short list leaves no
+  whitespace — and expanding adds the filter, the Reveal-values toggle, and the source note
+  (values only unmask when expanded), snapping to the larger `env_size`. Click a row to copy `NAME=value`. Opened by
   `⌘⇧E`, the pane menu, or an **Env** status-bar cell — a `MetricKind::Env` "launcher" cell
   that renders a static label (short-circuiting the sampler like `Clock`) and, on click,
   opens the popover instead of a drill-in (special-cased in the `PointerReleased` handler).

@@ -21,9 +21,17 @@ pub use types::*;
 
 /// The Env popover's default `(width, height)`: compact (a masked list + Add) vs the
 /// expanded full experience (filter, revealed values, source note). Drag-resize still
-/// overrides freely; expand/restore snaps back to these.
+/// overrides freely; expand/restore snaps back to these. The compact *height* here is a
+/// fallback — [`Tty::env_view_size`] shrinks it to the actual content.
 const ENV_COMPACT_SIZE: (f32, f32) = (380.0, 340.0);
 const ENV_EXPANDED_SIZE: (f32, f32) = (640.0, 480.0);
+
+/// Compact-height math: fixed chrome (card padding + title + spacing) plus a per-row
+/// height, plus the Add-button row when editing. The compact card shrinks to its content
+/// so a short list leaves no whitespace; a long one is capped and the list scrolls.
+const ENV_COMPACT_CHROME: f32 = 70.0;
+const ENV_ROW_HEIGHT: f32 = 24.0;
+const ENV_ADD_ROW: f32 = 46.0;
 
 /// `impl Tty` methods for the opt-in encrypted command history.
 mod encrypted_history;
@@ -779,11 +787,36 @@ impl Tty {
         true
     }
 
+    /// The Env popover's effective `(width, height)`. Expanded uses the full `env_size`;
+    /// compact keeps the width but shrinks the height to its content (title + list +
+    /// optional Add) so a short list leaves no whitespace, clamped to the window so a long
+    /// env is capped and the list scrolls instead of overflowing.
+    pub fn env_view_size(&self) -> (f32, f32) {
+        if self.env_expanded {
+            return self.env_size;
+        }
+        let rows = if self.env_vars.is_empty() {
+            3
+        } else {
+            self.env_vars.len()
+        };
+        let mut h = ENV_COMPACT_CHROME + rows as f32 * ENV_ROW_HEIGHT;
+        if self.settings.shell_integration().env_editing {
+            h += ENV_ADD_ROW;
+        }
+        let cap = if self.window_height > 1.0 {
+            (self.window_height - 80.0).max(160.0)
+        } else {
+            520.0
+        };
+        (self.env_size.0, h.min(cap))
+    }
+
     /// The Env popover's current top-left position, defaulting to centered until the
     /// user drags it (then [`Self::env_pos`] remembers where they left it).
     pub fn env_effective_pos(&self) -> (f32, f32) {
         self.env_pos.unwrap_or_else(|| {
-            let (w, h) = self.env_size;
+            let (w, h) = self.env_view_size();
             let x = ((self.window_width - w) / 2.0).max(0.0);
             let y = ((self.window_height - h) / 2.0).max(20.0);
             (x, y)

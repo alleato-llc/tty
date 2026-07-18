@@ -101,8 +101,9 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   wire it up for new shells
 - **Env view (`⌘⇧E`)** — a movable, resizable popover (like the metric charts, so it
   stays open beside the terminal) listing the focused pane's environment variables. It
-  opens **compact** — a masked list plus an Add button — and **Expand** reveals the full
-  experience: a filter, the **Reveal values** toggle, and the source note. Click a row to
+  opens **compact** — a masked list plus an Add button — and the expand control (`+` / `−`,
+  the same glyph cluster the metric drill-ins use) reveals the full experience: a filter,
+  the **Reveal values** toggle, and the source note. Click a row to
   copy `NAME=value`. Open it with `⌘⇧E`, the pane menu, or an **Env** status-bar cell (add
   it in the Metrics settings, like any other cell). With **zero setup** it shows the pane
   process's launch-time environment, read straight from the OS (`KERN_PROCARGS2` on macOS,
