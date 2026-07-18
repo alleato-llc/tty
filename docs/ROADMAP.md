@@ -60,13 +60,19 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
 - **Command-finished notifications** — OSC 133 shell integration (`133;C`/`133;D`)
   drives a system notification (✓/✗ + command + duration) when a command finishes
   while the window is unfocused and ran past a threshold. Manual snippet by default;
-  opt-in zsh auto-install (generated `ZDOTDIR`) in Appearance → Terminal.
+  opt-in zsh auto-install (generated `ZDOTDIR`). All the shell-integration controls
+  live under one master toggle in the **Shell** settings section.
 - **OSC 133 semantic prompts** — on a cathode command-regions layer (mark positions
   pinned to stable line ids, surviving scrollback): **prompt-to-prompt navigation**
   (`⌘↑`/`⌘↓`, `⌘⇧↑`/`⌘⇧↓` for failures only), **failed-command flagging** (a red prompt
   marker on non-zero exit), **copy last command output** (`⌘⇧O` / pane menu), and an
   opt-in **prompt gutter** (a dot per prompt, red on failure). The command-finished
   notification above rides the same marks.
+- **Env view (`⌘⇧E`)** — a movable, resizable popover listing the focused pane's
+  environment variables (masked by default, reveal toggle, filter, click a row to copy
+  `NAME=value`). The shell-integration hook captures `env` to a per-session file each
+  prompt (gated by an `.on` flag), so it tracks the shell across commands with no
+  polling. Read-only for now (see the follow-up below).
 - **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
   clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
@@ -140,6 +146,13 @@ tier is complete.
   prompt-jump, failed-command flagging, output copy, a **jump-to-next-*failed*-command**
   (`⌘⇧↑`/`⌘⇧↓`), and an opt-in **persistent prompt gutter** (a dot per prompt, red on
   failure).
+- **Env editing** — the **Env view** ships read-only (see above); the edit half is the
+  natural follow-up: **set/unset for the active pane** by injecting a visible
+  `export`/`unset` at the prompt (gated on being at a prompt via OSC 133; zsh/bash
+  syntax; single-quote-escaped), and a **new-session overlay** — vars tty applies to
+  every shell it spawns (`CommandBuilder::env`, persisted in `tty.toml`), which needs no
+  injection and no running shell. A silent live-apply (a `precmd`-drained control file)
+  is possible but deliberately deferred as over-engineered for the common case.
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.
