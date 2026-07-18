@@ -1,4 +1,6 @@
-use iced::widget::{column, container, mouse_area, opaque, pane_grid, row, text, Column};
+use iced::widget::{
+    column, container, mouse_area, opaque, pane_grid, row, stack, text, Column, Space,
+};
 use iced::{Border, Element, Length};
 
 use rime::theme;
@@ -225,11 +227,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
             // apart — a single pane shows none (no stray accent rectangle).
             let multi = tab.panes.len() > 1;
             let highlight = state.settings.highlight_focused_pane();
-            // Pane-tab hover + whether a pane-tab drag is in flight (forces every strip
-            // visible so a single-terminal pane can be a drop target). Copied out so the
+            // Pane-tab hover + the window/pane a pane-tab drag currently sits in (drives
+            // the force-visible strips + the whole-pane drop zones). Copied out so the
             // closure doesn't borrow `state`.
             let pane_tab_hover = state.pane_tab_hover;
-            let pane_dragging = state.pane_tab_drag.is_some();
+            let pane_drag_at = state.pane_tab_drag.map(|d| (d.window, d.pane));
             pane_grid(&tab.panes, move |pane, content, maximized| {
                 let is_focused = pane == focus && window_focused;
                 let group = match content {
@@ -266,11 +268,12 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 .scroll_to(scroll_to)
                 .prompt_gutter(prompt_gutter)
                 .ligatures(state.settings.terminal_ligatures());
-                // A pane holding more than one shell shows a compact tab strip above the
-                // terminal (a single-terminal pane shows none, unless a drag is in flight).
+                // While a pane-tab is dragged *in this window*, every pane shows its strip
+                // (so a single-terminal pane can be a drop target).
+                let dragging_here = pane_drag_at.is_some_and(|(w, _)| w == win);
                 let hov = pane_tab_hover.and_then(|(w, p, i)| (w == win && p == pane).then_some(i));
                 let inner: Element<'_, Message> =
-                    match pane_tab_strip(group, win, pane, highlight, hov, pane_dragging) {
+                    match pane_tab_strip(group, win, pane, highlight, hov, dragging_here) {
                         Some(strip) => column![strip, term_widget].spacing(2).into(),
                         None => term_widget.into(),
                     };
@@ -297,9 +300,23 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     }
                 });
                 // Right-click anywhere in the pane opens the split context menu over it.
-                pane_grid::Content::new(
-                    mouse_area(bordered).on_right_press(Message::PaneRightClick(pane)),
-                )
+                let pane_body = mouse_area(bordered).on_right_press(Message::PaneRightClick(pane));
+                // While a pane-tab is dragged, every *other* pane in this window is a full
+                // drop zone: entering it moves the dragged tab into this group (appended).
+                // The pane currently holding the tab keeps its strip for precise reorder.
+                let content: Element<'_, Message> =
+                    if pane_drag_at.is_some_and(|(w, p)| w == win && p != pane) {
+                        let end = group.tabs.len();
+                        stack![
+                            pane_body,
+                            mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+                                .on_enter(Message::HoverPaneTab(win, pane, Some(end)))
+                        ]
+                        .into()
+                    } else {
+                        pane_body.into()
+                    };
+                pane_grid::Content::new(content)
             })
             .width(Length::Fill)
             .height(Length::Fill)
@@ -760,7 +777,7 @@ fn detached_view<'a>(
     let multi = tab.panes.len() > 1;
     let highlight = state.settings.highlight_focused_pane();
     let pane_tab_hover = state.pane_tab_hover;
-    let pane_dragging = state.pane_tab_drag.is_some();
+    let pane_drag_at = state.pane_tab_drag.map(|d| (d.window, d.pane));
 
     let body = pane_grid(&tab.panes, move |pane, content, maximized| {
         let is_focused = pane == focus && window_focused;
@@ -791,9 +808,10 @@ fn detached_view<'a>(
         .prompt_gutter(state.settings.shell_integration().gutter)
         .ligatures(state.settings.terminal_ligatures());
         // A tabbed pane shows the same compact strip here as in the main window.
+        let dragging_here = pane_drag_at.is_some_and(|(w, _)| w == window);
         let hov = pane_tab_hover.and_then(|(w, p, i)| (w == window && p == pane).then_some(i));
         let inner: Element<'_, Message> =
-            match pane_tab_strip(group, window, pane, highlight, hov, pane_dragging) {
+            match pane_tab_strip(group, window, pane, highlight, hov, dragging_here) {
                 Some(strip) => column![strip, term_widget].spacing(2).into(),
                 None => term_widget.into(),
             };
@@ -817,7 +835,20 @@ fn detached_view<'a>(
                 ..container::background(bg)
             }
         });
-        pane_grid::Content::new(bordered)
+        // A pane-tab drag in this window makes every other pane a full drop zone.
+        let content: Element<'_, Message> =
+            if pane_drag_at.is_some_and(|(w, p)| w == window && p != pane) {
+                let end = group.tabs.len();
+                stack![
+                    bordered,
+                    mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+                        .on_enter(Message::HoverPaneTab(window, pane, Some(end)))
+                ]
+                .into()
+            } else {
+                bordered.into()
+            };
+        pane_grid::Content::new(content)
     })
     .width(Length::Fill)
     .height(Length::Fill)

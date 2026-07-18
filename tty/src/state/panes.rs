@@ -182,7 +182,6 @@ impl Tty {
             window,
             pane,
             reorder,
-            start: self.pointer,
         });
     }
 
@@ -782,20 +781,6 @@ impl Tty {
         } else {
             None
         }
-    }
-
-    /// Complete a pane-tab drag on release. If the pointer was pulled down past
-    /// [`TAB_TEAR_THRESHOLD`] and released *off* every strip (`pane_tab_hover` is `None`,
-    /// so it didn't land as a reorder/move), the tab tears off into its own window;
-    /// otherwise the live reorder/move already did the work and this just disarms.
-    pub fn finish_pane_tab_drag(&mut self) -> Option<iced::Task<Message>> {
-        let drag = self.pane_tab_drag.take()?;
-        let idx = drag.reorder.anchor()?;
-        let torn_off =
-            self.pane_tab_hover.is_none() && self.pointer.y - drag.start.y > TAB_TEAR_THRESHOLD;
-        torn_off
-            .then(|| self.detach_pane_tab(drag.window, drag.pane, idx))
-            .flatten()
     }
 
     /// Record which window has the keyboard (chords/typing route to its tab).

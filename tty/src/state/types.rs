@@ -695,9 +695,6 @@ pub struct PaneTabDrag {
     pub window: iced::window::Id,
     pub pane: pane_grid::Pane,
     pub reorder: rime::widgets::Reorder,
-    /// The pointer at press. A release pulled down past [`TAB_TEAR_THRESHOLD`] off every
-    /// strip detaches the tab into its own window (a pane-tab tear-off).
-    pub start: iced::Point,
 }
 
 /// What a "Rename tab…" action is targeting: a window-level tab (by strip index), or a

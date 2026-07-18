@@ -404,8 +404,9 @@ fn cross_group_drag_moves_a_tab_through_the_widget_tree() {
 
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let _ = sim.snapshot(&crate::state::theme(&tty)); // force a layout pass
-                                                      // Drag the pointer onto the right pane's strip tab (its geometry, from the probe).
-    let pos = iced::Point::new(545.0, 52.0);
+                                                      // Drag the pointer deep into the right pane's *terminal body* (not its narrow tab):
+                                                      // the whole pane is a drop zone during a drag, so this still registers the move.
+    let pos = iced::Point::new(770.0, 400.0);
     sim.point_at(pos);
     let _ = sim.simulate(vec![iced::Event::Mouse(iced::mouse::Event::CursorMoved {
         position: pos,
@@ -415,7 +416,7 @@ fn cross_group_drag_moves_a_tab_through_the_widget_tree() {
         messages
             .iter()
             .any(|m| matches!(m, Message::HoverPaneTab(w, p, Some(_)) if *w == win && *p == right)),
-        "dragging onto the right pane's strip must emit a move-hover for it, got {messages:?}"
+        "dragging anywhere into the right pane must emit a move-hover for it, got {messages:?}"
     );
 
     // Applying that hover moves the dragged "zsh" tab out of the left group into the right.

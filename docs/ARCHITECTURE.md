@@ -160,12 +160,16 @@ Thin glue, mirroring `fed`'s module shape:
   PaneTab`), and drag-to-reorder: a tab press arms `pane_tab_drag`, and as the pointer
   crosses other pane-tabs (`hover_pane_tab`) the tab reorders within its group or moves
   to another group in the same window (`reorder_or_move_pane_tab`/`move_pane_tab_across`,
-  closing a source group that empties). The horizontal-move bookkeeping is the shared
-  `rime::widgets::Reorder` tracker + `reorder_slice` (the window-level strip uses the same
-  `reorder_slice`). A pane-tab also **detaches** into its own window — via its menu or by
-  dragging it down off the strips (`finish_pane_tab_drag` → `detach_pane_tab`) — reusing
-  the top-level `open_detached_window`/`reattach_window` machinery, so it docks back onto
-  the main strip as a top-level tab. `reap_dead` drops dead tabs from each group, closes a group that
+  closing a source group that empties). While a drag is in flight the `view` overlays every
+  pane *except* the one holding the tab with a full-pane drop zone (a transparent
+  `mouse_area` reporting `HoverPaneTab(..)` for that pane), so dropping anywhere in a pane
+  moves the tab into it — the pane holding the tab keeps its strip for precise reorder. The
+  horizontal-move bookkeeping is the shared `rime::widgets::Reorder` tracker + `reorder_slice`
+  (the window-level strip uses the same `reorder_slice`). A pane-tab **detaches** into its own
+  window via its context menu (`detach_pane_tab`, deliberate only — never a drag-off, so a
+  mis-aimed move can't tear the tab out), reusing the top-level
+  `open_detached_window`/`reattach_window` machinery, so it docks back onto the main strip as
+  a top-level tab. `reap_dead` drops dead tabs from each group, closes a group that
   empties, then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows

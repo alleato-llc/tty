@@ -641,12 +641,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                     }
                 }
             }
-            // A pane-tab drag has already reordered/moved live on hover; release either
-            // tears it off into its own window (dragged down off the strips) or just
-            // disarms.
-            if let Some(task) = state.finish_pane_tab_drag() {
-                return task;
-            }
+            // A pane-tab drag reorders/moves live on hover, so release just disarms it.
+            // (Detaching a pane-tab is a deliberate menu action, never an accidental
+            // drag-off, so a mis-aimed move never tears the tab out of the window.)
+            state.pane_tab_drag = None;
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }
