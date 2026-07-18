@@ -457,13 +457,14 @@ fn settings_history_browser(state: &Tty) -> Element<'_, Message> {
     // (cell text, archive address) per row — Copy and double-click use the
     // target's command (without the metadata suffix); Delete needs the rest
     // to tombstone the entry on disk.
+    let now_ms = state.now_ms();
     let rows: std::rc::Rc<Vec<(String, crate::state::ArchivedTarget)>> = std::rc::Rc::new(
         state
             .settings_history
             .iter()
             .map(|e| {
                 let date = crate::history::local_date_from_epoch_ms(e.started_at_epoch_ms);
-                let age = format_age(age_from_epoch_ms(e.started_at_epoch_ms));
+                let age = format_age(age_from_epoch_ms(now_ms, e.started_at_epoch_ms));
                 (
                     format!("{}  · {} · {} · {}", e.command, date, e.pane_tag, age),
                     crate::state::ArchivedTarget {

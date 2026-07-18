@@ -62,12 +62,10 @@ struct ScrollbackCommand {
 }
 
 /// How long ago an archived entry's wall-clock timestamp was, for the same
-/// "Xs/Xm/Xh ago" label a live row gets from its `Instant`.
-pub(super) fn age_from_epoch_ms(epoch_ms: u64) -> std::time::Duration {
-    let wall = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(epoch_ms);
-    std::time::SystemTime::now()
-        .duration_since(wall)
-        .unwrap_or_default()
+/// "Xs/Xm/Xh ago" label a live row gets from its `Instant`. `now_ms` is the
+/// reference "now" (from [`crate::state::Tty::now_ms`]) so tests can pin it.
+pub(super) fn age_from_epoch_ms(now_ms: u64, epoch_ms: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(now_ms.saturating_sub(epoch_ms))
 }
 
 /// This row's `HistoryRowTarget` for the header (whole-command) case — shared
@@ -105,6 +103,7 @@ pub(super) fn scrollback_panel_view<'a>(
     // Archived rows (paged in from the encrypted archive) render first —
     // oldest overall — followed by the live window, matching how
     // `TerminalScreen::seed_command_log` orders them at startup.
+    let now_ms = state.now_ms();
     let archived_commands = state.scrollback_archived.iter().map(|e| ScrollbackCommand {
         origin: RowOrigin::Archived {
             date: crate::history::local_date_from_epoch_ms(e.started_at_epoch_ms),
@@ -115,7 +114,7 @@ pub(super) fn scrollback_panel_view<'a>(
         command: e.command.clone(),
         output: Vec::new(),
         truncated: false,
-        age: age_from_epoch_ms(e.started_at_epoch_ms),
+        age: age_from_epoch_ms(now_ms, e.started_at_epoch_ms),
         untracked: false,
     });
     let live_commands = {

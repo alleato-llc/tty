@@ -114,6 +114,7 @@ fn populated() -> Tty {
         history_reauth_pending: false,
         show_settings_history: false,
         settings_history: Vec::new(),
+        clock_override: None,
         settings_history_cursor: None,
         settings_history_selected: None,
         settings_history_scroll: 0.0,
@@ -778,7 +779,13 @@ fn scrollback_command_row_context_menu_view() {
 /// renders relative to now, so pin the timestamps off `Utc::now()` to keep the
 /// ages sensible (5m / 2h / yesterday) whenever the snapshot is regenerated.
 fn tty_in_archive_browser() -> (Tty, Vec<cathode::history::PersistedCommandEntry>) {
-    let now = chrono::Utc::now().timestamp_millis() as u64;
+    // A FIXED anchor (not `now()`), pinned into the view via `clock_override` below, so
+    // the "N ago" + archived-date columns render identically no matter when the test
+    // runs — previously they drifted, and crossing midnight flipped the dates. Midday
+    // UTC keeps the local date clear of a day boundary.
+    let now = chrono::DateTime::parse_from_rfc3339("2026-06-15T18:00:00Z")
+        .expect("valid anchor")
+        .timestamp_millis() as u64;
     let min = 60_000u64;
     let hr = 60 * min;
     let day = 24 * hr;
@@ -824,6 +831,7 @@ fn tty_in_archive_browser() -> (Tty, Vec<cathode::history::PersistedCommandEntry
         settings_history: entries.clone(),
         settings_history_cursor: Some(cursor),
         settings_history_selected: Some(1),
+        clock_override: Some(now),
         ..populated()
     };
     (tty, entries)

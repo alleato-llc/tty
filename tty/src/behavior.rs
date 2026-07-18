@@ -98,6 +98,7 @@ pub(crate) fn headless(n: usize) -> Tty {
         history_reauth_pending: false,
         show_settings_history: false,
         settings_history: Vec::new(),
+        clock_override: None,
         settings_history_cursor: None,
         settings_history_selected: None,
         settings_history_scroll: 0.0,

@@ -307,6 +307,11 @@ pub struct Tty {
     /// independent of the panel's `scrollback_archived` so the two surfaces
     /// don't fight over one cursor. Cleared when the viewer or settings close.
     pub settings_history: Vec<cathode::history::PersistedCommandEntry>,
+    /// A fixed "now" (Unix-epoch ms) for the wall-clock-relative labels ("N ago", the
+    /// archived date). `None` in normal use — [`Tty::now_ms`] reads the real clock.
+    /// Snapshot tests set it so date/age render deterministically regardless of when
+    /// (or on which side of midnight) the test runs.
+    pub clock_override: Option<u64>,
     /// The oldest date paged into the settings viewer (`None` = nothing yet).
     pub settings_history_cursor: Option<chrono::NaiveDate>,
     /// The settings viewer's selected row.

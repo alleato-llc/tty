@@ -153,6 +153,7 @@ impl Tty {
             history_reauth_pending: false,
             show_settings_history: false,
             settings_history: Vec::new(),
+            clock_override: None,
             settings_history_cursor: None,
             settings_history_selected: None,
             settings_history_scroll: 0.0,
@@ -665,6 +666,18 @@ impl Tty {
             .as_ref()
             .map(|(_, v)| v.clone())
             .unwrap_or_default()
+    }
+
+    /// "Now" in Unix-epoch milliseconds for wall-clock-relative labels (the History
+    /// viewer's "N ago" and archived-date columns). Reads the real clock unless
+    /// [`Tty::clock_override`] pins it (snapshot tests, for determinism across midnight).
+    pub fn now_ms(&self) -> u64 {
+        self.clock_override.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        })
     }
 
     /// The `<env_file>.on` capture-enable flag path for the active pane's shell.
