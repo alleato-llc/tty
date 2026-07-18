@@ -23,7 +23,7 @@ pub use types::*;
 /// expanded full experience (filter, revealed values, source note). Drag-resize still
 /// overrides freely; expand/restore snaps back to these. The compact *height* here is a
 /// fallback — [`Tty::env_view_size`] shrinks it to the actual content.
-const ENV_COMPACT_SIZE: (f32, f32) = (380.0, 340.0);
+const ENV_COMPACT_SIZE: (f32, f32) = (320.0, 340.0);
 const ENV_EXPANDED_SIZE: (f32, f32) = (640.0, 480.0);
 
 /// Compact-height math: fixed chrome (card padding + title + spacing) plus a per-row

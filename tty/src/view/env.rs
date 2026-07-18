@@ -97,23 +97,24 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
         } else {
             "••••••••".to_string()
         };
-        let line = container(
+        let name = text(v.name.clone())
+            .size(12)
+            .font(Font::MONOSPACE)
+            .color(t.ink);
+        let value = text(shown).size(12).font(Font::MONOSPACE).color(t.muted);
+        // Compact: a key/value list — the name takes the row, the masked value sits at
+        // the right edge (so short values don't leave a stranded middle band). Expanded:
+        // real values need room, so they get a proper left-aligned second column.
+        let inner = if expanded {
             row![
-                text(v.name.clone())
-                    .size(12)
-                    .font(Font::MONOSPACE)
-                    .color(t.ink)
-                    .width(Length::FillPortion(2)),
-                text(shown)
-                    .size(12)
-                    .font(Font::MONOSPACE)
-                    .color(t.muted)
-                    .width(Length::FillPortion(3)),
+                name.width(Length::FillPortion(2)),
+                value.width(Length::FillPortion(3)),
             ]
-            .spacing(12),
-        )
-        .padding([3, 6])
-        .width(Length::Fill);
+            .spacing(12)
+        } else {
+            row![name.width(Length::Fill), value].spacing(12)
+        };
+        let line = container(inner).padding([3, 6]).width(Length::Fill);
         list = list
             .push(mouse_area(line).on_press(Message::CopyText(format!("{}={}", v.name, v.value))));
     }
@@ -165,14 +166,22 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
     }
     // Editing types into the running shell, so it's opt-in (Shell settings). When on,
     // an Add button opens the "Set a variable" modal; when off, the view is read-only.
+    // Compact spans the button full-width (so it reads as the card's action, not a stray
+    // element in the empty right); expanded, which is wider, keeps it right-aligned.
     if editing {
-        content = content.push(
+        content = content.push(if expanded {
             row![
                 Space::new().width(Length::Fill),
                 button::secondary("Add variable", Message::OpenEnvAdd),
             ]
-            .align_y(iced::Alignment::Center),
-        );
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            let btn: Element<'_, Message> = button::secondary("Add variable", Message::OpenEnvAdd)
+                .width(Length::Fill)
+                .into();
+            btn
+        });
     }
 
     container(content)
