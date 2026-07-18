@@ -31,6 +31,7 @@ fn painted_term(title: &str, cols: usize, rows: usize, bytes: &[u8]) -> Term {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     }
 }
 
@@ -62,6 +63,10 @@ fn populated() -> Tty {
         search: None,
         search_match: 0,
         scroll_target: None,
+        show_env: false,
+        env_vars: Vec::new(),
+        env_filter: String::new(),
+        env_reveal: false,
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,
@@ -177,6 +182,52 @@ fn failed_command_marker_view() {
     assert!(
         matches,
         "snapshot `tty-failed-command` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn env_view_view() {
+    // The Env view panel over the terminal: a filterable list with values revealed.
+    let mut tty = populated();
+    tty.show_env = true;
+    tty.env_reveal = true;
+    tty.env_vars = vec![
+        crate::env::EnvVar {
+            name: "EDITOR".into(),
+            value: "nvim".into(),
+        },
+        crate::env::EnvVar {
+            name: "HOME".into(),
+            value: "/Users/dev".into(),
+        },
+        crate::env::EnvVar {
+            name: "LANG".into(),
+            value: "en_US.UTF-8".into(),
+        },
+        crate::env::EnvVar {
+            name: "PATH".into(),
+            value: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".into(),
+        },
+        crate::env::EnvVar {
+            name: "SHELL".into(),
+            value: "/bin/zsh".into(),
+        },
+        crate::env::EnvVar {
+            name: "TERM".into(),
+            value: "xterm-256color".into(),
+        },
+    ];
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-env-view.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-env-view` changed — delete its PNG to re-baseline"
     );
 }
 
@@ -431,6 +482,7 @@ fn scrollback_panel_view() {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     };
     let mut tty = Tty {
         tabs: vec![Tab::new(tab)],
@@ -478,6 +530,7 @@ fn scrollback_cleared_command_row_view() {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     };
     let mut tty = Tty {
         tabs: vec![Tab::new(tab)],
@@ -515,6 +568,7 @@ fn tty_with_open_scrollback_panel() -> Tty {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     };
     let mut tty = Tty {
         tabs: vec![Tab::new(tab)],
@@ -599,6 +653,7 @@ fn scrollback_output_row_context_menu_view() {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     };
     let mut tty = Tty {
         tabs: vec![Tab::new(tab)],
@@ -651,6 +706,7 @@ fn scrollback_command_row_context_menu_view() {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     };
     let mut tty = Tty {
         tabs: vec![Tab::new(tab)],

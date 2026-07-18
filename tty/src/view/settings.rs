@@ -70,6 +70,7 @@ fn keys_section<'a>() -> Element<'a, Message> {
                 ("⌘↑ / ⌘↓", "Jump to previous / next command prompt"),
                 ("⌘⇧↑ / ⌘⇧↓", "Jump between failed commands only"),
                 ("⌘⇧O", "Copy the last command's output"),
+                ("⌘⇧E", "Environment view (this pane's env vars)"),
                 ("⌘K", "Clear the focused pane's scrollback"),
                 ("⌘⇧H", "Scrollback History (commands + output)"),
                 ("wheel", "Scroll back through history"),

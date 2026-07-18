@@ -37,6 +37,10 @@ pub struct Term {
     pub dirty: Arc<AtomicBool>,
     /// Unseen output / bell on a background tab (shown as a • in the tab strip).
     pub activity: bool,
+    /// Where this shell writes its captured environment for the **Env view**
+    /// (`$TTY_ENV_FILE`, from `shell_integration::env_channel_path`). `None` when shell
+    /// integration is off. The view creates a `<path>.on` flag to switch capture on.
+    pub env_file: Option<std::path::PathBuf>,
 }
 
 /// What a single pane holds. A pane is usually a terminal, but a metric drill-in
@@ -173,6 +177,17 @@ pub struct Tty {
     /// `None` when at the live bottom. Fed to the focused pane's `scroll_to`; reset
     /// when the user types into the shell. See [`Tty::jump_to_prompt`].
     pub scroll_target: Option<usize>,
+    /// Whether the **Env view** (`⌘⇧E`) is open for the active pane. While open, the
+    /// pane's shell captures its env each prompt (via the `.on` flag) and
+    /// [`Tty::refresh_env`] re-reads it. See [`crate::env`].
+    pub show_env: bool,
+    /// The env vars read from the active pane's capture file, sorted by name.
+    pub env_vars: Vec<crate::env::EnvVar>,
+    /// The Env view's filter query.
+    pub env_filter: String,
+    /// Whether the Env view reveals values (off by default — env holds secrets, so
+    /// values are masked until asked for).
+    pub env_reveal: bool,
     /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
     pub show_scrollback: bool,
     /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).

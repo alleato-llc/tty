@@ -30,6 +30,7 @@ pub(crate) fn screen_term(title: &str) -> Term {
         alive: Arc::new(AtomicBool::new(true)),
         dirty: Arc::new(AtomicBool::new(false)),
         activity: false,
+        env_file: None,
     }
 }
 
@@ -52,6 +53,10 @@ pub(crate) fn headless(n: usize) -> Tty {
         search: None,
         search_match: 0,
         scroll_target: None,
+        show_env: false,
+        env_vars: Vec::new(),
+        env_filter: String::new(),
+        env_reveal: false,
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,

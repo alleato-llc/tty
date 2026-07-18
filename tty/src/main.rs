@@ -4,6 +4,7 @@
 
 mod app_icon;
 mod detach_drag;
+mod env;
 mod history;
 mod message;
 mod metrics;

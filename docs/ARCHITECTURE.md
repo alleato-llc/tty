@@ -267,6 +267,14 @@ Thin glue, mirroring `fed`'s module shape:
   cohesive unit gated by `shell_integration.enabled`: the resolver master-gates every
   sub-option, and `set_shell_integration_enabled` pushes the flag to every open pane's
   `set_honor_osc133` (like the scrollback cap), so flipping it clears the marks live.
+- **`env`** — the **Env view** (`⌘⇧E`). The shell-integration hook writes the shell's `env`
+  to a per-session file (`$TTY_ENV_FILE`, from `shell_integration::env_channel_path`, a
+  `0700` temp dir): one baseline dump at startup, then re-dumped each prompt only while a
+  `<file>.on` flag exists. `Tty::toggle_env_view` flips that flag on/off; `refresh_env`
+  re-reads + `env::parse`s the file each redraw while open (so it tracks the shell without
+  polling — env only changes at command boundaries). The panel (`view::env`) is a masked,
+  filterable list; click a row to copy `NAME=value`. Read-only for now — no editing back
+  into the shell. Needs shell integration; nothing without it.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the
   full key-derivation pipeline and its open refinement options are surveyed in
   `docs/history-keys.md`), opt-in

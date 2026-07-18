@@ -99,6 +99,10 @@ for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
   shell integration: paste the snippet from the **Shell** settings section into your
   `~/.zshrc`, or turn on **auto-install** there (zsh; off by default) to have tty
   wire it up for new shells
+- **Env view (`⌘⇧E`)** — a filterable, masked list of the focused pane's environment
+  variables; click one to copy `NAME=value`, toggle **Reveal values** to unmask. It
+  reads what the shell captures each prompt (same shell integration as above), so it
+  tracks the shell across commands — read-only for now
 
 ## Customize
 

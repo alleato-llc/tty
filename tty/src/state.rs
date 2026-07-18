@@ -108,6 +108,10 @@ impl Tty {
             search: None,
             search_match: 0,
             scroll_target: None,
+            show_env: false,
+            env_vars: Vec::new(),
+            env_filter: String::new(),
+            env_reveal: false,
             show_scrollback: false,
             scrollback_query: String::new(),
             scrollback_selected: None,
@@ -558,6 +562,46 @@ impl Tty {
         self.scroll_target = None;
     }
 
+    /// Open/close the **Env view** for the active pane. Opening flips the shell's capture
+    /// flag on (`<env_file>.on`, so it re-dumps each prompt) and reads the current
+    /// baseline; closing flips it off. See [`crate::env`].
+    pub fn toggle_env_view(&mut self) {
+        if self.show_env {
+            self.show_env = false;
+            self.env_vars.clear();
+            if let Some(flag) = self.active_env_flag() {
+                let _ = std::fs::remove_file(flag);
+            }
+            return;
+        }
+        self.show_env = true;
+        self.env_filter.clear();
+        if let Some(flag) = self.active_env_flag() {
+            let _ = std::fs::write(flag, b"");
+        }
+        self.refresh_env();
+    }
+
+    /// Re-read the active pane's captured env (no-op when the view is closed) — called
+    /// each redraw while open so it tracks the shell across commands.
+    pub fn refresh_env(&mut self) {
+        if !self.show_env {
+            return;
+        }
+        self.env_vars = self
+            .active_term()
+            .and_then(|t| t.env_file.as_deref())
+            .map(crate::env::read)
+            .unwrap_or_default();
+    }
+
+    /// The `<env_file>.on` capture-enable flag path for the active pane's shell.
+    fn active_env_flag(&self) -> Option<std::path::PathBuf> {
+        self.active_term()
+            .and_then(|t| t.env_file.as_ref())
+            .map(|p| p.with_extension("on"))
+    }
+
     /// The captured output of the most recent OSC 133 command in `window`'s focused
     /// pane, as text, or `None` when there's no finished command with output (no shell
     /// integration, or nothing has run). The `C`→`D` line span is recorded per region;
@@ -726,11 +770,23 @@ fn spawn_term(
 ) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
-    let env = if integration.autoinstall {
+    let mut env = if integration.autoinstall {
         crate::shell_integration::autoinstall_env(&shell)
     } else {
         Vec::new()
     };
+    // With integration on, hand the shell a per-session file to capture its env into
+    // for the Env view (the hook only writes while the view flips the `.on` flag).
+    let env_file = integration
+        .enabled
+        .then(crate::shell_integration::env_channel_path)
+        .flatten();
+    if let Some(path) = &env_file {
+        env.push((
+            "TTY_ENV_FILE".to_string(),
+            path.to_string_lossy().into_owned(),
+        ));
+    }
     let (session, mut rx) = match PtySession::spawn_in_env(&shell, cols, rows, dir, &env) {
         Ok(v) => v,
         Err(e) => {
@@ -771,6 +827,7 @@ fn spawn_term(
         alive,
         dirty,
         activity: false,
+        env_file,
     })
 }
 

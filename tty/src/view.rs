@@ -10,6 +10,7 @@ use rime::widgets::{
 use crate::message::Message;
 use crate::state::{Term, Tty};
 
+mod env;
 mod metrics;
 mod popover;
 mod procs;
@@ -397,6 +398,9 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     if state.show_scrollback {
         base = scrollback_panel_view(state, base);
     }
+    if state.show_env {
+        base = env::env_panel_view(state, base);
+    }
 
     // The right-click context menu floats above everything, anchored at the click. A
     // tab's menu adds tab actions (new / close tab); a pane's adds "close pane"; a
@@ -454,6 +458,11 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                     "Copy Last Command Output",
                     "⌘⇧O",
                     Message::CopyLastCommandOutput,
+                ));
+                items.push(MenuItem::shortcut(
+                    "Environment…",
+                    "⌘⇧E",
+                    Message::ToggleEnvView,
                 ));
                 items.push(MenuItem::separator());
                 items.push(MenuItem::shortcut("Close pane", "⌘W", Message::ClosePane));

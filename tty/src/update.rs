@@ -95,6 +95,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 }
             }
         }
+        Message::ToggleEnvView => {
+            state.close_menu();
+            state.toggle_env_view();
+        }
+        Message::EnvFilterChanged(q) => state.env_filter = q,
+        Message::ToggleEnvReveal => state.env_reveal = !state.env_reveal,
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {
@@ -280,6 +286,9 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::Tick => {
             // Surface any OSC 52 clipboard request and light background-activity dots.
             let clip = state.drain_effects();
+            // While the Env view is open, re-read the active pane's capture so it tracks
+            // the shell across commands (a no-op, and a cheap file read otherwise).
+            state.refresh_env();
             // Reap tabs whose shell exited across all windows; close any detached window
             // whose tab fully died, and quit when nothing remains anywhere.
             let (any, closed) = state.reap_dead();
@@ -642,6 +651,10 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
             state.search = None;
             return iced::Task::none();
         }
+        if state.show_env {
+            state.toggle_env_view();
+            return iced::Task::none();
+        }
     }
     // Chords and typing act on the focused window's tab (the main strip, or a detached
     // window). `keyboard_window` falls back to the main window.
@@ -766,6 +779,11 @@ fn handle_key(state: &mut Tty, key: Key, mods: Modifiers) -> iced::Task<Message>
                 // ⌘⇧O copies the most recent command's output (OSC 133) to the clipboard.
                 s if mods.shift() && s.eq_ignore_ascii_case("o") => {
                     return update(state, Message::CopyLastCommandOutput);
+                }
+                // ⌘⇧E opens/closes the Env view for the active pane.
+                s if is_main && mods.shift() && s.eq_ignore_ascii_case("e") => {
+                    state.toggle_env_view();
+                    return iced::Task::none();
                 }
                 d if is_main && d.len() == 1 && d.starts_with(|c: char| c.is_ascii_digit()) => {
                     let n = d.parse::<usize>().unwrap_or(0);

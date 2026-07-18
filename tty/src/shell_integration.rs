@@ -4,20 +4,32 @@
 //! pointing it at a generated `ZDOTDIR`.
 //!
 //! The hooks emit the semantic-prompt marks cathode parses (`OSC 133;C` before a
-//! command runs, `OSC 133;D;<exit>` after) — see `cathode::screen`'s OSC handling.
+//! command runs, `OSC 133;D;<exit>` after) — see `cathode::screen`'s OSC handling — and
+//! also capture the shell's environment each prompt for the **Env view**: `_tty_capture_env`
+//! writes `env` to `$TTY_ENV_FILE` (set per session by [`env_channel_path`]), but only
+//! while the `<file>.on` flag exists, so it costs one `stat` per command when the view
+//! is closed and a small write only while it's open.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// The zsh hooks, ready to paste into `~/.zshrc`. Kept in sync with what
 /// [`autoinstall_env`] installs.
 pub const ZSH_SNIPPET: &str = "\
-# tty shell integration — notify when a command finishes\n\
+# tty shell integration — command marks (OSC 133) + env capture for the Env view\n\
 autoload -Uz add-zsh-hook\n\
 _tty_preexec() { printf '\\e]133;C\\a' }\n\
-_tty_precmd()  { printf '\\e]133;D;%s\\a' \"$?\" }\n\
+_tty_precmd()  { printf '\\e]133;D;%s\\a' \"$?\"; _tty_capture_env }\n\
+_tty_capture_env() {\n\
+  [[ -n \"$TTY_ENV_FILE\" ]] || return\n\
+  # One baseline dump at startup, then per-prompt only while the view is open (.on).\n\
+  [[ -e \"${TTY_ENV_FILE}.on\" || ! -e \"$TTY_ENV_FILE\" ]] || return\n\
+  env > \"${TTY_ENV_FILE}.tmp\" 2>/dev/null && mv -f \"${TTY_ENV_FILE}.tmp\" \"$TTY_ENV_FILE\"\n\
+}\n\
 add-zsh-hook preexec _tty_preexec\n\
-add-zsh-hook precmd  _tty_precmd\n";
+add-zsh-hook precmd  _tty_precmd\n\
+_tty_capture_env\n";
 
 /// The env vars to set on a freshly spawned shell so tty's OSC 133 hooks load
 /// automatically, or an empty vec when auto-install can't apply.
@@ -38,6 +50,24 @@ pub fn autoinstall_env(shell: &str) -> Vec<(String, String)> {
         ("ZDOTDIR".to_string(), dir.to_string_lossy().into_owned()),
         ("TTY_PREV_ZDOTDIR".to_string(), prev),
     ]
+}
+
+/// Create a fresh per-session file path for the shell's env capture (the **Env view**),
+/// in a user-only temp dir. `None` if the dir can't be created. tty exports this as
+/// `TTY_ENV_FILE`; the hook writes the shell's `env` here each prompt while the
+/// companion `<path>.on` flag exists (tty creates that flag only when the view is open).
+pub fn env_channel_path() -> Option<PathBuf> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("tty-env-{}-{seq}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    // env holds secrets — keep the dir to the current user.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Some(dir.join("env"))
 }
 
 fn shell_is_zsh(shell: &str) -> bool {

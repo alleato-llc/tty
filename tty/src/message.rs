@@ -119,6 +119,12 @@ pub enum Message {
     /// Copy the most recent command's captured output to the clipboard (⌘⇧O / pane
     /// menu). Needs OSC 133 shell integration; a no-op without a recorded command.
     CopyLastCommandOutput,
+    /// Open/close the Env view (⌘⇧E / pane menu) for the active pane.
+    ToggleEnvView,
+    /// The Env view's filter query changed.
+    EnvFilterChanged(String),
+    /// Toggle revealing env values (masked by default — they hold secrets).
+    ToggleEnvReveal,
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.

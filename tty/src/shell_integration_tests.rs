@@ -10,6 +10,35 @@ fn snippet_emits_both_osc133_marks() {
 }
 
 #[test]
+fn snippet_captures_env_gated_on_the_flag() {
+    // The precmd also dumps env for the Env view — but only while the `.on` flag is
+    // present, so it's a no-op stat when the view is closed.
+    assert!(ZSH_SNIPPET.contains("_tty_capture_env"));
+    assert!(ZSH_SNIPPET.contains("$TTY_ENV_FILE"));
+    assert!(ZSH_SNIPPET.contains("${TTY_ENV_FILE}.on"));
+    assert!(ZSH_SNIPPET.contains("env >"));
+}
+
+#[test]
+fn env_channel_path_is_a_fresh_user_only_dir() {
+    let a = env_channel_path();
+    let b = env_channel_path();
+    if let (Some(a), Some(b)) = (&a, &b) {
+        assert_ne!(a, b, "each session gets its own file");
+        assert!(a.parent().unwrap().is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(a.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700, "user-only (env holds secrets)");
+        }
+    }
+}
+
+#[test]
 fn autoinstall_is_zsh_only() {
     assert!(autoinstall_env("/bin/bash").is_empty());
     assert!(autoinstall_env("/usr/bin/fish").is_empty());
