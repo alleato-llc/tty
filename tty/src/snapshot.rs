@@ -2371,6 +2371,23 @@ fn generate_landing_shots() {
     ));
     save(&tty, "ligatures", TW, TH);
 
+    // widgets — the optional, configurable status bar (pick the cells you want) with a
+    // drill-in chart popover open over the terminal.
+    {
+        let mut tty = populated();
+        tty.settings.status_bar_metrics = vec![
+            metric("cpu", "sparkline"),
+            metric("mem", "sparkline"),
+            metric("net_io", "sparkline"),
+            metric("disk_io", "sparkline"),
+        ];
+        seed_metric_sample(&mut tty);
+        tty.metric_details = vec![crate::state::MetricPopover::new(
+            crate::settings::MetricKind::Cpu,
+        )];
+        save(&tty, "widgets", TW, 460.0);
+    }
+
     // themes — the whole app re-skinned; same content, different palettes
     for (name, theme) in [
         ("theme-phosphor", "Phosphor"),
