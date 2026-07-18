@@ -469,6 +469,24 @@ kbd {
   margin: 30px auto 8px;
 }
 
+/* Theme-swap: show the dark capture by default, the light one under data-theme=light. */
+.shot-light {
+  display: none;
+}
+
+:root[data-theme="light"] .shot-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .shot-light {
+  display: block;
+}
+
+/* keep the .big centering when it's the light variant */
+:root[data-theme="light"] .shot-light.big {
+  margin: 30px auto 8px;
+}
+
 /* the make-it-yours theme grid */
 .shots-grid {
   display: grid;

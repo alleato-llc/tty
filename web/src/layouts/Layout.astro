@@ -26,10 +26,13 @@ const { title, description } = Astro.props;
       // follow the system and keep following it until the user picks. Dark is
       // tty's Dracula; light is GitHub Light.
       (() => {
+        // A `?theme=dark|light` query wins (a shareable themed link); then a stored choice.
+        const q = new URLSearchParams(location.search).get("theme");
         const saved = localStorage.getItem("tty-theme");
         const media = matchMedia("(prefers-color-scheme: dark)");
         const apply = (mode) => (document.documentElement.dataset.theme = mode);
-        apply(saved ?? (media.matches ? "dark" : "light"));
+        const forced = q === "dark" || q === "light" ? q : null;
+        apply(forced ?? saved ?? (media.matches ? "dark" : "light"));
         media.addEventListener("change", (e) => {
           if (!localStorage.getItem("tty-theme")) {
             apply(e.matches ? "dark" : "light");

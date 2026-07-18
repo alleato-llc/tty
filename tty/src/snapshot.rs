@@ -2228,9 +2228,9 @@ fn generate_landing_shots() {
     std::fs::create_dir_all("snapshots").ok();
     std::fs::create_dir_all("../web/public/shots").ok();
 
-    // Render each shot at a window size proportioned to its content, so the terminal
-    // fills the frame (a small window is genuinely how the app renders small — no cropping).
-    let save = |tty: &Tty, name: &str, w: f32, h: f32| {
+    // Render one shot at a window size proportioned to its content, so the terminal fills
+    // the frame (a small window is genuinely how the app renders small — no cropping).
+    let save1 = |tty: &Tty, name: &str, w: f32, h: f32| {
         let mut sim = iced_test::Simulator::with_size(
             Default::default(),
             iced::Size::new(w, h),
@@ -2245,11 +2245,20 @@ fn generate_landing_shots() {
         )
         .expect("copy shot to web");
     };
+    // A feature shot, rendered in both the page's dark (Dracula) and light (GitHub Light)
+    // themes as `<name>.png` / `<name>-light.png`, so the landing page swaps them with its
+    // theme toggle. (The theme-showcase grid below stays single-theme via `save1`.)
+    let save = |mut tty: Tty, name: &str, w: f32, h: f32| {
+        tty.theme = Theme::named("Dracula");
+        save1(&tty, name, w, h);
+        tty.theme = Theme::named("GitHub Light");
+        save1(&tty, &format!("{name}-light"), w, h);
+    };
     const TW: f32 = 820.0; // a compact terminal window
     const TH: f32 = 340.0;
 
     // hero — the signature look
-    save(&populated(), "hero", TW, TH);
+    save(populated(), "hero", TW, TH);
 
     // build — output-driven repaint / speed
     let mut tty = populated();
@@ -2262,7 +2271,7 @@ fn generate_landing_shots() {
           \x1b[1;32m   Compiling\x1b[0m phosphor v0.1.0\r\n\
           \x1b[1;32m    Finished\x1b[0m `release` in 9.4s\r\n$ ",
     ));
-    save(&tty, "build", TW, TH);
+    save(tty, "build", TW, TH);
 
     // splits — a tab split into two panes
     let mut tty = populated();
@@ -2278,7 +2287,7 @@ fn generate_landing_shots() {
               \x1b[32mtest result: ok\x1b[0m\r\n$ ",
         )),
     );
-    save(&tty, "splits", 1040.0, 400.0);
+    save(tty, "splits", 1040.0, 400.0);
 
     // shell — OSC 133 prompt gutter with a failed command (red dot)
     let mut tty = populated();
@@ -2291,7 +2300,7 @@ fn generate_landing_shots() {
           \x1b]133;A\x07$ cargo test\r\n\x1b]133;C\x07\x1b[31merror: test failed\x1b[0m\r\n\x1b]133;D;1\x07\
           \x1b]133;A\x07$ ",
     ));
-    save(&tty, "shell", TW, TH);
+    save(tty, "shell", TW, TH);
 
     // scrollback — a longer colored transcript (scrollback feel)
     let mut tty = populated();
@@ -2304,7 +2313,7 @@ fn generate_landing_shots() {
           \x1b[34m~/dev/tty\x1b[0m$ ls --color\r\n\
           \x1b[1;34msrc\x1b[0m  \x1b[32mREADME.md\x1b[0m  \x1b[1;31mtarget\x1b[0m  Cargo.toml\r\n$ ",
     ));
-    save(&tty, "scrollback", TW, 400.0);
+    save(tty, "scrollback", TW, 400.0);
 
     // history — the ⌘⇧H searchable command log (the encrypted-history feature)
     {
@@ -2341,7 +2350,7 @@ fn generate_landing_shots() {
             ..populated()
         };
         tty.show_scrollback = true;
-        save(&tty, "history", TW, 480.0);
+        save(tty, "history", TW, 480.0);
     }
 
     // embed — the phosphor widget usage, in a terminal
@@ -2355,7 +2364,7 @@ fn generate_landing_shots() {
           \x1b[90m 2\x1b[0m\r\n\
           \x1b[90m 3\x1b[0m \x1b[35mlet\x1b[0m term = terminal(screen, style, font, size, ..);\r\n$ ",
     ));
-    save(&tty, "embed", TW, TH);
+    save(tty, "embed", TW, TH);
 
     // ligatures — JetBrains Mono, ligatures on
     let mut tty = populated();
@@ -2369,7 +2378,7 @@ fn generate_landing_shots() {
           fn check(x: i32) -> bool { x != 0 && x >= 1 }\r\n\
           let ok = a >= b && c <= d;  // => -> != == |>\r\n$ ",
     ));
-    save(&tty, "ligatures", TW, TH);
+    save(tty, "ligatures", TW, TH);
 
     // widgets — the optional, configurable status bar (pick the cells you want) with a
     // drill-in chart popover open over the terminal.
@@ -2385,7 +2394,7 @@ fn generate_landing_shots() {
         tty.metric_details = vec![crate::state::MetricPopover::new(
             crate::settings::MetricKind::Cpu,
         )];
-        save(&tty, "widgets", TW, 460.0);
+        save(tty, "widgets", TW, 460.0);
     }
 
     // themes — the whole app re-skinned; same content, different palettes
@@ -2397,6 +2406,6 @@ fn generate_landing_shots() {
     ] {
         let mut tty = populated();
         tty.theme = Theme::named(theme);
-        save(&tty, name, TW, TH);
+        save1(&tty, name, TW, TH);
     }
 }

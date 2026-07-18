@@ -8,6 +8,13 @@ const REPO = "https://github.com/alleato-llc/tty";
 const LATEST = `${REPO}/releases/latest`;
 const COFFEE = "https://buymeacoffee.com/alleato";
 
+// A theme-swapping screenshot: dark (Dracula) + light (GitHub Light) variants, shown/hidden
+// by the page's theme via CSS (.shot-dark / .shot-light), so the captures re-skin with the
+// ◐ toggle the same way the app does.
+const shot = (name: string, alt: string, extra = "") =>
+  `<img class="shot shot-dark ${extra}" src="/shots/${name}.png" alt="${alt}" />` +
+  `<img class="shot shot-light ${extra}" src="/shots/${name}-light.png" alt="${alt}" />`;
+
 // The whole slide deck is one raw-HTML string injected with `set:html`. Every
 // terminal shown is a real screenshot of the app (web/public/shots/*, rendered by
 // the actual wgpu path — see snapshot.rs `generate_landing_shots`), never a mockup.
@@ -22,7 +29,7 @@ const deck = `
         that repaints the instant output lands and sleeps when it doesn't.
         <b>No browser, no bloat.</b>
       </p>
-      <img class="shot big" src="/shots/hero.png" alt="tty terminal showing colored ls output" />
+      ${shot("hero", "tty terminal showing colored ls output", "big")}
       <div class="cta">
         <a class="btn primary" href="${LATEST}">Download tty <span class="sub">for macOS</span></a>
         <a class="btn ghost" href="${REPO}">View on GitHub</a>
@@ -42,7 +49,7 @@ const deck = `
           <li>One process, <b>instant startup</b>, a memory footprint you'd have to go looking for.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/build.png" alt="tty running a cargo build" />
+      ${shot("build", "tty running a cargo build")}
     </div>
   </section>
 
@@ -58,7 +65,7 @@ const deck = `
           <li><b>Tear a tab off</b> into its own window — and drop it back when you're done.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/splits.png" alt="tty split into two side-by-side panes" />
+      ${shot("splits", "tty split into two side-by-side panes")}
     </div>
   </section>
 
@@ -75,7 +82,7 @@ const deck = `
           <li>Built on OSC 133 shell integration — opt in, and it stays out of the way.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/shell.png" alt="tty prompt gutter with a red dot on a failed command" />
+      ${shot("shell", "tty prompt gutter with a red dot on a failed command")}
     </div>
   </section>
 
@@ -91,7 +98,7 @@ const deck = `
           <li>Full ANSI — 16-color, 256-color, truecolor, plus bold, dim, italic, underline and inverse.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/scrollback.png" alt="tty scrollback with colored git and ls output" />
+      ${shot("scrollback", "tty scrollback with colored git and ls output")}
     </div>
   </section>
 
@@ -108,7 +115,7 @@ const deck = `
           <li>Off by default — nothing is stored unless you say so.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/history.png" alt="tty's searchable ⌘⇧H command history panel" />
+      ${shot("history", "tty's searchable ⌘⇧H command history panel")}
     </div>
   </section>
 
@@ -143,7 +150,7 @@ const deck = `
           <li><b>Click to drill in</b> — any cell opens a full chart, and a chart can <b>graduate into its own pane</b> beside the terminal.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/widgets.png" alt="tty's configurable status-bar metrics with a CPU chart drilled in" />
+      ${shot("widgets", "tty's configurable status-bar metrics with a CPU chart drilled in")}
     </div>
   </section>
 
@@ -159,7 +166,7 @@ const deck = `
           <li>tty is thin glue over the two — and the <i>same</i> crates drop straight into <b><a href="https://github.com/nycjv321/fed">fed</a></b>'s integrated terminal panel.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/embed.png" alt="the phosphor terminal widget shown in source" />
+      ${shot("embed", "the phosphor terminal widget shown in source")}
     </div>
   </section>
 
