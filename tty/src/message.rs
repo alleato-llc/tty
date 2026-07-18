@@ -254,6 +254,8 @@ pub enum Message {
     SetWindowAlwaysOnTop(bool),
     /// Toggle inking the active tab with the accent color.
     SetTabHighlight(bool),
+    /// Toggle programming-ligature rendering in the terminal.
+    SetTerminalLigatures(bool),
     /// Toggle whether a metric drill-in can graduate into a split pane.
     SetGraduateMetrics(bool),
     /// Toggle the accent border on the focused pane (multi-pane tabs).

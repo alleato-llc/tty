@@ -154,6 +154,9 @@ pub struct Terminal<Message> {
     /// Reserve a one-cell left gutter and mark every OSC 133 command prompt in it (a
     /// dot, red for a failed command). Off by default — see [`Terminal::prompt_gutter`].
     show_gutter: bool,
+    /// Render programming ligatures in fonts that ship them. Off by default — see
+    /// [`Terminal::ligatures`].
+    ligatures: bool,
 }
 
 impl<Message> Terminal<Message> {
@@ -168,6 +171,16 @@ impl<Message> Terminal<Message> {
     /// sees one fewer column. Off by default.
     pub fn prompt_gutter(mut self, on: bool) -> Self {
         self.show_gutter = on;
+        self
+    }
+
+    /// Render programming ligatures (`=>`, `!=`, `->`, …) in fonts that ship them, by
+    /// shaping each same-style run of ASCII cells together so the font's `calt`/`liga`
+    /// substitutions fire. Off by default (each cell shaped alone, so no ligatures form).
+    /// The grid stays aligned via a calibrated cell width; the run breaks at the cursor
+    /// cell and at wide/non-ASCII glyphs so those keep per-cell placement.
+    pub fn ligatures(mut self, on: bool) -> Self {
+        self.ligatures = on;
         self
     }
 
@@ -239,6 +252,7 @@ pub fn terminal<Message>(
         find: None,
         scroll_to: None,
         show_gutter: false,
+        ligatures: false,
     }
 }
 
@@ -573,7 +587,7 @@ where
             let state = tree.state.downcast_mut::<State>();
             if state.last_scroll_to != Some(target) {
                 let bounds = node.bounds();
-                let cell_w = cell_width(renderer, self.font, self.font_size);
+                let cell_w = cell_width(renderer, self.font, self.font_size, self.ligatures);
                 let line_h = self.line_height();
                 let (total, rows, _cols) = self.dims(cell_w, line_h, bounds);
                 // Center the target line in the viewport when there's room to.
@@ -598,7 +612,7 @@ where
         _viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        let cell_w = cell_width(renderer, self.font, self.font_size);
+        let cell_w = cell_width(renderer, self.font, self.font_size, self.ligatures);
         let line_h = self.line_height();
         // The text grid occupies `content` (bounds minus the gutter); every pixel↔cell
         // mapping below works in that frame, and the shell is sized to its columns.
@@ -864,7 +878,7 @@ where
         _viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        let cell_w = cell_width(renderer, self.font, self.font_size);
+        let cell_w = cell_width(renderer, self.font, self.font_size, self.ligatures);
         let line_h = self.line_height();
         // The grid draws in `content` (bounds minus the gutter); prompt markers, when
         // the gutter is on, go in the reserved strip to its left.
@@ -1043,14 +1057,13 @@ where
                     }
                     let (fg, _) = self.cell_colors(&cell);
                     let key = (fg, cell.bold, cell.italic, cell.underline);
-                    // (column, char) pairs sharing this style run — rendered one glyph
-                    // per `fill_text` call, each explicitly anchored to its own cell
-                    // (`content.x + col * cell_w`), rather than shaping the whole run as
-                    // one string and letting the text shaper's own per-glyph advance
-                    // (even under Shaping::Basic) drift from the monospace grid over a
-                    // long run — the drift is invisible for a couple of characters but
-                    // grows to several cells' worth by column 20+.
-                    let mut run: Vec<(usize, char)> = vec![(c, cell.ch)];
+                    // `(col, char, width)` for the cells sharing this style run. Without
+                    // ligatures each is rendered one glyph per `fill_text`, anchored to its
+                    // own cell (`content.x + col * cell_w`); with ligatures, `segment_run`
+                    // coalesces ASCII stretches into one shaped `fill_text` so the shaper
+                    // can form ligatures. Either way glyphs are anchored by cell (not shaper
+                    // advance), and the calibrated `cell_w` keeps a shaped run on the grid.
+                    let mut run: Vec<(usize, char, u8)> = vec![(c, cell.ch, cell.width)];
                     let mut end = c + 1;
                     while end < cols {
                         let nc = cell_at(&screen, history, line, end);
@@ -1062,25 +1075,52 @@ where
                         }
                         let (nfg, _) = self.cell_colors(&nc);
                         if (nfg, nc.bold, nc.italic, nc.underline) == key {
-                            run.push((end, nc.ch));
+                            run.push((end, nc.ch, nc.width));
                             end += 1;
                         } else {
                             break;
                         }
                     }
                     let x = content.x + c as f32 * cell_w;
-                    for &(col, ch) in &run {
-                        if ch == ' ' {
-                            continue;
-                        }
-                        let gx = content.x + col as f32 * cell_w;
+                    // Break a shaped run at the cursor cell so it de-ligatures there and the
+                    // block cursor's inverse redraw stays a single glyph.
+                    let cursor_col = (self.focused
+                        && state.scroll == 0
+                        && screen.cursor_visible
+                        && line == history + screen.cursor_row
+                        && screen.cursor_col < cols)
+                        .then_some(screen.cursor_col);
+                    let font = self.variant(key.1, key.2);
+                    for span in segment_run(&run, self.ligatures, cursor_col) {
+                        let (gx, glyphs, bwidth) = match &span {
+                            Span::Shaped { start_col, text } => {
+                                if text.trim().is_empty() {
+                                    continue;
+                                }
+                                (
+                                    content.x + *start_col as f32 * cell_w,
+                                    text.clone(),
+                                    text.chars().count() as f32 * cell_w + cell_w,
+                                )
+                            }
+                            Span::Single { col, ch } => {
+                                if *ch == ' ' {
+                                    continue;
+                                }
+                                (
+                                    content.x + *col as f32 * cell_w,
+                                    ch.to_string(),
+                                    cell_w * 2.0,
+                                )
+                            }
+                        };
                         renderer.fill_text(
                             text::Text {
-                                content: ch.to_string(),
-                                bounds: Size::new(cell_w * 2.0, line_h),
+                                content: glyphs,
+                                bounds: Size::new(bwidth, line_h),
                                 size: self.font_size.into(),
                                 line_height: text::LineHeight::Absolute(line_h.into()),
-                                font: self.variant(key.1, key.2),
+                                font,
                                 align_x: text::Alignment::Left,
                                 align_y: alignment::Vertical::Top,
                                 shaping: text::Shaping::Advanced,
@@ -1180,14 +1220,64 @@ where
     }
 }
 
-/// Measure the monospace cell width by shaping one glyph.
+/// A drawable piece of a same-style run: a shaped multi-cell string (ligatures may form)
+/// anchored at `start_col`, or a single cell drawn on its own.
+#[derive(Debug, PartialEq, Eq)]
+enum Span {
+    Shaped { start_col: usize, text: String },
+    Single { col: usize, ch: char },
+}
+
+/// Split a same-style run of `(col, char, width)` cells into drawable spans. With
+/// `ligatures`, maximal stretches of width-1 ASCII cells that don't include `cursor_col`
+/// are coalesced into one `Shaped` span, so the shaper can form ligatures across them;
+/// every other cell — a wide glyph, a non-ASCII glyph, the cursor cell, or *anything* when
+/// `ligatures` is off — stays a `Single`. Programming ligatures are ASCII, so restricting
+/// shaping to ASCII loses none of them while sidestepping RTL, combining marks, and CJK.
+fn segment_run(run: &[(usize, char, u8)], ligatures: bool, cursor_col: Option<usize>) -> Vec<Span> {
+    let mut spans = Vec::new();
+    let mut buf = String::new();
+    let mut buf_start = 0usize;
+    for &(col, ch, width) in run {
+        let shapeable = ligatures && width == 1 && ch.is_ascii() && cursor_col != Some(col);
+        if shapeable {
+            if buf.is_empty() {
+                buf_start = col;
+            }
+            buf.push(ch);
+        } else {
+            if !buf.is_empty() {
+                spans.push(Span::Shaped {
+                    start_col: buf_start,
+                    text: std::mem::take(&mut buf),
+                });
+            }
+            spans.push(Span::Single { col, ch });
+        }
+    }
+    if !buf.is_empty() {
+        spans.push(Span::Shaped {
+            start_col: buf_start,
+            text: buf,
+        });
+    }
+    spans
+}
+
+/// Measure the monospace cell width. With `ligatures`, measure a *run* of glyphs and divide
+/// to get the font's true per-glyph advance — so a shaped run's cumulative advance lands on
+/// `col * cell_w` with no drift. Without it (the default), one glyph's `min_bounds`, keeping
+/// the per-cell path byte-identical to before the feature.
 fn cell_width<Renderer: text::Renderer<Font = Font>>(
     _renderer: &Renderer,
     font: Font,
     size: f32,
+    ligatures: bool,
 ) -> f32 {
+    let n = if ligatures { 64 } else { 1 };
+    let sample = "M".repeat(n);
     let para = <Renderer::Paragraph as Paragraph>::with_text(Text {
-        content: "M",
+        content: &sample,
         bounds: Size::new(f32::INFINITY, f32::INFINITY),
         size: size.into(),
         line_height: text::LineHeight::Absolute((size * LINE_HEIGHT_RATIO).into()),
@@ -1197,7 +1287,7 @@ fn cell_width<Renderer: text::Renderer<Font = Font>>(
         shaping: text::Shaping::Advanced,
         wrapping: text::Wrapping::None,
     });
-    para.min_bounds().width.max(1.0)
+    (para.min_bounds().width / n as f32).max(1.0)
 }
 
 fn fill_rect<Renderer: renderer::Renderer>(

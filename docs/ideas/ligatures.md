@@ -1,8 +1,9 @@
 # Programming ligatures (phosphor)
 
-Status: **proposed; approach (Option A) validated by spike.** A plan for optional cross-cell
-ligature rendering (`!=` → `≠`, `=>` → `⇒`, `->`, `===`) in fonts that ship them (JetBrains
-Mono, Fira Code, Cascadia Code). Opt-in via a setting.
+Status: **implemented (opt-in).** Optional cross-cell ligature rendering (`!=` → `≠`,
+`=>` → `⇒`, `->`, `===`) in fonts that ship them (JetBrains Mono, Fira Code, Cascadia Code),
+via Option A below. Off by default; toggle in **Appearance → Theme** ("Programming ligatures",
+beside the font picker). `Settings.terminal_ligatures` → `phosphor::Terminal::ligatures`.
 
 ## Why it doesn't work today
 
@@ -145,11 +146,16 @@ users dislike them. Off by default, matching tty's opt-in ethos (history, env, n
 
 ## Phased plan
 
-1. ~~**Spike:** calibrate `cell_w`; render a shaped run; check alignment at col 0/40/80. Decide A vs B.~~
-   **DONE — Option A validated** (ligatures form, grid holds at col 78; see "Spike result").
-2. **Segmentation + render (A):** the pure line-segmentation fn + its unit tests; route shaped
-   spans through one `fill_text`, per-cell spans unchanged; break at cursor/wide/RTL.
-3. **Setting:** the phosphor `ligatures` flag + tty `Settings` field + the Appearance→Terminal
-   toggle (`ui-settings`); fed-ide wiring optional.
-4. **Tests + docs:** segmentation unit tests, the alignment-regression snapshot, an embedded-font
-   ligature snapshot if feasible; note the feature in README + this file's status.
+1. ~~**Spike:** calibrate `cell_w`; render a shaped run; check alignment.~~ **DONE — Option A validated.**
+2. ~~**Segmentation + render (A):** pure `segment_run` (break at cursor / wide / non-ASCII — ASCII
+   captures every programming ligature while sidestepping RTL/CJK/combining), one `fill_text` per
+   shaped span, per-cell otherwise; `cell_w` calibration gated on the flag.~~ **DONE** (`terminal.rs`).
+3. ~~**Setting:** phosphor `Terminal::ligatures` + `Settings.terminal_ligatures` + resolver + the
+   Appearance→Theme toggle (beside the font picker) + both `view.rs` widget call sites.~~ **DONE.**
+4. **Tests + docs:** ~~`segment_run` unit tests~~ (done, `terminal_tests.rs`); the alignment
+   regression is covered — with the flag off, every existing terminal snapshot stayed byte-identical
+   (calibration is flag-gated). ~~README + this file.~~ (done). **Remaining (optional):** an
+   embedded-font ligature *pixel* snapshot for a committed ON-path guard — deferred because a
+   system-font (JetBrains Mono) snapshot would be non-deterministic on machines without it; the ON
+   path is currently covered by the `segment_run` unit tests + the spike screenshots. fed-ide can opt
+   in by wiring `.ligatures(...)` from its own settings.

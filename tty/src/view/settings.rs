@@ -194,6 +194,17 @@ fn appearance_theme_pane(state: &Tty) -> Element<'_, Message> {
             Message::FontSizeStep(-1.0),
             Message::FontSizeStep(1.0),
         ),
+        toggle(
+            "Programming ligatures",
+            state.settings.terminal_ligatures(),
+            Message::SetTerminalLigatures(!state.settings.terminal_ligatures()),
+        ),
+        text(
+            "Render =>, !=, -> and friends as single glyphs, when the font ships them \
+             (JetBrains Mono, Fira Code, …). Off by default."
+        )
+        .size(12)
+        .color(theme::tokens().muted),
     ]
     .spacing(14)
     .into()

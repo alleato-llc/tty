@@ -316,3 +316,74 @@ fn prompt_gutter_insets_the_content_frame() {
     assert_eq!(c.x, 10.0, "shifted right one cell");
     assert_eq!(c.width, 790.0, "one cell narrower");
 }
+
+#[test]
+fn segment_run_off_renders_every_cell_single() {
+    let run = [(0, '-', 1u8), (1, '>', 1), (2, '=', 1)];
+    assert_eq!(
+        segment_run(&run, false, None),
+        vec![
+            Span::Single { col: 0, ch: '-' },
+            Span::Single { col: 1, ch: '>' },
+            Span::Single { col: 2, ch: '=' },
+        ]
+    );
+}
+
+#[test]
+fn segment_run_on_coalesces_an_ascii_stretch() {
+    let run = [
+        (0, '-', 1u8),
+        (1, '>', 1),
+        (2, ' ', 1),
+        (3, '=', 1),
+        (4, '>', 1),
+    ];
+    assert_eq!(
+        segment_run(&run, true, None),
+        vec![Span::Shaped {
+            start_col: 0,
+            text: "-> =>".into()
+        }]
+    );
+}
+
+#[test]
+fn segment_run_breaks_at_the_cursor_cell() {
+    let run = [(0, 'a', 1u8), (1, 'b', 1), (2, 'c', 1)];
+    assert_eq!(
+        segment_run(&run, true, Some(1)),
+        vec![
+            Span::Shaped {
+                start_col: 0,
+                text: "a".into()
+            },
+            Span::Single { col: 1, ch: 'b' },
+            Span::Shaped {
+                start_col: 2,
+                text: "c".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn segment_run_breaks_at_wide_and_non_ascii_glyphs() {
+    // '世' is a wide (width-2), non-ASCII glyph; its width-0 spacer was already dropped
+    // when the run was built, so the next ASCII cell is at col 3.
+    let run = [(0, 'x', 1u8), (1, '世', 2), (3, 'y', 1)];
+    assert_eq!(
+        segment_run(&run, true, None),
+        vec![
+            Span::Shaped {
+                start_col: 0,
+                text: "x".into()
+            },
+            Span::Single { col: 1, ch: '世' },
+            Span::Shaped {
+                start_col: 3,
+                text: "y".into()
+            },
+        ]
+    );
+}

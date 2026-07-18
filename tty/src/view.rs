@@ -210,7 +210,8 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 )
                 .find(search.clone())
                 .scroll_to(scroll_to)
-                .prompt_gutter(prompt_gutter);
+                .prompt_gutter(prompt_gutter)
+                .ligatures(state.settings.terminal_ligatures());
                 // When split, an accent border marks the focused pane so it's clear where
                 // typing goes (unless the highlight is off); the others get a hairline.
                 let border_color = if is_focused && highlight {
@@ -705,7 +706,8 @@ fn detached_view<'a>(
             Message::OpenFile,
         )
         .find(None)
-        .prompt_gutter(state.settings.shell_integration().gutter);
+        .prompt_gutter(state.settings.shell_integration().gutter)
+        .ligatures(state.settings.terminal_ligatures());
         let border_color = if is_focused && highlight {
             accent
         } else {

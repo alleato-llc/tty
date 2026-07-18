@@ -374,6 +374,10 @@ pub struct Settings {
     pub font_family: Option<String>,
     #[serde(default)]
     pub font_size: Option<f32>,
+    /// Render programming ligatures (`=>`, `!=`, …) when the font ships them. Off by
+    /// default — see [`Settings::terminal_ligatures`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_ligatures: Option<bool>,
     /// A custom palette overriding the built-in dark/light terminal colors.
     #[serde(default)]
     pub palette: Option<Palette>,
@@ -948,6 +952,11 @@ impl Settings {
             seconds: self.clock_seconds.unwrap_or(false),
             date: self.clock_date.unwrap_or(false),
         }
+    }
+
+    /// Whether the terminal renders programming ligatures (default `false`).
+    pub fn terminal_ligatures(&self) -> bool {
+        self.terminal_ligatures.unwrap_or(false)
     }
 
     /// Whether to ink the active tab with the accent (default `true`).

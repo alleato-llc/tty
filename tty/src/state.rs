@@ -310,6 +310,13 @@ impl Tty {
         self.settings.save();
     }
 
+    /// Toggle programming-ligature rendering in the terminal (persisted). Read at view
+    /// time by the `phosphor::terminal` widget, so it applies on the next redraw.
+    pub fn set_terminal_ligatures(&mut self, on: bool) {
+        self.settings.terminal_ligatures = Some(on);
+        self.settings.save();
+    }
+
     /// Toggle whether a drill-in can graduate into a split pane (the ⊞ control).
     pub fn set_graduate_metrics(&mut self, on: bool) {
         self.settings.graduate_metrics = Some(on);
