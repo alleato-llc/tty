@@ -1835,6 +1835,58 @@ fn reattach_window_docks_the_tab_back_at_its_origin() {
 }
 
 #[test]
+fn detaching_a_pane_tab_moves_it_into_its_own_window_and_reattaches() {
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    let pane = tty.tabs[0].focus;
+    grow_pane_group(&mut tty, pane, &["b"]); // group is [sh0, b]
+
+    let _task = tty.detach_pane_tab(win, pane, 1); // detach "b"
+    assert_eq!(
+        pane_tab_labels(&tty, pane),
+        ["sh0"],
+        "the source group keeps its other tab"
+    );
+    assert_eq!(
+        tty.detached.len(),
+        1,
+        "the pane-tab lives in its own window"
+    );
+
+    // Reattach docks it onto the main strip as a top-level tab.
+    let dwin = *tty.detached.keys().next().unwrap();
+    tty.reattach_window(dwin);
+    assert_eq!(
+        tty.tabs.len(),
+        2,
+        "the detached pane-tab is now a top-level tab"
+    );
+    assert!(tty.detached.is_empty());
+}
+
+#[test]
+fn detaching_the_only_tab_of_a_pane_closes_that_pane() {
+    use iced::widget::pane_grid::Direction;
+    let mut tty = headless(1);
+    let win = main_win(&tty);
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::single(screen_term("r")),
+    );
+    let right = tty.tabs[0].focus;
+    assert_eq!(tty.tabs[0].panes.len(), 2);
+    // Detaching the right pane's only terminal empties its group, closing the pane.
+    tty.detach_pane_tab(win, right, 0);
+    assert_eq!(tty.tabs[0].panes.len(), 1, "the emptied source pane closed");
+    assert_eq!(
+        tty.detached.len(),
+        1,
+        "the terminal moved to its own window"
+    );
+}
+
+#[test]
 fn os_close_of_a_detached_window_reattaches_but_cmd_w_last_pane_does_not() {
     use iced::widget::pane_grid::Direction;
     let mut tty = headless(2);

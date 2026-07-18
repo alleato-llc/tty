@@ -98,6 +98,8 @@ pub enum Message {
     PaneTabRightClick(iced::window::Id, pane_grid::Pane, usize),
     /// Begin renaming a pane-tab (its "Rename tab…" menu item).
     StartRenamePaneTab(iced::window::Id, pane_grid::Pane, usize),
+    /// Detach a pane-tab into its own window (its "Detach tab" menu item).
+    DetachPaneTab(iced::window::Id, pane_grid::Pane, usize),
     /// Drag-resize a split divider.
     ResizeSplit(iced::window::Id, pane_grid::ResizeEvent),
     /// The cursor moved (window-relative) — tracked so a right-click can anchor a menu.

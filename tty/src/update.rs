@@ -35,6 +35,11 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::HoverPaneTab(win, pane, idx) => state.hover_pane_tab(win, pane, idx),
         Message::PaneTabRightClick(win, pane, idx) => state.open_pane_tab_menu(win, pane, idx),
         Message::StartRenamePaneTab(win, pane, idx) => state.start_rename_pane_tab(win, pane, idx),
+        Message::DetachPaneTab(win, pane, idx) => {
+            if let Some(task) = state.detach_pane_tab(win, pane, idx) {
+                return task;
+            }
+        }
         Message::ResizeSplit(win, e) => state.resize_split(win, e.split, e.ratio),
         Message::PointerMoved(p) => {
             state.pointer = p;
@@ -636,9 +641,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                     }
                 }
             }
-            // A pane-tab drag has already reordered/moved live on hover; release just
-            // disarms it.
-            state.pane_tab_drag = None;
+            // A pane-tab drag has already reordered/moved live on hover; release either
+            // tears it off into its own window (dragged down off the strips) or just
+            // disarms.
+            if let Some(task) = state.finish_pane_tab_drag() {
+                return task;
+            }
             if let Some(task) = state.finish_tab_drag() {
                 return task;
             }

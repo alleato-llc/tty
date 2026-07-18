@@ -182,6 +182,7 @@ impl Tty {
             window,
             pane,
             reorder,
+            start: self.pointer,
         });
     }
 
@@ -673,6 +674,14 @@ impl Tty {
         } else {
             self.active = self.active.min(self.tabs.len() - 1);
         }
+        Some(self.open_detached_window(tab, idx))
+    }
+
+    /// Open a new OS window hosting `tab`, recording `origin` as the main-strip index it
+    /// docks back to on reattach. Returns the window-open + position-sync task (both
+    /// windows' positions feed the drag-dock band). The single detach primitive behind
+    /// both the top-level [`detach_tab`](Self::detach_tab) and a pane-tab tear-off.
+    fn open_detached_window(&mut self, tab: Tab, origin: usize) -> iced::Task<Message> {
         let size = iced::Size::new(720.0, 600.0);
         let (id, open) = iced::window::open(iced::window::Settings {
             size,
@@ -681,18 +690,58 @@ impl Tty {
             ..Default::default()
         });
         self.detached.insert(id, tab);
-        self.detach_origin.insert(id, idx);
+        self.detach_origin.insert(id, origin);
         crate::detach_drag::on_opened(self, id, size);
         let open = open.then(move |id| {
             iced::window::position(id).map(move |p| Message::WindowPosition(id, p))
         });
         match self.main_window {
-            Some(main) => Some(iced::Task::batch([
+            Some(main) => iced::Task::batch([
                 open,
                 iced::window::position(main).map(move |p| Message::WindowPosition(main, p)),
-            ])),
-            None => Some(open),
+            ]),
+            None => open,
         }
+    }
+
+    /// Detach terminal tab `idx` out of `pane`'s group into its own OS window (as a
+    /// one-pane tab). An emptied source pane closes; the untracked promise follows the
+    /// terminal. Docks onto the end of the main strip on reattach.
+    pub fn detach_pane_tab(
+        &mut self,
+        window: iced::window::Id,
+        pane: pane_grid::Pane,
+        idx: usize,
+    ) -> Option<iced::Task<Message>> {
+        self.menu = None;
+        self.pane_tab_drag = None;
+        let untracked = self.tab_for(window).is_some_and(|t| t.untracked);
+        let t = self.tab_for_mut(window)?;
+        let term = t
+            .panes
+            .get_mut(pane)
+            .and_then(Pane::group_mut)
+            .and_then(|g| {
+                (idx < g.tabs.len()).then(|| {
+                    let term = g.tabs.remove(idx);
+                    g.active = g.active.min(g.tabs.len().saturating_sub(1));
+                    term
+                })
+            })?;
+        // Close the source pane if its group emptied.
+        if t.panes
+            .get(pane)
+            .and_then(Pane::group)
+            .is_some_and(|g| g.tabs.is_empty())
+        {
+            if let Some((_removed, sibling)) = t.panes.close(pane) {
+                t.focus = sibling;
+            }
+        }
+        let mut tab = Tab::new(term);
+        tab.untracked = untracked;
+        let origin = self.tabs.len();
+        Some(self.open_detached_window(tab, origin))
     }
 
     /// Dock a detached window's tab back into the main strip at its origin index.
@@ -733,6 +782,20 @@ impl Tty {
         } else {
             None
         }
+    }
+
+    /// Complete a pane-tab drag on release. If the pointer was pulled down past
+    /// [`TAB_TEAR_THRESHOLD`] and released *off* every strip (`pane_tab_hover` is `None`,
+    /// so it didn't land as a reorder/move), the tab tears off into its own window;
+    /// otherwise the live reorder/move already did the work and this just disarms.
+    pub fn finish_pane_tab_drag(&mut self) -> Option<iced::Task<Message>> {
+        let drag = self.pane_tab_drag.take()?;
+        let idx = drag.reorder.anchor()?;
+        let torn_off =
+            self.pane_tab_hover.is_none() && self.pointer.y - drag.start.y > TAB_TEAR_THRESHOLD;
+        torn_off
+            .then(|| self.detach_pane_tab(drag.window, drag.pane, idx))
+            .flatten()
     }
 
     /// Record which window has the keyboard (chords/typing route to its tab).

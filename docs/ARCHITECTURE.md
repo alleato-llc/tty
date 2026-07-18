@@ -162,7 +162,10 @@ Thin glue, mirroring `fed`'s module shape:
   to another group in the same window (`reorder_or_move_pane_tab`/`move_pane_tab_across`,
   closing a source group that empties). The horizontal-move bookkeeping is the shared
   `rime::widgets::Reorder` tracker + `reorder_slice` (the window-level strip uses the same
-  `reorder_slice`). `reap_dead` drops dead tabs from each group, closes a group that
+  `reorder_slice`). A pane-tab also **detaches** into its own window — via its menu or by
+  dragging it down off the strips (`finish_pane_tab_drag` → `detach_pane_tab`) — reusing
+  the top-level `open_detached_window`/`reattach_window` machinery, so it docks back onto
+  the main strip as a top-level tab. `reap_dead` drops dead tabs from each group, closes a group that
   empties, then any tab with no live pane, then exits when none remain.
 - **`update`** — app **chords use ⌘** (`Modifiers::command()`) so `Ctrl` stays a real
   terminal control code: `⌘T`/`⌘N`/`⌘W`, `⌘1`–`⌘9`, `⌘±`/`⌘0`, `⌘C` copy, `⌥⌘`+arrows

@@ -515,6 +515,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                         "Rename tab…",
                         Message::StartRenamePaneTab(window, pane, idx),
                     ),
+                    MenuItem::action("Detach tab", Message::DetachPaneTab(window, pane, idx)),
                     MenuItem::separator(),
                     MenuItem::shortcut(
                         "Close tab",
