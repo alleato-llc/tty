@@ -2293,7 +2293,7 @@ fn generate_landing_shots() {
     ));
     save(&tty, "shell", TW, TH);
 
-    // history — a longer colored transcript (scrollback feel)
+    // scrollback — a longer colored transcript (scrollback feel)
     let mut tty = populated();
     tty.tabs[0] = Tab::new(painted_term(
         "zsh",
@@ -2304,7 +2304,45 @@ fn generate_landing_shots() {
           \x1b[34m~/dev/tty\x1b[0m$ ls --color\r\n\
           \x1b[1;34msrc\x1b[0m  \x1b[32mREADME.md\x1b[0m  \x1b[1;31mtarget\x1b[0m  Cargo.toml\r\n$ ",
     ));
-    save(&tty, "history", TW, 400.0);
+    save(&tty, "scrollback", TW, 400.0);
+
+    // history — the ⌘⇧H searchable command log (the encrypted-history feature)
+    {
+        let mut screen = TerminalScreen::new(56, 12);
+        let mut parser = TermParser::new();
+        for (cmd, out) in [
+            (
+                b"$ git status".as_slice(),
+                b"\r\nOn branch main - clean\r\n".as_slice(),
+            ),
+            (b"$ cargo test", b"\r\ntest result: ok. 312 passed\r\n"),
+            (b"$ ls --color", b"\r\nsrc  README.md  target\r\n"),
+            (
+                b"$ grep -rn TODO src",
+                b"\r\nsrc/view.rs:88: TODO polish\r\n",
+            ),
+        ] {
+            parser.process(cmd, &mut screen);
+            screen.mark_command_boundary(50);
+            parser.process(out, &mut screen);
+        }
+        parser.process(b"$ ", &mut screen);
+        let tab = Term {
+            screen: Arc::new(Mutex::new(screen)),
+            pty: None,
+            title: "zsh".into(),
+            alive: Arc::new(AtomicBool::new(true)),
+            dirty: Arc::new(AtomicBool::new(false)),
+            activity: false,
+            env_file: None,
+        };
+        let mut tty = Tty {
+            tabs: vec![Tab::new(tab)],
+            ..populated()
+        };
+        tty.show_scrollback = true;
+        save(&tty, "history", TW, 480.0);
+    }
 
     // embed — the phosphor widget usage, in a terminal
     let mut tty = populated();

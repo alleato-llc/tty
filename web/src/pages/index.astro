@@ -79,24 +79,40 @@ const deck = `
     </div>
   </section>
 
-  <!-- 5 — scrollback + copy + history -->
+  <!-- 5 — scrollback + copy -->
   <section class="slide">
     <div class="inner cols">
       <div>
-        <div class="kicker">Scrollback, copy &amp; history</div>
-        <h2>Scroll back. Drag. Copy. Recall.</h2>
+        <div class="kicker">Scrollback &amp; copy</div>
+        <h2>Scroll back. Drag. Copy.</h2>
         <ul class="feat">
           <li><b>Real scrollback</b> with <kbd>⌘F</kbd> search; the live screen snaps back the moment you're at the bottom.</li>
           <li><b>Click-drag to select</b>, <kbd>⌘C</kbd> to copy. <kbd>Ctrl+C</kbd> stays a real <span class="pill" style="margin:0">SIGINT</span> to the shell.</li>
           <li>Full ANSI — 16-color, 256-color, truecolor, plus bold, dim, italic, underline and inverse.</li>
-          <li><b>Command history, your call</b> — <kbd>⌘⇧H</kbd> opens a searchable log. Opt in to persist it (encrypted at rest, command text only — never output), or go incognito with <kbd>⌘⇧T</kbd> and <code>--untracked</code>.</li>
         </ul>
       </div>
-      <img class="shot" src="/shots/history.png" alt="tty scrollback with colored git and ls output" />
+      <img class="shot" src="/shots/scrollback.png" alt="tty scrollback with colored git and ls output" />
     </div>
   </section>
 
-  <!-- 6 — make it yours (themes + ligatures) -->
+  <!-- 6 — command history (encrypted, opt-in) -->
+  <section class="slide">
+    <div class="inner cols">
+      <div>
+        <div class="kicker">Command history, your call</div>
+        <h2>Recall every command — or none.</h2>
+        <ul class="feat">
+          <li><kbd>⌘⇧H</kbd> opens a <b>searchable log</b> of what you've run — each command's output a click away.</li>
+          <li><b>Opt in to persist it</b> across launches, <b>encrypted at rest</b> — command text only, never output.</li>
+          <li>Or the other way: <kbd>⌘⇧T</kbd> opens an <b>untracked</b> tab, and <code>--untracked</code> a whole session that records nothing.</li>
+          <li>Off by default — nothing is stored unless you say so.</li>
+        </ul>
+      </div>
+      <img class="shot" src="/shots/history.png" alt="tty's searchable ⌘⇧H command history panel" />
+    </div>
+  </section>
+
+  <!-- 7 — make it yours (themes + ligatures) -->
   <section class="slide">
     <div class="inner">
       <div class="kicker" style="text-align:center">Make it yours</div>
@@ -115,7 +131,7 @@ const deck = `
     </div>
   </section>
 
-  <!-- 7 — embeddable -->
+  <!-- 8 — embeddable -->
   <section class="slide">
     <div class="inner cols">
       <div>
@@ -131,7 +147,7 @@ const deck = `
     </div>
   </section>
 
-  <!-- 8 — closer / download -->
+  <!-- 9 — closer / download -->
   <section class="slide">
     <div class="inner" style="text-align:center">
       <div class="kicker">Native. Fast. Yours.</div>
