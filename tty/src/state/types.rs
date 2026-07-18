@@ -188,6 +188,16 @@ pub struct Tty {
     /// Whether the Env view reveals values (off by default — env holds secrets, so
     /// values are masked until asked for).
     pub env_reveal: bool,
+    /// The Env popover's top-left position in window pixels. `None` = not yet placed
+    /// (the view centers it); a drag sets it, so it's remembered across opens.
+    pub env_pos: Option<(f32, f32)>,
+    /// The Env popover's `(width, height)` in pixels (border-drag resizes it).
+    pub env_size: (f32, f32),
+    /// Active title-bar move drag: `(pointer at grab, position at grab)`. Ended by
+    /// `PointerReleased`. See the metric popovers' `metric_detail_move_drag`.
+    pub env_move_drag: Option<(iced::Point, (f32, f32))>,
+    /// Active border resize drag: `(pointer at grab, size at grab, edge)`.
+    pub env_resize: Option<(iced::Point, (f32, f32), ResizeEdge)>,
     /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
     pub show_scrollback: bool,
     /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).

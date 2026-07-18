@@ -112,6 +112,10 @@ impl Tty {
             env_vars: Vec::new(),
             env_filter: String::new(),
             env_reveal: false,
+            env_pos: None,
+            env_size: (620.0, 400.0),
+            env_move_drag: None,
+            env_resize: None,
             show_scrollback: false,
             scrollback_query: String::new(),
             scrollback_selected: None,
@@ -600,6 +604,17 @@ impl Tty {
         self.active_term()
             .and_then(|t| t.env_file.as_ref())
             .map(|p| p.with_extension("on"))
+    }
+
+    /// The Env popover's current top-left position, defaulting to centered until the
+    /// user drags it (then [`Self::env_pos`] remembers where they left it).
+    pub fn env_effective_pos(&self) -> (f32, f32) {
+        self.env_pos.unwrap_or_else(|| {
+            let (w, h) = self.env_size;
+            let x = ((self.window_width - w) / 2.0).max(0.0);
+            let y = ((self.window_height - h) / 2.0).max(20.0);
+            (x, y)
+        })
     }
 
     /// The captured output of the most recent OSC 133 command in `window`'s focused

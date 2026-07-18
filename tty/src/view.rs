@@ -399,7 +399,7 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
         base = scrollback_panel_view(state, base);
     }
     if state.show_env {
-        base = env::env_panel_view(state, base);
+        base = env::place_env_popover(state, base);
     }
 
     // The right-click context menu floats above everything, anchored at the click. A

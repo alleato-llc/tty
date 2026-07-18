@@ -272,7 +272,11 @@ Thin glue, mirroring `fed`'s module shape:
   `0700` temp dir): one baseline dump at startup, then re-dumped each prompt only while a
   `<file>.on` flag exists. `Tty::toggle_env_view` flips that flag on/off; `refresh_env`
   re-reads + `env::parse`s the file each redraw while open (so it tracks the shell without
-  polling — env only changes at command boundaries). The panel (`view::env`) is a masked,
+  polling — env only changes at command boundaries). `view::env` renders it as a **popover**
+  (like the metric charts, not a modal): non-modal so the terminal stays live behind it,
+  dragged by its title bar (`EnvMoveStart` → `env_move_drag`) and border-resized
+  (`EnvResizeStart` → `env_resize`), both tracked through `PointerMoved`/`PointerReleased`
+  exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
   filterable list; click a row to copy `NAME=value`. Read-only for now — no editing back
   into the shell. Needs shell integration; nothing without it.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the

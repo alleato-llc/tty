@@ -57,6 +57,25 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
                 if let Some(pop) = state.metric_details.get_mut(i) {
                     pop.move_offset = (bx + (p.x - start.x), by + (p.y - start.y));
                 }
+            } else if let Some((start, (bw, bh), edge)) = state.env_resize {
+                // Same drag mechanics for the Env popover (single, absolute-positioned).
+                let (h_ax, v_ax) = edge.axes();
+                let w = if h_ax {
+                    (bw + (p.x - start.x)).clamp(320.0, (ww - 40.0).max(320.0))
+                } else {
+                    bw
+                };
+                let h = if v_ax {
+                    (bh + (p.y - start.y)).clamp(160.0, (wh - 120.0).max(160.0))
+                } else {
+                    bh
+                };
+                state.env_size = (w, h);
+            } else if let Some((start, (bx, by))) = state.env_move_drag {
+                let (w, h) = state.env_size;
+                let x = (bx + (p.x - start.x)).clamp(0.0, (ww - w).max(0.0));
+                let y = (by + (p.y - start.y)).clamp(0.0, (wh - h).max(0.0));
+                state.env_pos = Some((x, y));
             }
         }
         Message::PaneRightClick(pane) => state.open_pane_menu(pane),
@@ -101,6 +120,12 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::EnvFilterChanged(q) => state.env_filter = q,
         Message::ToggleEnvReveal => state.env_reveal = !state.env_reveal,
+        Message::EnvMoveStart => {
+            state.env_move_drag = Some((state.pointer, state.env_effective_pos()));
+        }
+        Message::EnvResizeStart(edge) => {
+            state.env_resize = Some((state.pointer, state.env_size, edge));
+        }
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {
@@ -564,6 +589,8 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::PointerReleased => {
             state.metric_detail_resize = None;
             state.metric_detail_move_drag = None;
+            state.env_resize = None;
+            state.env_move_drag = None;
             // A metric drag commits its reorder; a quick tap opens the drill-in.
             if let Some(idx) = state.release_status_metric() {
                 if let Some(key) = state

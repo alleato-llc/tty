@@ -125,6 +125,11 @@ pub enum Message {
     EnvFilterChanged(String),
     /// Toggle revealing env values (masked by default — they hold secrets).
     ToggleEnvReveal,
+    /// Start dragging the Env popover by its title bar (tracked via `PointerMoved`,
+    /// ended by `PointerReleased`).
+    EnvMoveStart,
+    /// Start border-resizing the Env popover from an edge/corner.
+    EnvResizeStart(crate::state::ResizeEdge),
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.
