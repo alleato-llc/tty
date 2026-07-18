@@ -59,6 +59,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         env_os_cache: None,
         env_filter: String::new(),
         env_reveal: false,
+        env_expanded: false,
+        env_add_open: false,
         env_pos: None,
         env_size: (620.0, 400.0),
         env_move_drag: None,

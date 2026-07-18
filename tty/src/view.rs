@@ -400,6 +400,9 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
     }
     if state.show_env {
         base = env::place_env_popover(state, base);
+        if state.env_add_open {
+            base = env::place_env_add_modal(state, base);
+        }
     }
 
     // The right-click context menu floats above everything, anchored at the click. A

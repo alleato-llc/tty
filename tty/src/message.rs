@@ -129,6 +129,11 @@ pub enum Message {
     EnvFilterChanged(String),
     /// Toggle revealing env values (masked by default — they hold secrets).
     ToggleEnvReveal,
+    /// Expand the Env popover to its full experience / restore it to compact.
+    ToggleEnvExpanded,
+    /// Open / close the "Set a variable" modal (the Env popover's Add button).
+    OpenEnvAdd,
+    CloseEnvAdd,
     /// Start dragging the Env popover by its title bar (tracked via `PointerMoved`,
     /// ended by `PointerReleased`).
     EnvMoveStart,

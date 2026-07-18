@@ -192,8 +192,15 @@ pub struct Tty {
     /// The Env view's filter query.
     pub env_filter: String,
     /// Whether the Env view reveals values (off by default — env holds secrets, so
-    /// values are masked until asked for).
+    /// values are masked until asked for). Only takes effect when expanded; the compact
+    /// list is always masked.
     pub env_reveal: bool,
+    /// Whether the Env popover is expanded to its full experience (filter, reveal toggle,
+    /// source note, larger size) vs the compact default (a masked list + Add). Toggled by
+    /// the popover's expand/restore control, like the metric drill-ins.
+    pub env_expanded: bool,
+    /// Whether the "Set a variable" modal (opened by the Env popover's Add button) is up.
+    pub env_add_open: bool,
     /// The Env popover's top-left position in window pixels. `None` = not yet placed
     /// (the view centers it); a drag sets it, so it's remembered across opens.
     pub env_pos: Option<(f32, f32)>,

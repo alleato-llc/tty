@@ -289,18 +289,22 @@ Thin glue, mirroring `fed`'s module shape:
   terminal stays live behind it, dragged by **anywhere on the card** (`EnvMoveStart` →
   `env_move_drag`) and border-resized (`EnvResizeStart` → `env_resize`, via
   `rime::widgets::resize_edges`), both tracked through `PointerMoved`/`PointerReleased`
-  exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. A masked,
-  filterable list; click a row to copy `NAME=value`. Opened by `⌘⇧E`, the pane menu, or an
-  **Env** status-bar cell — a `MetricKind::Env` "launcher" cell that renders a static
-  label (short-circuiting the sampler like `Clock`) and, on click, opens the popover
-  instead of a drill-in (special-cased in the `PointerReleased` handler). **Editing** has
-  two scopes: the
-  popover's footer **sets/unsets in *this* pane** by injecting a visible `export`/`unset`
-  at the prompt — **opt-in** via `shell_integration.env_editing` (off by default, since it
-  types into your shell; the footer is hidden when off), `env::export_command`
-  single-quote-escapes the value, `is_valid_name` rejects a name that could smuggle shell
-  syntax, and it's gated on `screen.command_running()` so it never types into a foreground
-  program — while the **Shell** settings' "new shells" list
+  exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. Like the
+  metric drill-ins it has a **compact ↔ expanded** toggle (`env_expanded`,
+  `ToggleEnvExpanded`, snapping `env_size` between two defaults): it opens compact — a
+  masked list + Add — and `Expand` adds the filter, the Reveal-values toggle, and the source
+  note (values only unmask when expanded). Click a row to copy `NAME=value`. Opened by
+  `⌘⇧E`, the pane menu, or an **Env** status-bar cell — a `MetricKind::Env` "launcher" cell
+  that renders a static label (short-circuiting the sampler like `Clock`) and, on click,
+  opens the popover instead of a drill-in (special-cased in the `PointerReleased` handler).
+  **Editing** has two scopes: the popover's **Add variable** button opens a centered
+  `rime::widgets::modal_sized` dialog (`env_add_open`) that **sets/unsets in *this* pane** by
+  injecting a visible `export`/`unset` at the prompt — **opt-in** via
+  `shell_integration.env_editing` (off by default, since it types into your shell; the Add
+  button is hidden when off), `env::export_command` single-quote-escapes the value,
+  `is_valid_name` rejects a name that could smuggle shell syntax, and it's gated on
+  `screen.command_running()` so it never types into a foreground program — while the
+  **Shell** settings' "new shells" list
   (`settings.env`, applied at spawn) is a persistent overlay that touches no running shell.
   Reading needs shell integration; the overlay works without it.
 - **`history`** — the app half of **encrypted history** (ADRs 0006/0007/0008; the

@@ -69,6 +69,8 @@ fn populated() -> Tty {
         env_os_cache: None,
         env_filter: String::new(),
         env_reveal: false,
+        env_expanded: false,
+        env_add_open: false,
         env_pos: None,
         env_size: (620.0, 400.0),
         env_move_drag: None,
@@ -217,41 +219,59 @@ fn env_status_bar_cell_view() {
     );
 }
 
+/// A representative environment for the Env-view snapshots.
+fn sample_env_vars() -> Vec<crate::env::EnvVar> {
+    [
+        ("EDITOR", "nvim"),
+        ("HOME", "/Users/dev"),
+        ("LANG", "en_US.UTF-8"),
+        ("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"),
+        ("SHELL", "/bin/zsh"),
+        ("TERM", "xterm-256color"),
+    ]
+    .into_iter()
+    .map(|(name, value)| crate::env::EnvVar {
+        name: name.into(),
+        value: value.into(),
+    })
+    .collect()
+}
+
 #[test]
-fn env_view_view() {
-    // The Env view panel over the terminal: a filterable list with values revealed,
-    // showing the launch-time source note (the OS-read fallback).
+fn env_view_compact_view() {
+    // How the Env view opens by default: compact — a masked list plus the Add button,
+    // no filter / reveal / summary. Editing is on, so the Add button shows.
     let mut tty = populated();
     tty.show_env = true;
+    tty.env_size = (380.0, 340.0);
+    tty.env_source = crate::state::EnvSource::Process;
+    tty.settings.shell_integration.env_editing = Some(true);
+    tty.env_vars = sample_env_vars();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-env-compact.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-env-compact` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn env_view_view() {
+    // The expanded Env view: filter, revealed values, the launch-time source note, and
+    // the Add button.
+    let mut tty = populated();
+    tty.show_env = true;
+    tty.env_expanded = true;
     tty.env_reveal = true;
     tty.env_source = crate::state::EnvSource::Process;
-    tty.settings.shell_integration.env_editing = Some(true); // show the set/unset footer
-    tty.env_vars = vec![
-        crate::env::EnvVar {
-            name: "EDITOR".into(),
-            value: "nvim".into(),
-        },
-        crate::env::EnvVar {
-            name: "HOME".into(),
-            value: "/Users/dev".into(),
-        },
-        crate::env::EnvVar {
-            name: "LANG".into(),
-            value: "en_US.UTF-8".into(),
-        },
-        crate::env::EnvVar {
-            name: "PATH".into(),
-            value: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin".into(),
-        },
-        crate::env::EnvVar {
-            name: "SHELL".into(),
-            value: "/bin/zsh".into(),
-        },
-        crate::env::EnvVar {
-            name: "TERM".into(),
-            value: "xterm-256color".into(),
-        },
-    ];
+    tty.settings.shell_integration.env_editing = Some(true);
+    tty.env_vars = sample_env_vars();
     std::fs::create_dir_all("snapshots").expect("create snapshots dir");
     let mut sim = iced_test::Simulator::new(main_chrome(&tty));
     let snap = sim
@@ -263,6 +283,32 @@ fn env_view_view() {
     assert!(
         matches,
         "snapshot `tty-env-view` changed — delete its PNG to re-baseline"
+    );
+}
+
+#[test]
+fn env_add_modal_view() {
+    // The "Set a variable" modal, opened by the Add button, over the expanded view.
+    let mut tty = populated();
+    tty.show_env = true;
+    tty.env_expanded = true;
+    tty.env_source = crate::state::EnvSource::Process;
+    tty.settings.shell_integration.env_editing = Some(true);
+    tty.env_vars = sample_env_vars();
+    tty.env_add_open = true;
+    tty.env_set_name = "API_TOKEN".into();
+    tty.env_set_value = "s3cr3t".into();
+    std::fs::create_dir_all("snapshots").expect("create snapshots dir");
+    let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+    let snap = sim
+        .snapshot(&crate::state::theme(&tty))
+        .expect("render snapshot");
+    let matches = snap
+        .matches_image("snapshots/tty-env-add-modal.png")
+        .expect("write/compare snapshot");
+    assert!(
+        matches,
+        "snapshot `tty-env-add-modal` changed — delete its PNG to re-baseline"
     );
 }
 

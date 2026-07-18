@@ -1,13 +1,14 @@
 //! The **Env view** — a popover (like the metric charts): non-modal, drag it by
 //! anywhere on the card, border-resize it, and it stays open beside the terminal so
-//! it tracks the shell as commands run. A masked, filterable list of the active
-//! pane's environment; click a row to copy `NAME=value`. Data comes from
-//! [`crate::env`]; the draggable/resizable chrome is [`rime::widgets::popover`].
+//! it tracks the shell as commands run. It opens **compact** — a masked list of the
+//! active pane's environment plus an Add button — and expands to the full experience
+//! (filter, revealed values, the source note). Click a row to copy `NAME=value`. Data
+//! comes from [`crate::env`]; the draggable/resizable chrome is [`rime::widgets::popover`].
 
 use iced::widget::{column, container, mouse_area, row, scrollable, stack, text, Space};
 use iced::{Border, Element, Font, Length, Padding};
 use rime::theme;
-use rime::widgets::{button, popover, section, stat, text_field, toggle};
+use rime::widgets::{button, modal_sized, popover, section, text_field, toggle};
 
 use crate::message::Message;
 use crate::state::{EnvSource, Tty};
@@ -39,9 +40,46 @@ pub(super) fn place_env_popover<'a>(
     stack![base, placed].into()
 }
 
+/// The "Set a variable" modal (opened by the Add button) — a centered dialog over a
+/// dimmed terminal. Types an `export`/`unset` at the focused shell's prompt via the
+/// existing inject path; only reachable when env editing is enabled.
+pub(super) fn place_env_add_modal<'a>(
+    state: &'a Tty,
+    base: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let t = theme::tokens();
+    let content = column![
+        section("Set a variable"),
+        text("Types an export at the focused shell's prompt (only while it's idle).")
+            .size(11)
+            .color(t.muted),
+        text_field("NAME", &state.env_set_name, Message::EnvSetNameChanged).size(13),
+        text_field("value", &state.env_set_value, Message::EnvSetValueChanged).size(13),
+        row![
+            button::ghost("Unset", Message::EnvInjectUnset),
+            Space::new().width(Length::Fill),
+            button::ghost("Cancel", Message::CloseEnvAdd),
+            button::primary("Set", Message::EnvInjectSet),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(12);
+    modal_sized(base, content, Message::CloseEnvAdd, 380.0)
+}
+
 fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
     let t = theme::tokens();
-    let filter = state.env_filter.to_lowercase();
+    let expanded = state.env_expanded;
+    let editing = state.settings.shell_integration().env_editing;
+    // Values only unmask when expanded — the compact list stays masked.
+    let reveal = expanded && state.env_reveal;
+    // The filter only applies in the expanded view; compact shows the whole list.
+    let filter = if expanded {
+        state.env_filter.to_lowercase()
+    } else {
+        String::new()
+    };
     let matched: Vec<&crate::env::EnvVar> = state
         .env_vars
         .iter()
@@ -54,7 +92,7 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
 
     let mut list = column![].spacing(2);
     for v in &matched {
-        let shown = if state.env_reveal {
+        let shown = if reveal {
             elide(&v.value, MAX_VALUE_CHARS)
         } else {
             "••••••••".to_string()
@@ -92,80 +130,49 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
         scrollable(list).height(Length::Fill).into()
     };
 
-    // A one-line note on where the list came from: the live shell hook (updates each
-    // prompt) or a launch-time snapshot read from the OS (static until the hook is on).
-    // `None` (nothing to show) adds no line — the body message covers that case.
-    let source_note: Option<Element<'_, Message>> = match state.env_source {
-        EnvSource::Hook => Some(
-            text("Live — the shell reports its environment each prompt.")
-                .size(11)
-                .color(t.success)
-                .into(),
-        ),
-        EnvSource::Process => Some(
-            text(
-                "Launch-time snapshot from the OS. Turn on Environment view in Shell \
-                 settings for live updates as you export.",
-            )
-            .size(11)
-            .color(t.muted)
-            .into(),
-        ),
-        EnvSource::None => None,
-    };
-
-    // The whole card is the drag handle (see `place_env_popover`); the reveal toggle +
-    // close × keep their own hit areas.
-    let title_bar = row![
-        section("Environment"),
-        Space::new().width(Length::Fill),
-        toggle("Reveal values", state.env_reveal, Message::ToggleEnvReveal),
-        button::ghost("×", Message::ToggleEnvView),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center);
-
-    let mut content = column![
-        title_bar,
-        row![
-            stat("Variables", matched.len().to_string()),
-            Space::new().width(Length::Fill),
-            text("Click a row to copy NAME=value")
-                .size(11)
-                .color(t.muted),
-        ]
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(12);
-    if let Some(note) = source_note {
-        content = content.push(note);
+    // Title bar (also the drag handle, see `place_env_popover`): the name, then the
+    // Reveal toggle (expanded only), the expand/restore control, and close.
+    let mut title_bar = row![section("Environment"), Space::new().width(Length::Fill)]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+    if expanded {
+        title_bar = title_bar.push(toggle(
+            "Reveal values",
+            state.env_reveal,
+            Message::ToggleEnvReveal,
+        ));
     }
-    let content = content
-        .push(text_field("Filter…", &state.env_filter, Message::EnvFilterChanged).size(13))
-        .push(body);
+    title_bar = title_bar
+        .push(button::ghost_compact(
+            if expanded { "Collapse" } else { "Expand" },
+            Message::ToggleEnvExpanded,
+        ))
+        .push(button::ghost_compact("×", Message::ToggleEnvView));
 
-    // Editing types into the running shell, so it's opt-in (Shell settings). When off,
-    // the view stays read-only (see + copy) and no footer shows.
-    let content = if state.settings.shell_integration().env_editing {
-        content.push(
-            column![
-                text("Set in this pane — types at the shell's prompt:")
-                    .size(11)
-                    .color(t.muted),
-                row![
-                    text_field("NAME", &state.env_set_name, Message::EnvSetNameChanged).size(13),
-                    text_field("value", &state.env_set_value, Message::EnvSetValueChanged).size(13),
-                    button::secondary("Set", Message::EnvInjectSet),
-                    button::ghost("Unset", Message::EnvInjectUnset),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
+    let mut content = column![title_bar].spacing(12);
+    if expanded {
+        content = content
+            .push(text_field("Filter…", &state.env_filter, Message::EnvFilterChanged).size(13));
+    }
+    content = content.push(body);
+    // The source note (live hook vs launch-time OS read) is part of the full
+    // experience, so it only shows when expanded.
+    if expanded {
+        if let Some(note) = source_note(state.env_source, t.success, t.muted) {
+            content = content.push(note);
+        }
+    }
+    // Editing types into the running shell, so it's opt-in (Shell settings). When on,
+    // an Add button opens the "Set a variable" modal; when off, the view is read-only.
+    if editing {
+        content = content.push(
+            row![
+                Space::new().width(Length::Fill),
+                button::secondary("Add variable", Message::OpenEnvAdd),
             ]
-            .spacing(6),
-        )
-    } else {
-        content
-    };
+            .align_y(iced::Alignment::Center),
+        );
+    }
 
     container(content)
         .width(Length::Fixed(w))
@@ -180,6 +187,34 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
             ..container::background(t.surface)
         })
         .into()
+}
+
+/// A one-line note on where the list came from: the live shell hook (updates each
+/// prompt) or a launch-time snapshot read from the OS (static until the hook is on).
+/// `None` (nothing to show) renders no line — the body message covers that case.
+fn source_note<'a>(
+    src: EnvSource,
+    live: iced::Color,
+    muted: iced::Color,
+) -> Option<Element<'a, Message>> {
+    match src {
+        EnvSource::Hook => Some(
+            text("Live — the shell reports its environment each prompt.")
+                .size(11)
+                .color(live)
+                .into(),
+        ),
+        EnvSource::Process => Some(
+            text(
+                "Launch-time snapshot from the OS. Turn on Environment view in Shell \
+                 settings for live updates as you export.",
+            )
+            .size(11)
+            .color(muted)
+            .into(),
+        ),
+        EnvSource::None => None,
+    }
 }
 
 fn elide(s: &str, max: usize) -> String {

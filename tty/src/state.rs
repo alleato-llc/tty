@@ -19,6 +19,12 @@ use crate::theme::Theme;
 mod types;
 pub use types::*;
 
+/// The Env popover's default `(width, height)`: compact (a masked list + Add) vs the
+/// expanded full experience (filter, revealed values, source note). Drag-resize still
+/// overrides freely; expand/restore snaps back to these.
+const ENV_COMPACT_SIZE: (f32, f32) = (380.0, 340.0);
+const ENV_EXPANDED_SIZE: (f32, f32) = (640.0, 480.0);
+
 /// `impl Tty` methods for the opt-in encrypted command history.
 mod encrypted_history;
 /// `impl Tty` methods for the status-bar metrics / drill-ins / metric panes.
@@ -114,6 +120,8 @@ impl Tty {
             env_os_cache: None,
             env_filter: String::new(),
             env_reveal: false,
+            env_expanded: false,
+            env_add_open: false,
             env_pos: None,
             env_size: (620.0, 400.0),
             env_move_drag: None,
@@ -586,10 +594,12 @@ impl Tty {
 
     /// Open/close the **Env view** for the active pane. Opening flips the shell's capture
     /// flag on (`<env_file>.on`, so it re-dumps each prompt) and reads the current
-    /// baseline; closing flips it off. See [`crate::env`].
+    /// baseline; closing flips it off. It always opens **compact** (a masked list + Add) —
+    /// the full experience is one expand away. See [`crate::env`].
     pub fn toggle_env_view(&mut self) {
         if self.show_env {
             self.show_env = false;
+            self.env_add_open = false;
             self.env_vars.clear();
             self.env_source = EnvSource::None;
             self.env_os_cache = None;
@@ -599,11 +609,26 @@ impl Tty {
             return;
         }
         self.show_env = true;
+        self.env_expanded = false;
+        self.env_add_open = false;
+        self.env_size = ENV_COMPACT_SIZE;
         self.env_filter.clear();
         if let Some(flag) = self.active_env_flag() {
             let _ = std::fs::write(flag, b"");
         }
         self.refresh_env();
+    }
+
+    /// Toggle the Env popover between compact (a masked list + Add) and its full
+    /// experience (filter, revealed values, source note), snapping to the matching
+    /// default size — the same expand/restore gesture the metric drill-ins have.
+    pub fn toggle_env_expanded(&mut self) {
+        self.env_expanded = !self.env_expanded;
+        self.env_size = if self.env_expanded {
+            ENV_EXPANDED_SIZE
+        } else {
+            ENV_COMPACT_SIZE
+        };
     }
 
     /// Refresh the Env view (no-op when closed) — called each redraw while open so it
@@ -718,6 +743,7 @@ impl Tty {
             if self.inject_env(bytes) {
                 self.env_set_name.clear();
                 self.env_set_value.clear();
+                self.env_add_open = false;
             }
         }
     }
@@ -728,6 +754,7 @@ impl Tty {
             if self.inject_env(bytes) {
                 self.env_set_name.clear();
                 self.env_set_value.clear();
+                self.env_add_open = false;
             }
         }
     }

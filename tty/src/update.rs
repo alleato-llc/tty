@@ -120,6 +120,13 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         }
         Message::EnvFilterChanged(q) => state.env_filter = q,
         Message::ToggleEnvReveal => state.env_reveal = !state.env_reveal,
+        Message::ToggleEnvExpanded => state.toggle_env_expanded(),
+        Message::OpenEnvAdd => state.env_add_open = true,
+        Message::CloseEnvAdd => {
+            state.env_add_open = false;
+            state.env_set_name.clear();
+            state.env_set_value.clear();
+        }
         Message::EnvMoveStart => {
             state.env_move_drag = Some((state.pointer, state.env_effective_pos()));
         }
