@@ -198,6 +198,11 @@ pub struct Tty {
     pub env_move_drag: Option<(iced::Point, (f32, f32))>,
     /// Active border resize drag: `(pointer at grab, size at grab, edge)`.
     pub env_resize: Option<(iced::Point, (f32, f32), ResizeEdge)>,
+    /// The "add to new shells" draft in the Shell settings overlay editor: the name and
+    /// value being typed before [`Tty::add_env_overlay`] commits them to
+    /// [`crate::settings::Settings::env`].
+    pub env_overlay_name: String,
+    pub env_overlay_value: String,
     /// Whether the scrollback history panel (⌘⇧H) is open for the active pane.
     pub show_scrollback: bool,
     /// The scrollback panel's own filter query (independent of `⌘F`'s `search`).

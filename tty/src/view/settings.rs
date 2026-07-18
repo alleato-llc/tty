@@ -501,6 +501,49 @@ fn shell_section(state: &Tty) -> Element<'_, Message> {
             )
             .push(button::secondary("Copy snippet", Message::CopyShellSnippet));
     }
+
+    // The new-shells env overlay — independent of OSC 133 (it's just spawn env), so it
+    // shows whether or not integration is enabled.
+    col = col.push(caption("ENVIRONMENT FOR NEW SHELLS")).push(
+        text(
+            "Variables tty sets on every shell it starts (not ones already running). \
+                 Also editable under [env] in tty.toml.",
+        )
+        .size(12)
+        .color(t.muted),
+    );
+    for (name, value) in &state.settings.env {
+        col = col.push(
+            row![
+                text(format!("{name} = {value}"))
+                    .size(12)
+                    .font(iced::Font::MONOSPACE)
+                    .color(t.ink),
+                iced::widget::Space::new().width(Length::Fill),
+                button::ghost("Remove", Message::EnvOverlayRemove(name.clone())),
+            ]
+            .align_y(iced::Alignment::Center),
+        );
+    }
+    col = col.push(
+        row![
+            text_field(
+                "NAME",
+                &state.env_overlay_name,
+                Message::EnvOverlayNameChanged
+            )
+            .size(13),
+            text_field(
+                "value",
+                &state.env_overlay_value,
+                Message::EnvOverlayValueChanged
+            )
+            .size(13),
+            button::secondary("Add", Message::EnvOverlayAdd),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    );
     col.into()
 }
 

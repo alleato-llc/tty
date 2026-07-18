@@ -61,6 +61,8 @@ pub(crate) fn headless(n: usize) -> Tty {
         env_size: (620.0, 400.0),
         env_move_drag: None,
         env_resize: None,
+        env_overlay_name: String::new(),
+        env_overlay_value: String::new(),
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,
@@ -298,6 +300,28 @@ fn copy_last_command_output_returns_the_newest_commands_output() {
         tty.last_command_output(win).as_deref(),
         Some("a.txt\nb.txt")
     );
+}
+
+#[test]
+fn env_overlay_add_commits_the_draft_and_remove_deletes() {
+    let mut tty = headless(1);
+    // A leading/trailing-spaced name is trimmed; the draft clears on commit.
+    tty.env_overlay_name = "  FOO ".into();
+    tty.env_overlay_value = "bar baz".into();
+    tty.add_env_overlay();
+    assert_eq!(
+        tty.settings.env.get("FOO").map(String::as_str),
+        Some("bar baz")
+    );
+    assert!(tty.env_overlay_name.is_empty() && tty.env_overlay_value.is_empty());
+    // A blank name is ignored (no phantom entry).
+    tty.env_overlay_name = "   ".into();
+    tty.env_overlay_value = "x".into();
+    tty.add_env_overlay();
+    assert_eq!(tty.settings.env.len(), 1);
+    // Remove deletes it.
+    tty.remove_env_overlay("FOO");
+    assert!(tty.settings.env.is_empty());
 }
 
 #[test]

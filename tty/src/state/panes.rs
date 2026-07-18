@@ -84,6 +84,7 @@ impl Tty {
             self.history_id_floor,
             untracked,
             self.settings.shell_integration(),
+            &self.settings.env,
         ) {
             let mut tab = Tab::new(term);
             tab.untracked = untracked;
@@ -113,6 +114,7 @@ impl Tty {
             self.history_id_floor,
             untracked,
             self.settings.shell_integration(),
+            &self.settings.env,
         ) {
             self.split_with(window, dir, Pane::Term(term));
         }

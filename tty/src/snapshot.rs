@@ -71,6 +71,8 @@ fn populated() -> Tty {
         env_size: (620.0, 400.0),
         env_move_drag: None,
         env_resize: None,
+        env_overlay_name: String::new(),
+        env_overlay_value: String::new(),
         show_scrollback: false,
         scrollback_query: String::new(),
         scrollback_selected: None,

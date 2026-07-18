@@ -412,3 +412,28 @@ fn shell_integration_defaults_when_absent() {
         .to_string();
     assert!(!out.contains("shell_integration"), "no empty block:\n{out}");
 }
+
+#[test]
+fn env_overlay_round_trips_through_toml() {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("EDITOR".to_string(), "nvim".to_string());
+    env.insert("API_KEY".to_string(), "sk-with spaces".to_string());
+    let s = Settings {
+        env,
+        ..Default::default()
+    };
+    let out = toml_edit::ser::to_document(&s)
+        .expect("serialize")
+        .to_string();
+    let back = Settings::from_toml_str(&out).expect("parse");
+    assert_eq!(back.env.get("EDITOR").map(String::as_str), Some("nvim"));
+    assert_eq!(
+        back.env.get("API_KEY").map(String::as_str),
+        Some("sk-with spaces")
+    );
+    // Empty overlay writes no `env` key.
+    let empty = toml_edit::ser::to_document(&Settings::default())
+        .unwrap()
+        .to_string();
+    assert!(!empty.contains("env"), "no empty env block:\n{empty}");
+}

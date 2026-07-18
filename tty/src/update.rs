@@ -126,6 +126,10 @@ pub fn update(state: &mut Tty, message: Message) -> iced::Task<Message> {
         Message::EnvResizeStart(edge) => {
             state.env_resize = Some((state.pointer, state.env_size, edge));
         }
+        Message::EnvOverlayNameChanged(s) => state.env_overlay_name = s,
+        Message::EnvOverlayValueChanged(s) => state.env_overlay_value = s,
+        Message::EnvOverlayAdd => state.add_env_overlay(),
+        Message::EnvOverlayRemove(name) => state.remove_env_overlay(&name),
         Message::Split(dir) => {
             // The context menu is main-window only; split the main active tab.
             if let Some(main) = state.main_window {

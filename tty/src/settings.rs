@@ -507,6 +507,12 @@ pub struct Settings {
     pub prompt_gutter: Option<bool>,
     #[serde(default, skip_serializing)]
     pub shell_integration_autoinstall: Option<bool>,
+    /// Environment variables tty sets on **every shell it spawns** — the Env view's
+    /// "new sessions" overlay, serialized as an `[env]` block. Applied at spawn
+    /// (`CommandBuilder::env`), so it never touches a running shell; edited in the Env
+    /// popover or by hand. Empty by default.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
     /// Command template for ⌘-clicking a `path:line[:col]` reference in terminal
     /// output. `{file}`/`{line}`/`{col}` are substituted (line/col default to `1`
     /// when the reference omits them). Absent = the smart default: `$VISUAL` or

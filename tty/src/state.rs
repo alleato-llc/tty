@@ -116,6 +116,8 @@ impl Tty {
             env_size: (620.0, 400.0),
             env_move_drag: None,
             env_resize: None,
+            env_overlay_name: String::new(),
+            env_overlay_value: String::new(),
             show_scrollback: false,
             scrollback_query: String::new(),
             scrollback_selected: None,
@@ -606,6 +608,27 @@ impl Tty {
             .map(|p| p.with_extension("on"))
     }
 
+    /// Commit the "add to new shells" draft into the persisted env overlay
+    /// ([`crate::settings::Settings::env`], applied at spawn). A blank name is ignored;
+    /// on success the draft fields clear. Affects shells spawned *after* this, not open ones.
+    pub fn add_env_overlay(&mut self) {
+        let name = self.env_overlay_name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        self.settings
+            .env
+            .insert(name, std::mem::take(&mut self.env_overlay_value));
+        self.settings.save();
+        self.env_overlay_name.clear();
+    }
+
+    /// Remove a variable from the new-shells env overlay (persisted).
+    pub fn remove_env_overlay(&mut self, name: &str) {
+        self.settings.env.remove(name);
+        self.settings.save();
+    }
+
     /// The Env popover's current top-left position, defaulting to centered until the
     /// user drags it (then [`Self::env_pos`] remembers where they left it).
     pub fn env_effective_pos(&self) -> (f32, f32) {
@@ -782,6 +805,7 @@ fn spawn_term(
     id_floor: u32,
     untracked: bool,
     integration: crate::settings::ResolvedShellIntegration,
+    overlay: &std::collections::BTreeMap<String, String>,
 ) -> Option<Term> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let dir = cwd.map(std::path::Path::new);
@@ -790,6 +814,10 @@ fn spawn_term(
     } else {
         Vec::new()
     };
+    // The Env view's "new sessions" overlay — vars the user set to apply to every shell.
+    for (k, v) in overlay {
+        env.push((k.clone(), v.clone()));
+    }
     // With integration on, hand the shell a per-session file to capture its env into
     // for the Env view (the hook only writes while the view flips the `.on` flag).
     let env_file = integration

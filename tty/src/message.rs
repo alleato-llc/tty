@@ -130,6 +130,12 @@ pub enum Message {
     EnvMoveStart,
     /// Start border-resizing the Env popover from an edge/corner.
     EnvResizeStart(crate::state::ResizeEdge),
+    /// The new-shells env overlay editor (Shell settings): draft name / value changed,
+    /// commit the draft, or remove a variable.
+    EnvOverlayNameChanged(String),
+    EnvOverlayValueChanged(String),
+    EnvOverlayAdd,
+    EnvOverlayRemove(String),
     /// A "Split <dir>" context-menu item was chosen.
     Split(pane_grid::Direction),
     /// The "Close pane" context-menu item was chosen.
