@@ -23,7 +23,7 @@ Pages share one shell:
   script, the fixed chrome (wordmark + theme toggle), and a `<slot />`.
 - `src/components/ThemeToggle.tsx` — the one interactive island (Preact).
 - `src/styles/global.css` — the two-theme design system via the `data-theme`
-  attribute. **Dark is tty's Dracula; light is GitHub Light.** The page chrome
+  attribute. **Dark is tty's Dracula; light is Solarized Light.** The page chrome
   draws from these tokens, so the toggle re-skins it.
 - `public/shots/` — the terminal screenshots (see below).
 - `public/` — other static assets served as-is (favicon).

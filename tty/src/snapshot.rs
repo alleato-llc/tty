@@ -2245,13 +2245,14 @@ fn generate_landing_shots() {
         )
         .expect("copy shot to web");
     };
-    // A feature shot, rendered in both the page's dark (Dracula) and light (GitHub Light)
-    // themes as `<name>.png` / `<name>-light.png`, so the landing page swaps them with its
-    // theme toggle. (The theme-showcase grid below stays single-theme via `save1`.)
+    // A feature shot, rendered in both the page's dark (Dracula) and light (Solarized Light)
+    // themes as `<name>.png` / `<name>-light.png`, so the captures match the page chrome as
+    // its ◐ toggle flips. (The theme-showcase grid below stays single-theme via `save1`.)
+    // Keep these two in step with web/src/styles/global.css `:root[data-theme=…]`.
     let save = |mut tty: Tty, name: &str, w: f32, h: f32| {
         tty.theme = Theme::named("Dracula");
         save1(&tty, name, w, h);
-        tty.theme = Theme::named("GitHub Light");
+        tty.theme = Theme::named("Solarized Light");
         save1(&tty, &format!("{name}-light"), w, h);
     };
     const TW: f32 = 820.0; // a compact terminal window
@@ -2380,21 +2381,34 @@ fn generate_landing_shots() {
     ));
     save(tty, "ligatures", TW, TH);
 
-    // widgets — the optional, configurable status bar (pick the cells you want) with a
-    // drill-in chart popover open over the terminal.
+    // widgets — the optional, configurable status bar (pick the cells you want) with two
+    // drill-in panels floating over the terminal: the per-core CPU grid (upper-right) and
+    // the Processes table (lower-left), pinned so several stay open at once.
     {
         let mut tty = populated();
         tty.settings.status_bar_metrics = vec![
-            metric("cpu", "sparkline"),
-            metric("mem", "sparkline"),
-            metric("net_io", "sparkline"),
             metric("disk_io", "sparkline"),
+            metric("clock", "sparkline"),
+            metric("load", "sparkline"),
+            metric("cpu", "sparkline"),
+            metric("procs", "sparkline"),
+            metric("uptime", "sparkline"),
         ];
+        tty.settings.status_bar_metrics_pinned = Some(true);
+        tty.window_width = 1120.0;
+        tty.window_height = 640.0;
         seed_metric_sample(&mut tty);
-        tty.metric_details = vec![crate::state::MetricPopover::new(
-            crate::settings::MetricKind::Cpu,
-        )];
-        save(tty, "widgets", TW, 460.0);
+        seed_cpu_cores(&mut tty);
+        seed_processes(&mut tty);
+        tty.metrics.load_avg = Some([1.32, 1.10, 0.95]);
+        tty.metrics.load1_history = [0.8, 1.0, 1.2, 1.1, 1.3, 1.32].into_iter().collect();
+        tty.metrics.system_uptime_secs = Some(2 * 60);
+        let mut cores = crate::state::MetricPopover::new(crate::settings::MetricKind::CpuCores);
+        cores.move_offset = (250.0, -150.0); // right + up
+        let mut procs = crate::state::MetricPopover::new(crate::settings::MetricKind::Procs);
+        procs.move_offset = (-290.0, 40.0); // left + down
+        tty.metric_details = vec![cores, procs];
+        save(tty, "widgets", 1120.0, 640.0);
     }
 
     // themes — the whole app re-skinned; same content, different palettes

@@ -24,7 +24,7 @@ const { title, description } = Astro.props;
     <script is:inline>
       // Resolve the theme before first paint: a stored choice wins, otherwise
       // follow the system and keep following it until the user picks. Dark is
-      // tty's Dracula; light is GitHub Light.
+      // tty's Dracula; light is Solarized Light.
       (() => {
         // A `?theme=dark|light` query wins (a shareable themed link); then a stored choice.
         const q = new URLSearchParams(location.search).get("theme");
