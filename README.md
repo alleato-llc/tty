@@ -126,7 +126,9 @@ shows a focused pane instead of one long scroll. Pick one of 8 named
 themes (the same catalog fed-ide ships, shared via rime) or import any
 [base16](https://github.com/chriskempson/base16) scheme, choose a monospace font and
 size (with an opt-in **Programming ligatures** toggle beside it, for fonts that ship them
-like JetBrains Mono / Fira Code), toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and
+like JetBrains Mono / Fira Code). A live **preview** on the Theme tab renders a sample
+terminal in the chosen theme, font, size, and ligatures — updating as you change them.
+Elsewhere in Appearance, toggle **Highlight active tab** (accent ink vs. a subtler emphasis) and
 **Highlight the focused pane** (the accent border on the focused pane in a split
 tab — turn it off for a flat, borderless split), and the
 **auto-hiding status bar** (on by default — it floats back in when the pointer

@@ -374,7 +374,16 @@ detached window + shell). Detached terminals are **ephemeral** — no session is
   the terminal colors). The **Appearance** section is itself split into horizontal
   sub-tabs (`APPEARANCE_TABS`: Theme / Tabs / Status bar / Terminal / Window,
   tracked by `Tty::appearance_tab`) so it shows one pane at a time instead of one
-  long scroll; `settings_subtabs` renders the chip strip. Those panes carry the
+  long scroll; `settings_subtabs` renders the chip strip. The **Theme** pane carries the
+  theme picker, font family/size, an opt-in **Programming ligatures** toggle
+  (`Settings.terminal_ligatures` → `phosphor::Terminal::ligatures`, off by default; when on,
+  phosphor shapes each same-style ASCII run together so `=>`/`!=`/`->` ligate, with `cell_w`
+  calibrated to keep the grid aligned — see `docs/ideas/ligatures.md`), and a fully static
+  **terminal preview** (`terminal_preview`): the real `phosphor::terminal` over curated
+  content, rendered unfocused with every callback wired to `Message::Ignore`, reading the
+  live theme/font/size/ligatures so it updates as you change them. The preview mirrors
+  *appearance* only — it deliberately doesn't wire the OSC 133 prompt gutter (a Shell-section
+  setting). Other panes carry the
   **Highlight active tab** and **Highlight the focused pane** toggles (the latter
   gates the accent border in the pane-grid closures; the rime `tabs` strip takes a
   `TabBarStyle { highlight_active, text_size }`, so accent-ink vs. subtler emphasis
