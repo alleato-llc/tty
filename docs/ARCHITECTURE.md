@@ -267,10 +267,13 @@ Thin glue, mirroring `fed`'s module shape:
   cohesive unit gated by `shell_integration.enabled`: the resolver master-gates every
   sub-option, and `set_shell_integration_enabled` pushes the flag to every open pane's
   `set_honor_osc133` (like the scrollback cap), so flipping it clears the marks live.
-- **`env`** — the **Env view** (`⌘⇧E`). The shell-integration hook writes the shell's `env`
-  to a per-session file (`$TTY_ENV_FILE`, from `shell_integration::env_channel_path`, a
-  `0700` temp dir): one baseline dump at startup, then re-dumped each prompt only while a
-  `<file>.on` flag exists. `Tty::toggle_env_view` flips that flag on/off; `refresh_env`
+- **`env`** — the **Env view** (`⌘⇧E`), the whole feature gated by
+  `shell_integration.env_view` (**off by default** — opt-in). Only when it's on does
+  `spawn_term` hand the shell a `$TTY_ENV_FILE`; without that the hook's `_tty_capture_env`
+  is a single string-test no-op, so an install that doesn't use the view does *no* env
+  work. When on, the shell-integration hook writes the shell's `env` to that per-session
+  file (from `shell_integration::env_channel_path`, a `0700` temp dir): one baseline dump
+  at startup, then re-dumped each prompt only while a `<file>.on` flag exists. `Tty::toggle_env_view` flips that flag on/off; `refresh_env`
   re-reads + `env::parse`s the file each redraw while open (so it tracks the shell without
   polling — env only changes at command boundaries). `view::env` renders it as a **popover**
   (like the metric charts, not a modal): non-modal so the terminal stays live behind it,

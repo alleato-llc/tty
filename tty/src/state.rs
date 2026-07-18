@@ -570,6 +570,17 @@ impl Tty {
         self.scroll_target = None;
     }
 
+    /// Toggle the Env view feature (persisted). Turning it off closes the popover if
+    /// open. Takes effect on shells started after (existing ones weren't handed a
+    /// capture file) — the popover's empty state says so.
+    pub fn set_env_view(&mut self, on: bool) {
+        self.settings.shell_integration.env_view = Some(on);
+        self.settings.save();
+        if !on && self.show_env {
+            self.toggle_env_view();
+        }
+    }
+
     /// Open/close the **Env view** for the active pane. Opening flips the shell's capture
     /// flag on (`<env_file>.on`, so it re-dumps each prompt) and reads the current
     /// baseline; closing flips it off. See [`crate::env`].
@@ -864,10 +875,11 @@ fn spawn_term(
     for (k, v) in overlay {
         env.push((k.clone(), v.clone()));
     }
-    // With integration on, hand the shell a per-session file to capture its env into
-    // for the Env view (the hook only writes while the view flips the `.on` flag).
+    // Only when the Env view is enabled: hand the shell a per-session file to capture
+    // its env into. Without `TTY_ENV_FILE` the hook's `_tty_capture_env` is a no-op
+    // (one string test), so an install that doesn't use the view does no env work.
     let env_file = integration
-        .enabled
+        .env_view
         .then(crate::shell_integration::env_channel_path)
         .flatten();
     if let Some(path) = &env_file {

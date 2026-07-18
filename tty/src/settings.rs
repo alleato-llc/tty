@@ -73,10 +73,16 @@ pub struct ShellIntegration {
     /// by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gutter: Option<bool>,
+    /// Enable the **Env view** (`⌘⇧E`): the shell captures its env each prompt (via
+    /// `$TTY_ENV_FILE`) for tty to display. Off by default — opt-in, so a shell tty
+    /// starts does no env work at all unless you turn it on. Gates capture + view +
+    /// editing together. The new-shells overlay (`Settings::env`) is separate and always
+    /// works (it needs no capture).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_view: Option<bool>,
     /// Allow the Env view to **edit** a running shell's env by injecting `export`/`unset`
-    /// at its prompt. Off by default — opt-in, since it types into your shell. The Env
-    /// view stays read-only (see + copy) when off. The new-shells overlay is unaffected
-    /// (it needs no injection).
+    /// at its prompt. Off by default — opt-in, since it types into your shell; requires
+    /// `env_view`. The view stays read-only when off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_editing: Option<bool>,
 }
@@ -101,6 +107,8 @@ pub struct ResolvedShellIntegration {
     pub notify: bool,
     pub notify_min_seconds: u32,
     pub gutter: bool,
+    /// The Env view feature (capture + view). `env_editing` implies this.
+    pub env_view: bool,
     pub env_editing: bool,
 }
 
@@ -986,6 +994,8 @@ impl Settings {
                 .unwrap_or(DEFAULT_NOTIFY_MIN_SECONDS)
                 .clamp(MIN_NOTIFY_MIN_SECONDS, MAX_NOTIFY_MIN_SECONDS),
             gutter: enabled && si.gutter.unwrap_or(false),
+            // Editing implies the view, so enabling editing alone still shows it.
+            env_view: enabled && (si.env_view.unwrap_or(false) || si.env_editing.unwrap_or(false)),
             env_editing: enabled && si.env_editing.unwrap_or(false),
         }
     }

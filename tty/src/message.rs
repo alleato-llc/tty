@@ -112,6 +112,8 @@ pub enum Message {
     SetShellIntegrationAutoinstall(bool),
     /// Toggle the OSC 133 prompt gutter.
     SetPromptGutter(bool),
+    /// Toggle the Env view feature (env capture + view).
+    SetEnvView(bool),
     /// Toggle whether the Env view may edit a shell (inject export/unset).
     SetEnvEditing(bool),
     /// Copy the manual shell-integration snippet to the clipboard.

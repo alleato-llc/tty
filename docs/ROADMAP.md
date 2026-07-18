@@ -72,8 +72,10 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   environment variables (masked by default, reveal toggle, filter, click a row to copy
   `NAME=value`). The shell-integration hook captures `env` to a per-session file each
   prompt (gated by an `.on` flag), so it tracks the shell across commands with no
-  polling. **Editable** two ways: set/unset in this pane (a visible inject at the prompt)
-  and a persistent new-shells `[env]` overlay in Shell settings.
+  polling. The whole feature is **opt-in** (`shell_integration.env_view`, off by default)
+  so an unused install does no env work. **Editable** two ways: set/unset in this pane (a
+  visible inject at the prompt, a further opt-in) and a persistent new-shells `[env]`
+  overlay in Shell settings.
 - **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
   clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).

@@ -71,10 +71,18 @@ fn card<'a>(state: &'a Tty, w: f32, h: f32) -> Element<'a, Message> {
             .push(mouse_area(line).on_press(Message::CopyText(format!("{}={}", v.name, v.value))));
     }
 
-    let body: Element<'_, Message> = if state.env_vars.is_empty() {
+    let body: Element<'_, Message> = if !state.settings.shell_integration().env_view {
         text(
-            "No environment captured yet. This needs shell integration (Shell settings); \
-             once it's on, run any command and it'll appear here.",
+            "The Environment view is off. Turn it on in Shell settings — it captures the \
+             shell's env each prompt (and takes effect on shells started after).",
+        )
+        .size(12)
+        .color(t.muted)
+        .into()
+    } else if state.env_vars.is_empty() {
+        text(
+            "No environment captured yet. Run any command in this pane and it'll appear \
+             here (needs the shell-integration hooks).",
         )
         .size(12)
         .color(t.muted)

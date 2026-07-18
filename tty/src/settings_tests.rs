@@ -462,3 +462,33 @@ fn env_editing_defaults_off_and_is_master_gated() {
     };
     assert!(!gated.shell_integration().env_editing);
 }
+
+#[test]
+fn env_view_defaults_off_and_editing_implies_it() {
+    assert!(
+        !Settings::default().shell_integration().env_view,
+        "off by default"
+    );
+    // Enabling editing turns the view on too (you can't edit what you can't see).
+    let editing = Settings {
+        shell_integration: ShellIntegration {
+            env_editing: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let si = editing.shell_integration();
+    assert!(si.env_view && si.env_editing, "editing implies the view");
+    // The master switch gates both.
+    let gated = Settings {
+        shell_integration: ShellIntegration {
+            enabled: Some(false),
+            env_view: Some(true),
+            env_editing: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let si = gated.shell_integration();
+    assert!(!si.env_view && !si.env_editing);
+}
