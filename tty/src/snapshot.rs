@@ -438,6 +438,49 @@ fn cross_group_drag_moves_a_tab_through_the_widget_tree() {
 }
 
 #[test]
+fn right_click_anywhere_on_a_pane_strip_opens_the_pane_tab_menu() {
+    // The reported bug: right-clicking a pane-tab (or the strip gaps around it) opened the
+    // *pane* split menu instead of the pane-tab menu. The strip must capture the whole row.
+    let mut tty = populated();
+    let win = tty.main_window.unwrap();
+    let focus = tty.tabs[0].focus;
+    if let Some(g) = tty.tabs[0]
+        .panes
+        .get_mut(focus)
+        .and_then(crate::state::Pane::group_mut)
+    {
+        g.tabs.push(painted_term("build", 40, 6, b"$ "));
+    }
+    // A few points across the strip row: on the first tab, between tabs, and past the last.
+    for pos in [(30.0, 51.0), (200.0, 51.0), (600.0, 51.0)] {
+        let mut sim = iced_test::Simulator::new(main_chrome(&tty));
+        let _ = sim.snapshot(&crate::state::theme(&tty));
+        sim.point_at(iced::Point::new(pos.0, pos.1));
+        let _ = sim.simulate(vec![
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Right,
+            )),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Right,
+            )),
+        ]);
+        let messages: Vec<_> = sim.into_messages().collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::PaneTabRightClick(w, _, _) if *w == win)),
+            "strip right-click at {pos:?} must open the pane-tab menu, got {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, Message::PaneRightClick(_))),
+            "and must NOT open the pane split menu, got {messages:?}"
+        );
+    }
+}
+
+#[test]
 fn pane_tabs_view() {
     // A single pane holding two shell tabs: the compact in-pane tab strip renders above the
     // terminal, with the active tab accented.

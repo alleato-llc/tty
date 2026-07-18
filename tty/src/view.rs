@@ -274,7 +274,16 @@ fn main_view(state: &Tty) -> Element<'_, Message> {
                 let hov = pane_tab_hover.and_then(|(w, p, i)| (w == win && p == pane).then_some(i));
                 let inner: Element<'_, Message> =
                     match pane_tab_strip(group, win, pane, highlight, hov, dragging_here) {
-                        Some(strip) => column![strip, term_widget].spacing(2).into(),
+                        // A right-press anywhere on the strip (a tab or the gaps between/past
+                        // them) opens the pane-tab menu for the active tab; a press *on* a tab
+                        // captures first with its own index. Either way it captures, so the
+                        // pane (split) menu below never fires for a strip click.
+                        Some(strip) => {
+                            let active = group.active_idx();
+                            let strip = mouse_area(strip)
+                                .on_right_press(Message::PaneTabRightClick(win, pane, active));
+                            column![strip, term_widget].spacing(2).into()
+                        }
                         None => term_widget.into(),
                     };
                 // When split, an accent border marks the focused pane so it's clear where
@@ -812,7 +821,12 @@ fn detached_view<'a>(
         let hov = pane_tab_hover.and_then(|(w, p, i)| (w == window && p == pane).then_some(i));
         let inner: Element<'_, Message> =
             match pane_tab_strip(group, window, pane, highlight, hov, dragging_here) {
-                Some(strip) => column![strip, term_widget].spacing(2).into(),
+                Some(strip) => {
+                    let active = group.active_idx();
+                    let strip = mouse_area(strip)
+                        .on_right_press(Message::PaneTabRightClick(window, pane, active));
+                    column![strip, term_widget].spacing(2).into()
+                }
                 None => term_widget.into(),
             };
         let border_color = if is_focused && highlight {
