@@ -70,10 +70,10 @@ app state is `struct Tty` in `state/types.rs`, with methods in `state.rs` (+
 (`settings.rs`). Tests: `behavior::*` drives `update()` with pty-less tabs; `snapshot::*`
 renders chrome to a PNG.
 
-Adding or changing a UI surface — a popover/drill-in, a status-bar cell, a settings
-toggle, a widget — follows one repeatable procedure: **invoke the `ui` skill** for the
-step-by-step (the wiring loop, the tty/rime boundary, popover/modal chrome, the settings
-round-trip, snapshot re-baselining). Two traps worth knowing up front:
+Adding or changing a UI surface follows one repeatable procedure. **Invoke the `ui`
+skill** for the shared wiring loop + conventions (the tty/rime boundary, snapshot
+re-baselining, verify); it and the focused workflow skills — `ui-popover`, `ui-settings`,
+`ui-status-cell`, `rime-widget` — carry the step-by-step. Two traps worth knowing up front:
 
 - **`Tty` is built by a full struct literal in three places** — `Tty::new` (`state.rs`),
   `behavior.rs`, and `populated()` (`snapshot.rs`). A new field must be added to all three

@@ -1,17 +1,30 @@
 ---
 name: ui
-description: Start here for any UI-surface work in tty or rime — building or changing a popover/drill-in, a status-bar cell, a settings toggle or section, an existing widget, or a reusable rime primitive. This file carries the shared wiring loop, the tty/rime boundary, snapshot-test mechanics, and verification; it routes to a focused per-component reference for the specifics. Apply whenever you touch iced view/update/state code in `tty/src/` or a widget in `../rime/rime`.
+description: Orientation + shared conventions for UI-surface work in tty and rime. Carries the wiring loop every UI change follows (Message→update→view→state, the three struct-literal init sites), the tty/rime boundary, snapshot-test authoring + re-baselining, and the verify commands. Start here when unsure which UI workflow applies or for the shared conventions; the focused workflow skills — ui-popover, ui-settings, ui-status-cell, rime-widget — trigger on their own and build on this.
 ---
 
-# Building UI in tty + rime
+# UI in tty + rime — shared core
 
 tty is one iced 0.14 Elm loop; `rime` (`../rime/rime`, a path dep) is the shared, stateless
 component kit. **Reusable chrome lives in rime; app-specific surfaces live in tty.** The UI
-is a set of *separate components* (a popover, a status-bar cell, a settings section, a pane)
-that all thread through the **same wiring loop** below. Read the loop, then jump to the one
-reference for the component you're building.
+is a set of *separate components* that all thread through the **same wiring loop** below.
 
-Read `tty/CLAUDE.md` (invariants) and `../rime/ICED.md` (iced 0.14 patterns) alongside this.
+This skill is the shared foundation. Each specific workflow is its own skill (see the table)
+and recaps just enough of the loop to stand alone — but this is where the full loop, snapshot
+mechanics, and verify commands live. Also read `tty/CLAUDE.md` (invariants) and
+`../rime/ICED.md` (iced 0.14 patterns).
+
+## Which workflow skill
+
+| Building… | Skill |
+|-----------|-------|
+| a popover / floating panel (drag + resize, compact↔expanded, a sub-form modal) | **`ui-popover`** |
+| a status-bar cell (sampled metric, or a launcher like `Env`) | **`ui-status-cell`** |
+| a settings toggle / section (TOML round-trip, gating, migration) | **`ui-settings`** |
+| a reusable rime primitive (the contract, demo, tokens) | **`rime-widget`** |
+| editing an existing surface | find its `view/*.rs`, change the render, re-baseline its snapshots (below). Branch in the view over adding state when you can. |
+
+Invoke the matching skill; each carries the component-specific detail. This file has the rest.
 
 ## Where things live (tty/src/)
 
@@ -31,35 +44,22 @@ Read `tty/CLAUDE.md` (invariants) and `../rime/ICED.md` (iced 0.14 patterns) alo
 3. **Update** — handle them in the `update()` match in `update.rs` (usually calling a method you add in `state.rs`).
 4. **View** — render from `&Tty` in the relevant `view/*.rs`; wire controls to your `Message`s.
 5. **Init** — a new `Tty` field must be initialized in **all three** full struct-literal sites:
-   - `state.rs` → `Tty::new`
-   - `behavior.rs` (the test constructor)
-   - `snapshot.rs` → the `populated()` helper
+   `Tty::new` (`state.rs`), `behavior.rs`, and `populated()` (`snapshot.rs`).
 
 > ⚠️ **The 3-init trap.** Miss a site and you get `error[E0063]: missing field ...`. Add the
 > field to all three in one pass. `grep -rn "<neighbor_field>:" tty/src/{state.rs,behavior.rs,snapshot.rs}` finds them.
 
 ## The tty ↔ rime boundary
 
-- **Reusable primitive** (a button style, a card, floating-panel chrome) → **extend rime**,
-  then depend on it. Never inline or hand-roll a styled widget in tty.
+- **Reusable primitive** (a button style, a card, floating-panel chrome) → **extend rime**
+  (the `rime-widget` skill), then depend on it. Never inline or hand-roll a styled widget in tty.
 - **App-specific surface** → tty, *composing* rime primitives.
-- rime primitives are **stateless**, read colors from `theme::tokens()`; tty owns the state
-  and passes flags in.
+- rime primitives are **stateless**, read colors from `theme::tokens()`; tty owns the state.
 
 Chrome already in rime: `button::{primary,secondary,ghost,ghost_compact,danger,icon}`,
 `text_field`, `toggle`, `section`, `caption`, `stat`, `select`, `stepper`,
 `modal`/`modal_sized`, `dialog`, `context_menu`, `table`, and
 **`popover`/`resize_edges`/`ResizeEdge`** (the draggable-resizable floating card).
-
-## Pick the component → read its reference
-
-| Building… | Read |
-|-----------|------|
-| a popover / floating panel (drag + resize, compact↔expanded, a sub-form modal) | [`reference/popover.md`](reference/popover.md) |
-| a status-bar cell (sampled metric, or a launcher like `Env`) | [`reference/status-bar-cell.md`](reference/status-bar-cell.md) |
-| a settings toggle / section (the TOML round-trip, gating, migration) | [`reference/settings.md`](reference/settings.md) |
-| a reusable rime primitive (the contract, demo, tokens) | [`reference/rime-primitive.md`](reference/rime-primitive.md) |
-| editing an existing surface | find its `view/*.rs`, change the render, re-baseline its snapshots (below). Branch in the view over adding state when you can. |
 
 ## Snapshot tests (shared)
 
@@ -105,12 +105,12 @@ rime work: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && carg
 **No inline test modules**: `foo.rs` keeps its tests in a sibling `foo_tests.rs`, wired
 `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;`.
 
-## Checklist
+## Checklist (any UI change)
 
 - [ ] State fields added + doc-commented; initialized in **all three** literals
 - [ ] `Message` variant(s) + `update.rs` handler(s)
 - [ ] Rendered in `view/*.rs`; reusable chrome came from rime, not inlined
-- [ ] Component reference followed (popover / cell / settings / rime primitive)
+- [ ] The component workflow skill followed (popover / settings / status-cell / rime-widget)
 - [ ] Snapshot(s) added/updated; `-wgpu` PNGs re-baselined; no `now()` in fixtures
 - [ ] `fmt` clean, `clippy -D warnings` clean, full suite green
 - [ ] Changelog/docs updated where the repo expects it (rime CHANGELOG; tty README/ARCHITECTURE for user-facing or architectural changes)
