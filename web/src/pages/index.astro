@@ -8,9 +8,9 @@ const REPO = "https://github.com/alleato-llc/tty";
 const LATEST = `${REPO}/releases/latest`;
 const COFFEE = "https://buymeacoffee.com/alleato";
 
-// The whole slide deck is one raw-HTML string injected with `set:html` — the
-// terminal mockups are full of literal `{ }`, which Astro would otherwise parse
-// as JSX. A template literal sidesteps that; it interpolates only `${...}`.
+// The whole slide deck is one raw-HTML string injected with `set:html`. Every
+// terminal shown is a real screenshot of the app (web/public/shots/*, rendered by
+// the actual wgpu path — see snapshot.rs `generate_landing_shots`), never a mockup.
 const deck = `
   <!-- 1 — hero -->
   <section class="slide active">
@@ -18,17 +18,11 @@ const deck = `
       <div class="kicker">A terminal written in Rust</div>
       <h1>tty<span style="color:var(--accent)">.</span></h1>
       <p class="lede" style="margin-inline:auto">
-        A <b>fast, focused</b> terminal with the old-school feel — tabs, scrollback,
-        select &amp; copy, and a GPU-rendered grid that repaints the instant output
-        lands and sleeps when it doesn't. <b>No browser, no bloat.</b>
+        A <b>fast, focused</b> terminal with the old-school feel — a GPU-rendered grid
+        that repaints the instant output lands and sleeps when it doesn't.
+        <b>No browser, no bloat.</b>
       </p>
-      <div style="margin-top:24px">
-        <span class="pill">⚡ native speed</span>
-        <span class="pill">GPU-rendered</span>
-        <span class="pill">tabs</span>
-        <span class="pill">scrollback + copy</span>
-        <span class="pill">no Electron</span>
-      </div>
+      <img class="shot big" src="/shots/hero.png" alt="tty terminal showing colored ls output" />
       <div class="cta">
         <a class="btn primary" href="${LATEST}">Download tty <span class="sub">for macOS</span></a>
         <a class="btn ghost" href="${REPO}">View on GitHub</a>
@@ -43,123 +37,80 @@ const deck = `
         <div class="kicker">Built for speed</div>
         <h2>Repaints on output. Silent when idle.</h2>
         <ul class="feat">
-          <li><b>Native Rust</b>, rendered on the GPU with wgpu — keystrokes echo and output paints in microseconds.</li>
+          <li><b>Native Rust</b>, GPU-rendered with wgpu — keystrokes echo and output paints in microseconds.</li>
           <li><b>Output-driven repaint</b>: the screen redraws exactly when the shell writes, and costs nothing while it waits. No 60fps idle spin.</li>
           <li>One process, <b>instant startup</b>, a memory footprint you'd have to go looking for.</li>
         </ul>
       </div>
-      <div class="win">
-        <div class="bar"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
-        <div class="code">
-          <div class="ln"><div class="c"><span class="f">~/dev/tty</span> <span class="k">$</span> cargo build --release</div></div>
-          <div class="ln"><div class="c"><span class="cm">   Compiling cathode v0.1.0</span></div></div>
-          <div class="ln"><div class="c"><span class="cm">   Compiling phosphor v0.1.0</span></div></div>
-          <div class="ln"><div class="c"><span class="t">    Finished</span> \`release\` in 9.4s</div></div>
-          <div class="ln cur"><div class="c"><span class="f">~/dev/tty</span> <span class="k">$</span> <span class="caret"></span></div></div>
-        </div>
-        <div class="foot"><span>zsh</span><span>80×24 · output-driven · 14px</span></div>
-      </div>
+      <img class="shot" src="/shots/build.png" alt="tty running a cargo build" />
     </div>
   </section>
 
-  <!-- 3 — tabs -->
+  <!-- 3 — tabs, splits & windows -->
   <section class="slide">
     <div class="inner cols">
       <div>
-        <div class="kicker">Tabs</div>
-        <h2>One window. Every shell.</h2>
+        <div class="kicker">Tabs, splits &amp; windows</div>
+        <h2>Arrange your shells your way.</h2>
         <ul class="feat">
-          <li><b>Multi-tab</b> — <kbd>⌘T</kbd> / <kbd>⌘N</kbd> new, <kbd>⌘W</kbd> close, <kbd>⌘1</kbd>–<kbd>⌘9</kbd> jump.</li>
-          <li>Type <code>exit</code> and the tab closes itself; close the last one and the window goes with it.</li>
-          <li>Minimalist by default — the tab strip only appears once you have more than one.</li>
+          <li><b>Tabs</b> — <kbd>⌘T</kbd> new, <kbd>⌘W</kbd> close, <kbd>⌘1</kbd>–<kbd>⌘9</kbd> jump. The strip only appears once you have more than one.</li>
+          <li><b>Split any pane</b> — <kbd>⌥⌘</kbd>+arrows split in any direction, <kbd>⌃⌘</kbd>+arrows move focus, drag the divider to resize.</li>
+          <li><b>Tear a tab off</b> into its own window — and drop it back when you're done.</li>
         </ul>
       </div>
-      <div class="win">
-        <div class="bar"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
-        <div class="tabs"><div class="tab active">● zsh</div><div class="tab">server</div><div class="tab">logs</div></div>
-        <div class="code">
-          <div class="ln"><div class="c"><span class="f">~/dev/tty</span> <span class="k">$</span> git status</div></div>
-          <div class="ln"><div class="c"><span class="t">On branch</span> main</div></div>
-          <div class="ln cur"><div class="c"><span class="f">~/dev/tty</span> <span class="k">$</span> <span class="caret"></span></div></div>
-        </div>
-        <div class="foot"><span>zsh</span><span>3 tabs · ⌘1–⌘3</span></div>
-      </div>
+      <img class="shot" src="/shots/splits.png" alt="tty split into two side-by-side panes" />
     </div>
   </section>
 
-  <!-- 4 — scrollback + select/copy -->
+  <!-- 4 — shell-aware (OSC 133) -->
   <section class="slide">
     <div class="inner cols">
       <div>
-        <div class="kicker">Scrollback &amp; copy</div>
-        <h2>Scroll back. Drag. Copy.</h2>
+        <div class="kicker">It understands your shell</div>
+        <h2>Jump to prompts. Spot failures. Click into your editor.</h2>
         <ul class="feat">
-          <li><b>Real scrollback</b> — wheel up through history; the live screen snaps back the moment you're at the bottom.</li>
-          <li><b>Mouse selection</b> — click-drag to select, <kbd>⌘C</kbd> to copy. <kbd>Ctrl+C</kbd> stays a real <span class="pill" style="margin:0">SIGINT</span> to the shell.</li>
-          <li>Full ANSI: 16-color, 256-color, truecolor, plus bold, dim, italic, underline and inverse.</li>
-          <li><b>Command history, your call</b> — <kbd>⌘⇧H</kbd> opens a searchable log of past commands. Opt in to persist it across launches (encrypted at rest, command text only — never output), or go the other way: <kbd>⌘⇧T</kbd> opens an untracked tab and <code>--untracked</code> starts a whole session that records nothing.</li>
+          <li><b>Prompt jump</b> — <kbd>⌘↑</kbd>/<kbd>⌘↓</kbd> hop between commands, or straight to the last one that <b>failed</b>.</li>
+          <li>An optional <b>gutter</b> marks every prompt — a red dot when a command exits non-zero.</li>
+          <li><kbd>⌘</kbd>-click a <code>path:line:col</code> in output to open it in your editor; <kbd>⌘</kbd>-click a URL to open your browser.</li>
+          <li>Built on OSC 133 shell integration — opt in, and it stays out of the way.</li>
         </ul>
       </div>
-      <div class="win">
-        <div class="bar"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
-        <div class="code">
-          <div class="ln"><div class="c"><span class="k">$</span> ls --color</div></div>
-          <div class="ln"><div class="c"><span class="t">src</span>  <span class="f">README.md</span>  <span class="k">target</span>  Cargo.toml</div></div>
-          <div class="ln"><div class="c"><span class="s">warn</span>: <u>unused</u>  <span class="n">256-orange</span>  truecolor</div></div>
-          <div class="ln cur"><div class="c"><span class="k">$</span> <span class="caret"></span></div></div>
-        </div>
-        <div class="foot"><span>zsh</span><span>⌘C copy · scrollback 5000</span></div>
-      </div>
+      <img class="shot" src="/shots/shell.png" alt="tty prompt gutter with a red dot on a failed command" />
     </div>
   </section>
 
-  <!-- 5 — zoom -->
+  <!-- 5 — scrollback + copy + history -->
   <section class="slide">
-    <div class="inner">
-      <div class="kicker" style="text-align:center">Font zoom</div>
-      <h2 style="text-align:center; margin-bottom:8px">Bigger or smaller, instantly. <kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></h2>
-      <p class="lede" style="margin:0 auto 28px; text-align:center">
-        Zoom the grid on the fly — the terminal re-measures and resizes the PTY
-        (a real <span class="pill" style="margin:0">SIGWINCH</span>), so <code>vim</code>,
-        <code>htop</code> and friends reflow correctly. <kbd>⌘0</kbd> snaps back to default.
-      </p>
-      <div class="ba">
-        <div class="mini"><span class="lbl">⌘−  11px</span>$ uname -sm
-Darwin arm64</div>
-        <div class="arrow">→</div>
-        <div class="mini"><span class="lbl">⌘+  18px</span>$ uname -sm
-Darwin arm64</div>
+    <div class="inner cols">
+      <div>
+        <div class="kicker">Scrollback, copy &amp; history</div>
+        <h2>Scroll back. Drag. Copy. Recall.</h2>
+        <ul class="feat">
+          <li><b>Real scrollback</b> with <kbd>⌘F</kbd> search; the live screen snaps back the moment you're at the bottom.</li>
+          <li><b>Click-drag to select</b>, <kbd>⌘C</kbd> to copy. <kbd>Ctrl+C</kbd> stays a real <span class="pill" style="margin:0">SIGINT</span> to the shell.</li>
+          <li>Full ANSI — 16-color, 256-color, truecolor, plus bold, dim, italic, underline and inverse.</li>
+          <li><b>Command history, your call</b> — <kbd>⌘⇧H</kbd> opens a searchable log. Opt in to persist it (encrypted at rest, command text only — never output), or go incognito with <kbd>⌘⇧T</kbd> and <code>--untracked</code>.</li>
+        </ul>
       </div>
+      <img class="shot" src="/shots/history.png" alt="tty scrollback with colored git and ls output" />
     </div>
   </section>
 
-  <!-- 6 — themeable (ties into the toggle) -->
+  <!-- 6 — make it yours (themes + ligatures) -->
   <section class="slide">
     <div class="inner">
       <div class="kicker" style="text-align:center">Make it yours</div>
       <h2 style="text-align:center; margin-bottom:6px">Dark or light, chrome <i>and</i> grid.</h2>
-      <p class="lede" style="margin:0 auto 26px; text-align:center">
-        A retro phosphor glow by default, a crisp light mode when you want it.
-        <b>Try the ◐ toggle up top</b> — this page is wearing tty's Dracula and
-        GitHub&nbsp;Light right now.
+      <p class="lede" style="margin:0 auto 22px; text-align:center">
+        8 built-in themes (or import any <a href="https://github.com/chriskempson/base16">base16</a>),
+        the font of your choice, and programming ligatures when it ships them.
+        <b>Try the ◐ toggle up top.</b>
       </p>
-      <div class="themes">
-        <div class="swatch" style="background:#1d2021">
-          <div class="h" style="color:#8ec07c">phosphor</div>
-          <div class="b" style="color:#ebdbb2"><span style="color:#b8bb26">$</span> echo <span style="color:#fabd2f">"✦"</span></div>
-        </div>
-        <div class="swatch" style="background:#282a36">
-          <div class="h" style="color:#bd93f9">Dracula</div>
-          <div class="b" style="color:#f8f8f2"><span style="color:#50fa7b">$</span> echo <span style="color:#f1fa8c">"✦"</span></div>
-        </div>
-        <div class="swatch" style="background:#002b36">
-          <div class="h" style="color:#268bd2">Solarized</div>
-          <div class="b" style="color:#839496"><span style="color:#859900">$</span> echo <span style="color:#2aa198">"✦"</span></div>
-        </div>
-        <div class="swatch" style="background:#ffffff">
-          <div class="h" style="color:#8250df">GitHub Light</div>
-          <div class="b" style="color:#24292e"><span style="color:#1a7f37">$</span> echo <span style="color:#0a3069">"✦"</span></div>
-        </div>
+      <div class="shots-grid">
+        <figure><img class="shot" src="/shots/theme-phosphor.png" alt="Phosphor theme" /><figcaption>Phosphor</figcaption></figure>
+        <figure><img class="shot" src="/shots/theme-dracula.png" alt="Dracula theme" /><figcaption>Dracula</figcaption></figure>
+        <figure><img class="shot" src="/shots/theme-solarized.png" alt="Solarized Light theme" /><figcaption>Solarized</figcaption></figure>
+        <figure><img class="shot" src="/shots/theme-light.png" alt="GitHub Light theme" /><figcaption>GitHub Light</figcaption></figure>
       </div>
     </div>
   </section>
@@ -176,15 +127,7 @@ Darwin arm64</div>
           <li>tty is thin glue over the two — and the <i>same</i> crates drop straight into <b><a href="https://github.com/nycjv321/fed">fed</a></b>'s integrated terminal panel.</li>
         </ul>
       </div>
-      <div class="win">
-        <div class="bar"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
-        <div class="code">
-          <div class="ln"><div class="c"><span class="cm">// embed a terminal in any iced app</span></div></div>
-          <div class="ln"><div class="c"><span class="k">use</span> <span class="t">phosphor</span>::terminal;</div></div>
-          <div class="ln cur"><div class="c">terminal(screen, style, font, size, ..)<span class="caret"></span></div></div>
-        </div>
-        <div class="foot"><span>cathode · phosphor</span><span>embeddable widget</span></div>
-      </div>
+      <img class="shot" src="/shots/embed.png" alt="the phosphor terminal widget shown in source" />
     </div>
   </section>
 
@@ -215,7 +158,7 @@ Darwin arm64</div>
 
 <Layout
   title="tty — the fast terminal in Rust"
-  description="tty is a fast, focused, GPU-accelerated terminal written in Rust — tabs, scrollback, mouse select & copy, full ANSI color, and output-driven repaint. Built on the cathode engine and phosphor widget. No Electron."
+  description="tty is a fast, focused, GPU-accelerated terminal written in Rust — tabs, split panes, shell-aware prompt jumping, scrollback, mouse select & copy, full ANSI color, themes, and output-driven repaint. Built on the cathode engine and phosphor widget. No Electron."
 >
   <div class="hint">← → or space to explore</div>
   <div class="brand-foot">Rust · wgpu · zero Electron</div>

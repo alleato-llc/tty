@@ -2216,3 +2216,132 @@ fn settings_history_start_failed_view() {
         "snapshot `tty-settings-history-start-failed` changed — delete its PNG to re-baseline"
     );
 }
+
+/// Regenerate the landing-page screenshots in `web/public/shots/` from the *real* app
+/// render (the same headless wgpu path as the snapshot tests — not a mockup). Ignored by
+/// default; run explicitly from the crate dir:
+///   cargo nextest run -p tty --ignore-default-filter --run-ignored all -E 'test(generate_landing_shots)'
+#[test]
+#[ignore = "screenshot generator for web/public/shots — run explicitly"]
+fn generate_landing_shots() {
+    use iced::widget::pane_grid::Direction;
+    std::fs::create_dir_all("snapshots").ok();
+    std::fs::create_dir_all("../web/public/shots").ok();
+
+    // Render each shot at a window size proportioned to its content, so the terminal
+    // fills the frame (a small window is genuinely how the app renders small — no cropping).
+    let save = |tty: &Tty, name: &str, w: f32, h: f32| {
+        let mut sim = iced_test::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(w, h),
+            main_chrome(tty),
+        );
+        let snap = sim.snapshot(&crate::state::theme(tty)).expect("render");
+        let tmp = format!("snapshots/_shot-{name}.png");
+        let _ = snap.matches_image(&tmp); // writes _shot-<name>-wgpu.png
+        std::fs::copy(
+            format!("snapshots/_shot-{name}-wgpu.png"),
+            format!("../web/public/shots/{name}.png"),
+        )
+        .expect("copy shot to web");
+    };
+    const TW: f32 = 820.0; // a compact terminal window
+    const TH: f32 = 340.0;
+
+    // hero — the signature look
+    save(&populated(), "hero", TW, TH);
+
+    // build — output-driven repaint / speed
+    let mut tty = populated();
+    tty.tabs[0] = Tab::new(painted_term(
+        "zsh",
+        56,
+        6,
+        b"\x1b[1;32muser@host\x1b[0m:\x1b[34m~/dev/tty\x1b[0m$ cargo build --release\r\n\
+          \x1b[1;32m   Compiling\x1b[0m cathode v0.1.0\r\n\
+          \x1b[1;32m   Compiling\x1b[0m phosphor v0.1.0\r\n\
+          \x1b[1;32m    Finished\x1b[0m `release` in 9.4s\r\n$ ",
+    ));
+    save(&tty, "build", TW, TH);
+
+    // splits — a tab split into two panes
+    let mut tty = populated();
+    let win = tty.main_window.unwrap();
+    tty.split_with(
+        win,
+        Direction::Right,
+        crate::state::Pane::Term(painted_term(
+            "zsh",
+            28,
+            6,
+            b"\x1b[34m~/dev/tty\x1b[0m$ cargo test\r\n\x1b[1;32m   Compiling\x1b[0m tty\r\n\
+              \x1b[32mtest result: ok\x1b[0m\r\n$ ",
+        )),
+    );
+    save(&tty, "splits", 1040.0, 400.0);
+
+    // shell — OSC 133 prompt gutter with a failed command (red dot)
+    let mut tty = populated();
+    tty.settings.shell_integration.gutter = Some(true);
+    tty.tabs[0] = Tab::new(painted_term(
+        "zsh",
+        56,
+        8,
+        b"\x1b]133;A\x07$ ls\r\n\x1b]133;C\x07README.md  src  Cargo.toml\r\n\x1b]133;D;0\x07\
+          \x1b]133;A\x07$ cargo test\r\n\x1b]133;C\x07\x1b[31merror: test failed\x1b[0m\r\n\x1b]133;D;1\x07\
+          \x1b]133;A\x07$ ",
+    ));
+    save(&tty, "shell", TW, TH);
+
+    // history — a longer colored transcript (scrollback feel)
+    let mut tty = populated();
+    tty.tabs[0] = Tab::new(painted_term(
+        "zsh",
+        56,
+        10,
+        b"\x1b[34m~/dev/tty\x1b[0m$ git log --oneline -3\r\n\
+          \x1b[33md0efb35\x1b[0m ligatures\r\n\x1b[33m661a280\x1b[0m preview\r\n\x1b[33mce397e3\x1b[0m docs\r\n\
+          \x1b[34m~/dev/tty\x1b[0m$ ls --color\r\n\
+          \x1b[1;34msrc\x1b[0m  \x1b[32mREADME.md\x1b[0m  \x1b[1;31mtarget\x1b[0m  Cargo.toml\r\n$ ",
+    ));
+    save(&tty, "history", TW, 400.0);
+
+    // embed — the phosphor widget usage, in a terminal
+    let mut tty = populated();
+    tty.tabs[0] = Tab::new(painted_term(
+        "zsh",
+        56,
+        6,
+        b"\x1b[34m~/dev/app\x1b[0m$ bat src/main.rs\r\n\
+          \x1b[90m 1\x1b[0m \x1b[35muse\x1b[0m phosphor::terminal;\r\n\
+          \x1b[90m 2\x1b[0m\r\n\
+          \x1b[90m 3\x1b[0m \x1b[35mlet\x1b[0m term = terminal(screen, style, font, size, ..);\r\n$ ",
+    ));
+    save(&tty, "embed", TW, TH);
+
+    // ligatures — JetBrains Mono, ligatures on
+    let mut tty = populated();
+    tty.font = Font::with_name("JetBrains Mono");
+    tty.settings.terminal_ligatures = Some(true);
+    tty.tabs[0] = Tab::new(painted_term(
+        "zsh",
+        56,
+        6,
+        b"\x1b[34m~/dev\x1b[0m$ cat lib.rs\r\n\
+          fn check(x: i32) -> bool { x != 0 && x >= 1 }\r\n\
+          let ok = a >= b && c <= d;  // => -> != == |>\r\n$ ",
+    ));
+    save(&tty, "ligatures", TW, TH);
+
+    // themes — the whole app re-skinned; same content, different palettes
+    for (name, theme) in [
+        ("theme-phosphor", "Phosphor"),
+        ("theme-dracula", "Dracula"),
+        ("theme-solarized", "Solarized Light"),
+        ("theme-light", "GitHub Light"),
+    ] {
+        let mut tty = populated();
+        tty.theme = Theme::named(theme);
+        save(&tty, name, TW, TH);
+    }
+}

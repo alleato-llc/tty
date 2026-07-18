@@ -23,15 +23,32 @@ Pages share one shell:
   script, the fixed chrome (wordmark + theme toggle), and a `<slot />`.
 - `src/components/ThemeToggle.tsx` — the one interactive island (Preact).
 - `src/styles/global.css` — the two-theme design system via the `data-theme`
-  attribute. **Dark is tty's Dracula; light is GitHub Light.** Everything,
-  including the terminal mockups, draws from these tokens, so the toggle re-skins
-  the whole page the way switching themes re-skins the app.
-- `public/` — static assets served as-is (favicon).
+  attribute. **Dark is tty's Dracula; light is GitHub Light.** The page chrome
+  draws from these tokens, so the toggle re-skins it.
+- `public/shots/` — the terminal screenshots (see below).
+- `public/` — other static assets served as-is (favicon).
 
 The deck markup lives in one raw-HTML string in `index.astro` injected via
-`set:html`, because the terminal mockups are full of literal `{ }` that Astro
-would otherwise parse as JSX expressions. The terminal panes are CSS mockups,
-not screenshots — drop in real captures later by replacing the `.win` blocks.
+`set:html` (a template literal, so the literal `{ }` in commands aren't parsed as
+JSX). Each terminal shown is a **real screenshot of the app** (`public/shots/*`),
+never a mockup.
+
+## Screenshots
+
+The shots in `public/shots/` are rendered by the *actual* app — the same headless
+wgpu path the snapshot tests use — not hand-drawn. Regenerate them from the tty
+crate:
+
+```
+cd ../tty   # the app crate
+cargo nextest run -p tty --ignore-default-filter --run-ignored all \
+  -E 'test(generate_landing_shots)'
+```
+
+The generator (`tty/src/snapshot.rs::generate_landing_shots`, `#[ignore]`d) writes
+each shot straight into `web/public/shots/`. To restyle content or add a shot, edit
+that function, rerun, and (optionally) `sips -Z 1400 web/public/shots/*.png` to keep
+the web assets light.
 
 ## Downloads
 
