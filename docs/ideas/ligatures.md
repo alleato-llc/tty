@@ -1,8 +1,8 @@
 # Programming ligatures (phosphor)
 
-Status: **proposed, not committed.** A plan for optional cross-cell ligature rendering
-(`!=` → `≠`, `=>` → `⇒`, `->`, `===`) in fonts that ship them (JetBrains Mono, Fira Code,
-Cascadia Code). Opt-in via a setting.
+Status: **proposed; approach (Option A) validated by spike.** A plan for optional cross-cell
+ligature rendering (`!=` → `≠`, `=>` → `⇒`, `->`, `===`) in fonts that ship them (JetBrains
+Mono, Fira Code, Cascadia Code). Opt-in via a setting.
 
 ## Why it doesn't work today
 
@@ -33,7 +33,7 @@ we use. That constraint drives the options below.
 
 ## Options
 
-### A. Run-shaping with a calibrated cell width  ← recommended (pending a spike)
+### A. Run-shaping with a calibrated cell width  ← recommended, **validated by spike**
 
 Render each eligible run as a **single `fill_text`** (content = the run's chars), and eliminate
 the drift by setting `cell_w` to the font's **true advance** instead of the rounded `"M"`
@@ -45,9 +45,9 @@ cell and every ligature is designed to advance an **integer number of cells**, s
 same-width glyphs lands on `col * cell_w` with no accumulated drift — *if* `cell_w` equals the
 font's advance. Bonus: fewer `fill_text` calls than today (one per run, not per char).
 
-**This hinges on a hypothesis** — that cosmic-text (through iced's `Paragraph`) positions a
-monospace run's glyphs at exact advance multiples once `cell_w` is calibrated. **Spike first**
-(see below). If it holds, this is a contained change entirely within `terminal.rs`, no renderer
+This hinged on a hypothesis — that cosmic-text (through iced's `Paragraph`) positions a
+monospace run's glyphs at exact advance multiples once `cell_w` is calibrated. **The spike
+confirmed it** (see below). It's a contained change entirely within `terminal.rs`, no renderer
 coupling, works on both the wgpu and tiny-skia backends.
 
 ### B. Cluster placement via cosmic-text (fallback if A drifts)
@@ -62,6 +62,25 @@ pursue if A can't hold alignment.
 
 Detecting sequences without shaping (a per-font `calt` table) is fragile and font-specific
 (JetBrains Mono has ~140). Not worth it.
+
+## Spike result (validated)
+
+Ran the two Option-A changes as a throwaway — calibrate `cell_w` to `min_bounds("M"×64)/64`, and
+render each same-style run as a single `fill_text` (content = the run string) anchored at the
+run's first cell — against JetBrains Mono (installed) through the headless wgpu snapshot renderer,
+with a `│` marker fixed at a column on every row.
+
+- **Ligatures form**: `=>`→⇒, `===`→≡, `<=`→≤, `>=`→≥, `==`→═, `==>`→⟹, `<==`→⟸, `:=`, `<>`→⋄, …
+  render as their ligature glyphs (before: each character separate).
+- **The grid holds**: with `cell_w` calibrated to the true advance, the `│` markers stayed aligned
+  across plain **and** ligature-heavy rows **at column 78** — exactly where the old
+  per-glyph-measured `cell_w` drifted "several cells." The plain rows rendered identically to the
+  per-cell baseline.
+
+Conclusion: **Option A is viable.** The drift was purely the `cell_w` measurement artifact;
+calibration removes it, and shaped ligature glyphs advance their integer cell-span, so alignment is
+preserved. The spike was unconditional + naive (no flag, no break rules) — the phased work below adds
+the opt-in setting and the cursor/wide/RTL segmentation. Option B (cosmic-text) is no longer needed.
 
 ## Segmentation: which runs get shaped
 
@@ -126,9 +145,8 @@ users dislike them. Off by default, matching tty's opt-in ethos (history, env, n
 
 ## Phased plan
 
-1. **Spike (½ day):** calibrate `cell_w` to the true advance; render one shaped run at a known
-   style; measure glyph x at col 0/40/80 vs `col * cell_w`. Decide A vs B. *Gate the whole effort
-   on this.*
+1. ~~**Spike:** calibrate `cell_w`; render a shaped run; check alignment at col 0/40/80. Decide A vs B.~~
+   **DONE — Option A validated** (ligatures form, grid holds at col 78; see "Spike result").
 2. **Segmentation + render (A):** the pure line-segmentation fn + its unit tests; route shaped
    spans through one `fill_text`, per-cell spans unchanged; break at cursor/wide/RTL.
 3. **Setting:** the phosphor `ligatures` flag + tty `Settings` field + the Appearance→Terminal
