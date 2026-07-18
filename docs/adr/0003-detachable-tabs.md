@@ -89,3 +89,13 @@ This depends on the tab activating on **press** (mouse-down), which is a `rime::
 change: the tab body is a plain container and the wrapping `mouse_area.on_press` reports
 the press — an iced `button` only reports on release, by which point the gesture is over.
 The same press-arm powers tear-off; both silently no-op'd while activation was release-based.
+
+## Update — pane-tabs detach into their own window too
+
+A single terminal tab inside a pane (see ADR 0002's update) can also detach, reusing this
+machinery: `detach_pane_tab` lifts the terminal into a one-pane `Tab` via the shared
+`open_detached_window`, recording a `PaneTabOrigin`. On reattach, `restore_pane_tab` drops
+it back into its origin tab group when that group still exists; otherwise it falls back to
+the top-level dock described here (a new main-strip tab). Detaching a pane-tab is a
+deliberate menu action only — never a drag-off — so a mis-aimed cross-pane move can't tear
+the tab out of the window.

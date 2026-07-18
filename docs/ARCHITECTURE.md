@@ -386,7 +386,7 @@ Thin glue, mirroring `fed`'s module shape:
 tty runs on iced's **`daemon`** model (not `application`) so it can open extra OS windows
 for **detached tabs** (ADR 0003): a daemon's `view`/`title`/`theme` take a `window::Id`,
 letting each window render different content. `boot` opens the main window and records
-`Tty::main_window`. A whole `Tab` (its owned `pane_grid::State<Term>`) is the detachable
+`Tty::main_window`. A whole `Tab` (its owned `pane_grid::State<Pane>`) is the detachable
 unit — detaching moves it out of `tabs` into `detached: HashMap<window::Id, Tab>` and back
 on reattach; `reap_dead`/`drain_effects` walk both. A daemon keeps running after its last
 window closes, so closing the **main** window calls `iced::exit()` (tearing down every

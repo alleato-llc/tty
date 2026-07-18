@@ -81,3 +81,15 @@ a `Metric` pane is transparent to them (no PTY, never reaps). New non-terminal p
 kinds now slot into the enum without touching the layout code. See
 `docs/ideas/status-bar-metrics.md` and `ARCHITECTURE.md` for the metric-pane
 specifics (promote/replace flows, maximize, the focus-highlight toggle).
+
+## Update — tabs inside panes (tab groups)
+
+`Pane::Term` later grew from a single `Term` into a `PaneTerms { tabs: Vec<Term>, active }`
+tab group, so a split pane can hold **multiple terminals as tabs** (a compact `rime` `tabs`
+strip renders above the terminal only when a group has more than one). Tabs now work at both
+the window top level and within any split. A pane-tab can be reordered by drag, moved into
+another pane (every pane becomes a full drop zone while a drag is in flight), renamed
+(`Term.name`), and detached into its own window (reattaching restores it into its origin
+group). This stayed within the enum's spirit: the split/focus/resize/close machinery is
+unchanged, and terminal operations still filter through `Pane::as_term` (now the group's
+active terminal). See `ARCHITECTURE.md` and `CLAUDE.md` ("Tabs are pane trees").

@@ -20,10 +20,13 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   right-click a pane (split / close pane) or a tab (new tab / split / close tab). Each
   pane is an independent shell — or a graduated metric view (see Machine stats); built
   on iced's `pane_grid`. (Option B below — splits only, no persistence.)
-- **Tabs inside panes** — a split pane can itself hold multiple terminal tabs: `⌥⌘T`
-  opens one in the focused pane, `⌥⌘]`/`⌥⌘[` cycle them, `⌥⌘W` closes one (a compact
-  strip appears above the terminal only when a pane has more than one). So tabs work at
-  both the window top level and within any split.
+- **Tabs inside panes** — a split pane can itself hold multiple terminal tabs, so tabs
+  work at both the window top level and within any split. `⌥⌘T` opens one in the focused
+  pane, `⌥⌘]`/`⌥⌘[` cycle them, `⌥⌘W` closes one (a compact strip appears above the
+  terminal only when a pane has more than one). Drag a pane-tab to reorder it, or drop it
+  onto any part of another pane to **move it into that split** (every pane is a drop zone
+  while a drag is in flight). Right-click one for new / rename / **detach** / close;
+  detaching opens it in its own window and reattaching returns it to its origin group.
 - Full ANSI rendering: 16 / 256 / truecolor + bold, dim, italic, underline, inverse.
 - Scrollback + mouse select / `⌘C` copy.
 - **Configurable scrollback** — a global max-lines setting (applies live to

@@ -92,29 +92,54 @@ kind of work: `ui` (+ the focused `ui-popover` / `ui-settings` / `ui-status-cell
 
 ## Tabs are pane trees
 
-A tab is **not** one terminal — it's a `Tab { panes: pane_grid::State<Term>, focus }`
-(`state.rs`), a tree of split panes that starts as a single pane. iced 0.14's built-in
-`pane_grid` owns the split tree, drag-to-resize dividers, focus, and cardinal
-`adjacent()` navigation, so we don't hand-roll any of it (and nothing about splits
-belongs in rime — `pane_grid` is an iced widget, not reusable chrome). The "active tab,
-focused pane" is the target of all input: `write_focused`/`resize_pane`/`paste`/the ⌘C
-selection read `tabs[active].panes.get(focus)`; `drain_effects`/`reap_dead` walk **every
-pane of every tab**. Split (`⌥⌘`+arrow) / focus-move (`⌃⌘`+arrow) / close (`⌘W`) are
-keyboard chords handled directly in `update::handle_key`, like the other ⌘ shortcuts.
-The same actions are reachable by **right-click**: a `mouse_area` per pane (and the tab
-strip's right-press hook) opens a rime `context_menu` anchored at `state.pointer` (a
-`PointerMoved` subscription tracks the cursor, since `mouse_area` reports a press but not
-its position). `state.menu: Option<(MenuKind, Point)>` records which kind is open — a
-**pane** menu (split + close pane) or a **tab** menu (new tab + rename + split + close
-tab). Both target the active tab. The **tab strip is always shown** (even with one tab)
-so there's always a tab to right-click. Because macOS delivers a **Ctrl+click** as
-`Left+Control` (not `Button::Right`), `update` also opens the menu when `ActivateTab` /
-`FocusPane` arrive with `modifiers.control()` held — so the menu is reachable without a
-two-button mouse. **Rename** (`Tab.title` override + `state.renaming`) shows a focused
-field under the strip; `Tab::label()` is the one place that resolves a tab's display name
-(custom title → program/OSC title → shell name). `split_focused` spawns the shell; its spawn-free core
-`split_with(dir, term)` is what the headless tests drive. The focus border only renders
-when a tab has **more than one pane** — a lone pane shows none.
+A tab is **not** one terminal — it's a `Tab { panes: pane_grid::State<Pane>, focus }`
+(`state.rs`), a tree of split panes that starts as a single pane. A `Pane` is either
+`Term(PaneTerms)` — a **tab group** of one-or-more terminals sharing that split slot
+(`PaneTerms { tabs: Vec<Term>, active }`) — or `Metric(kind)`, a metric drill-in
+"graduated" from a floating popover. iced 0.14's built-in `pane_grid` owns the split tree,
+drag-to-resize dividers, focus, and cardinal `adjacent()` navigation, so we don't
+hand-roll any of it (and nothing about splits belongs in rime — `pane_grid` is an iced
+widget, not reusable chrome). The "active tab, focused pane, active pane-tab" is the target
+of all input: `write_focused`/`resize_pane`/`paste`/the ⌘C selection reach through
+`Pane::as_term` (the group's active terminal); `drain_effects`/`reap_dead` walk **every
+terminal of every group of every tab** (reaping drops dead pane-tabs, then closes a group
+that empties). Split (`⌥⌘`+arrow) / focus-move (`⌃⌘`+arrow) / close (`⌘W`) are keyboard
+chords handled directly in `update::handle_key`, like the other ⌘ shortcuts.
+
+**Tabs nest inside splits.** A split pane can hold multiple terminals as tabs, rendered as
+a compact `filled: false` rime `tabs` strip above the terminal (shown only when a group has
+>1 tab, so a single-terminal pane looks exactly as before). Pane-tab ops live in
+`state/panes.rs`: `new_pane_tab`/`select_pane_tab`/`close_pane_tab`/`cycle_pane_tab` and the
+`⌥⌘T` / `⌥⌘]` / `⌥⌘[` / `⌥⌘W` chords. **Reorder + move**: a tab press arms `pane_tab_drag`;
+crossing another pane-tab reorders within the group, and while a drag is in flight the
+`view` overlays every *other* pane with a full-pane drop zone, so dropping anywhere in a
+pane moves the tab into it (`reorder_or_move_pane_tab` / `move_pane_tab_across`, closing an
+emptied source pane). The horizontal-move bookkeeping is the shared `rime::widgets::Reorder`
++ `reorder_slice`, which the window-level tab reorder uses too. **Detach** is a deliberate
+menu action (`detach_pane_tab`, never a drag-off): it opens the terminal in its own window
+via the shared `open_detached_window`, recording a `PaneTabOrigin` so `reattach_window` /
+`restore_pane_tab` drop it back into its origin group (or dock as a top-level tab if that
+group is gone).
+
+The same actions are reachable by **right-click**: a `mouse_area` per pane opens a rime
+`context_menu` anchored at `state.pointer` (a `PointerMoved` subscription tracks the cursor,
+since `mouse_area` reports a press but not its position); a strip-wide `mouse_area`
+right-press hook opens the pane-tab menu for any click on the strip (capturing, so a strip
+click never falls through to the pane menu). `state.menu: Option<(MenuKind, Point)>` records
+which kind is open — a **pane** menu (split + close pane), a **tab** menu (new tab + rename
++ detach + split + close tab), or a **pane-tab** menu (new tab + rename + detach + close
+tab). The window-level **tab strip shows only with >1 tab** (a lone tab carries none,
+matching fed / fed-ide); the split menu is always reachable by right-clicking the pane
+itself. Because macOS delivers a **Ctrl+click** as `Left+Control` (not
+`Button::Right`), `update` also opens the menu when `ActivateTab` / `FocusPane` arrive with
+`modifiers.control()` held — so the menu is reachable without a two-button mouse.
+Command-char chords also resolve against the base logical key (not the ⌥-composed glyph), so
+`⌥⌘`-chords work on macOS. **Rename** targets either a top-level tab (`Tab.title`) or a
+pane-tab (`Term.name`) via `RenameTarget` + `state.renaming`, showing a focused field under
+the strip; `Tab::label()` / `Term::label()` resolve a tab's display name (custom → program/
+OSC title → shell name). `split_focused` spawns the shell; its spawn-free core
+`split_with(dir, pane)` is what the headless tests drive. The focus border only renders when
+a tab has **more than one pane** — a lone pane shows none.
 
 ## Encrypted history (tty/src/history/ + cathode::history)
 
