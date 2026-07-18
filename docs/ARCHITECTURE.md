@@ -201,8 +201,9 @@ Thin glue, mirroring `fed`'s module shape:
   metric's full-size `rime` `line_chart` over its retained history — or a "collecting"
   note when the history isn't chartable yet — with a "+" / "−" expand affordance
   (compact is bottom-anchored, expanded is a large centered card sized off the window)
-  and border-resize strips (`with_resize_edges`, one `ResizeEdge` per side/corner);
-  hovering a point reads its value off the chart (`LineChart::hover_format`). CPU has
+  and border-resize strips from the shared `rime::widgets::resize_edges` (one `ResizeEdge`
+  per side/corner) — the same popover chrome the Env view uses; hovering a point reads its
+  value off the chart (`LineChart::hover_format`). CPU has
   three drill-in variants keyed by `MetricKind` (`Cpu` aggregate / `CpuCores` grid /
   `CpuAll` both) that share one status-bar cell. By default one popover is open at a
   time and an `opaque` click-away backdrop fires `CloseMetricDetail`; with
@@ -292,9 +293,13 @@ Thin glue, mirroring `fed`'s module shape:
   exactly like `metric_detail_*`; `env_pos`/`env_size` persist where you leave it. Like the
   metric drill-ins it has a **compact ↔ expanded** toggle (`env_expanded`,
   `ToggleEnvExpanded`, sharing their `+` / `−` glyph controls): it opens compact — a masked
-  list + Add, its height shrunk to the content by `env_view_size` so a short list leaves no
-  whitespace — and expanding adds the filter, the Reveal-values toggle, and the source note
-  (values only unmask when expanded), snapping to the larger `env_size`. Click a row to copy `NAME=value`. Opened by
+  key/value list (name left, masked value right-aligned) with a full-width Add button — and
+  expanding adds the filter, the Reveal-values toggle, and the source note (values only
+  unmask when expanded, and get a proper left-aligned second column), snapping to the larger
+  `env_size`. `env_view_size` sizes the compact card: it shrinks the *height* to the content
+  so a short list leaves no whitespace, capped at `ENV_COMPACT_MAX_HEIGHT` (or the window)
+  so a long environment stays compact and the list scrolls inside it instead of ballooning.
+  Click a row to copy `NAME=value`. Opened by
   `⌘⇧E`, the pane menu, or an **Env** status-bar cell — a `MetricKind::Env` "launcher" cell
   that renders a static label (short-circuiting the sampler like `Clock`) and, on click,
   opens the popover instead of a drill-in (special-cased in the `PointerReleased` handler).

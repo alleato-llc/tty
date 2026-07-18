@@ -69,13 +69,18 @@ Anything that doesn't clearly serve one of these is a candidate to **cut**, not 
   opt-in **prompt gutter** (a dot per prompt, red on failure). The command-finished
   notification above rides the same marks.
 - **Env view (`⌘⇧E`)** — a movable, resizable popover listing the focused pane's
-  environment variables (masked by default, reveal toggle, filter, click a row to copy
-  `NAME=value`). The shell-integration hook captures `env` to a per-session file each
-  prompt (gated by an `.on` flag), so it tracks the shell across commands with no
-  polling. The whole feature is **opt-in** (`shell_integration.env_view`, off by default)
-  so an unused install does no env work. **Editable** two ways: set/unset in this pane (a
-  visible inject at the prompt, a further opt-in) and a persistent new-shells `[env]`
-  overlay in Shell settings.
+  environment variables. It opens **compact** (a masked key/value list + an Add button,
+  scrolling when long) and expands (`+`/`−`, the metric drill-ins' glyph controls) to the
+  full experience: filter, reveal-values toggle, and a source note. Click a row to copy
+  `NAME=value`. With **zero setup** it shows the pane process's launch-time environment,
+  read from the OS (`KERN_PROCARGS2` / `/proc/<pid>/environ`); the shell-integration hook,
+  when enabled, upgrades it to a **live** view that re-captures `env` each prompt (gated by
+  an `.on` flag) with no polling, and the popover labels which source you're seeing. The
+  live capture is **opt-in** (`shell_integration.env_view`, off by default) so an unused
+  install does no env work; the OS read is tty-side and touches nothing in the shell.
+  **Editable** two ways: an **Add variable** modal that sets/unsets in this pane (a visible
+  inject at the prompt, a further opt-in) and a persistent new-shells `[env]` overlay in
+  Shell settings.
 - **OSC 52 clipboard** — an app inside `tmux`/`ssh`/`vim` can write the system
   clipboard (`take_clipboard`, surfaced to the host each drain).
 - Font zoom (`⌘±`/`⌘0`) with real PTY resize (SIGWINCH).
@@ -150,12 +155,12 @@ tier is complete.
   (`⌘⇧↑`/`⌘⇧↓`), and an opt-in **persistent prompt gutter** (a dot per prompt, red on
   failure).
 - **Env editing** — **shipped** (both halves): **set/unset in the active pane** from the
-  Env popover (a visible `export`/`unset` injected at the prompt, single-quote-escaped,
-  gated on being at a prompt via OSC 133, zsh/bash), and a **new-shells overlay** (an
-  `[env]` map in `tty.toml`, applied at spawn, no running shell touched). A *silent*
-  live-apply (a `precmd`-drained control file) stays deliberately deferred — the visible
-  inject is self-documenting and enough for the common case. Follow-ups if wanted: fish/csh
-  inject syntax, and per-row edit/unset buttons in the popover.
+  Env view's **Add-variable modal** (a visible `export`/`unset` injected at the prompt,
+  single-quote-escaped, gated on being at a prompt via OSC 133, zsh/bash), and a
+  **new-shells overlay** (an `[env]` map in `tty.toml`, applied at spawn, no running shell
+  touched). A *silent* live-apply (a `precmd`-drained control file) stays deliberately
+  deferred — the visible inject is self-documenting and enough for the common case.
+  Follow-ups if wanted: fish/csh inject syntax, and per-row edit/unset buttons in the list.
 - **Clickable links (OSC 8)** — the current URL autodetection is text-pattern based
   (shipped, see above); OSC 8 would let an app mark an arbitrary label as a link
   (e.g. `ls --hyperlink`) instead of relying on the text looking like a URL.

@@ -211,8 +211,9 @@ that metric's full-size chart, rather than a whole system panel.
    `rime`'s `LineChart` grew optional `y_max` (fixed axis scale) and `y_max_label`
    (caller-formatted axis label). A lighter first cut of the mini-fdtop overlay
    below.
-   - **Expand.** A `ghost` "Expand" / "Collapse" button floats over the chart's
-     top-right (`Tty::metric_detail_expanded` + `ToggleMetricDetailExpanded`).
+   - **Expand.** A `ghost_compact` `+` / `−` button floats over the chart's
+     top-right (`Tty::metric_detail_expanded` + `ToggleMetricDetailExpanded`) — the
+     same glyph control the Env popover shares.
      Expanded is a large centered card whose chart is sized off the window
      geometry; compact is the small bottom-anchored card. Reset to compact on
      each open / close / Escape.
@@ -223,9 +224,9 @@ that metric's full-size chart, rather than a whole system panel.
      so the widget stays generic). Works in the compact and expanded charts alike.
    - **Resize + move.** The card resizes by dragging its own borders — invisible
      hit strips overlay the right edge, bottom edge, and bottom-right corner
-     (`view::with_resize_edges`), each showing the matching resize cursor, so a
-     single-edge drag moves only that axis and the corner moves both
-     (`state::ResizeEdge`; `metric_detail_size`). Pressing the card body instead
+     (the shared `rime::widgets::resize_edges`), each showing the matching resize
+     cursor, so a single-edge drag moves only that axis and the corner moves both
+     (`state::ResizeEdge`, re-exported from rime; `metric_detail_size`). Pressing the card body instead
      drag-moves it (`metric_detail_move`). Both mirror the tab-drag mechanism
      (press starts, `PointerMoved` tracks the delta, `PointerReleased` ends; the
      edge strips / buttons take their own press first, so those don't move it).
