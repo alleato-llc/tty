@@ -1,0 +1,110 @@
+name: Regenerate snapshot baselines
+
+# Regenerates the tiny-skia snapshot baselines ON the runner that will compare
+# against them, and uploads them as an artifact to be committed.
+#
+# Why this exists: ADR 0005 forced the tiny-skia backend for CI on the theory
+# that a pure-CPU rasterizer produces identical pixels anywhere, and generated
+# the baselines in a `rust:bookworm` container. It never held — bookworm is
+# Debian 12, `ubuntu-latest` is Ubuntu 24.04, and their freetype/fontconfig
+# stacks rasterize text differently. The mismatch went unnoticed because CI was
+# failing earlier (missing sibling checkouts) from the moment those baselines
+# landed, so the snapshot step never actually ran until 2026-07-26.
+#
+# The fix is to stop guessing at a matching environment and generate the pixels
+# where they'll be compared. Run this workflow, download the `tiny-skia-baselines`
+# artifact, and commit its contents to tty/snapshots/.
+#
+#   gh workflow run snapshot-baselines.yml
+#   gh run download <run-id> -n tiny-skia-baselines -D tty/snapshots/
+#
+# Manual dispatch only — this never runs on push. Re-run it whenever a
+# deliberate UI change makes the snapshot step fail in ci.yml.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baselines:
+    name: Render baselines (tiny-skia, ubuntu-latest)
+    # MUST match ci.yml's runner — that is the entire point of this workflow.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tty
+        uses: actions/checkout@v4
+        with:
+          path: tty
+
+      - name: Checkout rime (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/rime
+          path: rime
+          token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+
+      # See ci.yml for why all three siblings are laid down.
+      - name: Checkout dorado (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/dorado
+          path: dorado
+
+      - name: Checkout prexp (sibling path dependency; dir must be `fdtop`)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/prexp
+          path: fdtop
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install graphics/windowing libraries (iced + wgpu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libdbus-1-dev
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tty
+          key: baselines
+
+      # Clear the existing tiny-skia baselines so every snapshot is written
+      # fresh. `matches_image` writes-and-passes when the PNG is absent, so with
+      # none present the run records all of them instead of comparing. The
+      # *-wgpu.png baselines are left alone — those are the local dev tier and
+      # are generated on a developer machine with a real GPU.
+      - name: Clear existing tiny-skia baselines
+        working-directory: tty
+        run: |
+          set -euo pipefail
+          echo "removing $(ls tty/snapshots/*-tiny-skia.png 2>/dev/null | wc -l) existing baselines"
+          rm -f tty/snapshots/*-tiny-skia.png
+
+      # --no-fail-fast so a surprise failure still records every other baseline;
+      # without it nextest cancels the run on the first one and the artifact
+      # comes back incomplete.
+      - name: Render all snapshots
+        working-directory: tty
+        env:
+          ICED_TEST_BACKEND: tiny-skia
+        run: cargo nextest run --ignore-default-filter --no-fail-fast -E 'test(snapshot)'
+
+      - name: Summarize
+        working-directory: tty
+        run: |
+          set -euo pipefail
+          count=$(ls tty/snapshots/*-tiny-skia.png | wc -l)
+          echo "generated $count tiny-skia baselines" >> "$GITHUB_STEP_SUMMARY"
+          ls -la tty/snapshots/*-tiny-skia.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny-skia-baselines
+          path: tty/tty/snapshots/*-tiny-skia.png
+          if-no-files-found: error
