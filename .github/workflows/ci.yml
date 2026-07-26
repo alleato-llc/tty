@@ -93,7 +93,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
-            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev xvfb
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libdbus-1-dev xvfb
 
       # nextest is the test runner. The default run (`.config/nextest.toml`'s
       # default-filter) covers unit + behavior; snapshots are run as their own step
@@ -189,7 +190,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
-            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            libdbus-1-dev
 
       - name: Install nextest + cargo-llvm-cov
         uses: taiki-e/install-action@v2
