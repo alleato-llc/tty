@@ -87,6 +87,15 @@ kbd {
 
 /* ---------- shared chrome (Layout.astro) ---------- */
 
+/* Height of the fixed header: 14px padding top and bottom around a 2rem
+   toggle. Slides derive their top padding from this so their content can never
+   slide underneath the wordmark / theme toggle — which is exactly what happened
+   when the mobile padding was a bare viewport percentage smaller than the
+   header. Keep in sync if `header.chrome`'s padding or the toggle size change. */
+:root {
+  --chrome-h: 60px;
+}
+
 header.chrome {
   position: fixed;
   top: 0;
@@ -96,7 +105,9 @@ header.chrome {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 22px;
+  /* The extra top inset keeps the wordmark and toggle clear of a notch /
+     Dynamic Island; it resolves to 0 everywhere else. */
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 22px 14px;
 }
 
 .wordmark {
@@ -144,7 +155,10 @@ header.chrome {
   display: none;
   grid-template-rows: 1fr;
   justify-items: center;
-  padding: 7vh 6vw 11vh;
+  /* `max()` so the top padding always clears the fixed header, however short
+     the viewport is. 7vh alone is only ~38px on a phone — less than the 60px
+     header — which put the heading behind the wordmark and toggle. */
+  padding: max(7vh, calc(var(--chrome-h) + env(safe-area-inset-top, 0px) + 14px)) 6vw 11vh;
   animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
   /* A slide taller than the viewport must stay reachable. `body` is
      overflow:hidden and every slide is pinned to the viewport, so without this
@@ -282,7 +296,8 @@ kbd {
 
 .nav {
   position: fixed;
-  bottom: 22px;
+  /* Lift clear of the home indicator on gesture-nav phones; 0 elsewhere. */
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
   left: 0;
   right: 0;
   display: flex;
@@ -381,9 +396,12 @@ kbd {
     width: 10px;
     height: 10px;
   }
-  /* Give tall slides more room before they need to scroll. */
+  /* Tighten the sides and bottom on a phone, but the TOP still has to clear the
+     fixed header — a flat 4vh here was the bug: it is smaller than the header,
+     so headings rendered underneath the wordmark and theme toggle. */
   .slide {
-    padding: 4vh 5vw 9vh;
+    padding: calc(var(--chrome-h) + env(safe-area-inset-top, 0px) + 10px) 5vw
+      calc(9vh + env(safe-area-inset-bottom, 0px));
   }
   ul.feat li {
     font-size: clamp(16px, 4.2vw, 20px);
