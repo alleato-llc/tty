@@ -143,9 +143,20 @@ header.chrome {
   inset: 0;
   display: none;
   grid-template-rows: 1fr;
-  place-items: center;
+  justify-items: center;
   padding: 7vh 6vw 11vh;
   animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* A slide taller than the viewport must stay reachable. `body` is
+     overflow:hidden and every slide is pinned to the viewport, so without this
+     any content that doesn't fit was silently clipped with no way to scroll to
+     it — invisible on a desktop, but routine on a phone. NOTE: this pairs with
+     `.inner { margin: auto }` below, NOT with `place-items: center`. A centered
+     grid item that overflows gets cut off at the TOP and the overflow is
+     unreachable; auto margins collapse to 0 when there isn't room, so the
+     content stays scrollable. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .slide.active {
@@ -165,6 +176,9 @@ header.chrome {
 
 .inner {
   width: min(1200px, 94vw);
+  /* Centers vertically when the slide has room; collapses to 0 when it doesn't,
+     so tall content scrolls instead of being clipped. See `.slide`. */
+  margin: auto;
 }
 
 .kicker {
@@ -337,10 +351,48 @@ kbd {
 }
 
 @media (max-width: 720px) {
-  .hint,
   .brand-foot {
     display: none;
   }
+  /* The hint itself stays — only its wording swaps. Hiding it outright left
+     touch visitors with no navigation affordance at all: there is no keyboard,
+     so "← → or space" is wrong, but nothing told them the deck swipes either. */
+  .hint-key {
+    display: none;
+  }
+  .hint-touch {
+    display: inline;
+  }
+  .hint {
+    bottom: 18px;
+    right: 14px;
+    font-size: 12px;
+  }
+  /* 34x30 and 8px dots are below the ~44px comfortable touch target. */
+  .arrows button {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+  .dots {
+    gap: 12px;
+  }
+  .dots b {
+    width: 10px;
+    height: 10px;
+  }
+  /* Give tall slides more room before they need to scroll. */
+  .slide {
+    padding: 4vh 5vw 9vh;
+  }
+  ul.feat li {
+    font-size: clamp(16px, 4.2vw, 20px);
+    padding-left: 22px;
+  }
+}
+
+.hint-touch {
+  display: none;
 }
 
 /* ---------- call-to-action buttons ---------- */
