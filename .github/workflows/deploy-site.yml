@@ -33,6 +33,11 @@ on:
       - "web/**"
       - "salpa.yaml"
       - ".github/workflows/deploy-site.yml"
+  # A new release redeploys the site so web/src/lib/releases.ts picks up the
+  # freshly published download links. Without this the build-time resolution
+  # goes stale the moment a tag is cut — the same trigger dorado uses.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -82,5 +87,12 @@ jobs:
 
       # Builds web/, syncs web/dist to the bucket, invalidates CloudFront —
       # all per salpa.yaml's `deploy:` block.
+      #
+      # GITHUB_TOKEN authenticates web/src/lib/releases.ts's build-time call to
+      # the Releases API, lifting the 60/hr unauthenticated rate limit. The
+      # resolver never fails the build without it; the links just degrade to the
+      # Releases page.
       - name: Deploy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: salpa deploy
