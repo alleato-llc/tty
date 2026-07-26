@@ -1,8 +1,8 @@
-/* fed landing page styles. Two themes via the `data-theme` attribute, set before
+/* tty landing page styles. Two themes via the `data-theme` attribute, set before
    first paint by the inline script in Layout.astro; with no stored choice it
-   follows the system. Dark is fed's Dracula; light is its Solarized Light — the
-   exact palettes the editor ships (see crates/patina/src/builtins.rs). Every
-   surface, including the editor mockups, draws from these tokens, so flipping the
+   follows the system. Dark is Dracula; light is Solarized Light — the same named
+   palettes the app ships (see tty/src/theme.rs). Every
+   surface, including the terminal screenshots, draws from these tokens, so flipping the
    toggle re-skins the whole page the way switching the theme re-skins the app. */
 
 :root,
