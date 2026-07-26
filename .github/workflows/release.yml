@@ -10,8 +10,11 @@ name: Release
 #   • macOS — a SIGNED, NOTARIZED, universal (Intel + Apple Silicon) .dmg, built by
 #     `salpa` (our house release tool) via the rust recipe. tty ships as Tty.app.
 #
-# rime is a sibling path dependency (../rime/rime), so every Rust job checks it
-# out next to tty. See ci.yml for the RIME_DEPLOY_TOKEN note.
+# tty's workspace has THREE sibling path dependencies — rime (../rime/rime),
+# dorado-engine (../dorado/rust/crates/dorado-engine) and prexp-core
+# (../fdtop/rust/crates/prexp-core) — so every Rust job lays all three down next
+# to tty. Miss one and `cargo metadata` fails before anything compiles. See
+# ci.yml for the RIME_DEPLOY_TOKEN note and the prexp/fdtop naming mismatch.
 on:
   push:
     tags:
@@ -19,10 +22,14 @@ on:
 
 permissions:
   contents: write # create the release + upload the binaries
+  packages: read # pull salpa from ghcr
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  SALPA_VERSION: "0.1.13" # pinned salpa release on ghcr (bump deliberately)
 
 jobs:
   # Gate the whole release on the test suite: nothing is created, built, or published
@@ -43,6 +50,16 @@ jobs:
           repository: alleato-llc/rime
           path: rime
           token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+      - name: Checkout dorado (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/dorado
+          path: dorado
+      - name: Checkout prexp (sibling path dependency; dir must be `fdtop`)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/prexp
+          path: fdtop
       - uses: dtolnay/rust-toolchain@stable
       - name: Install graphics/windowing libraries (iced + wgpu)
         run: |
@@ -99,6 +116,16 @@ jobs:
           repository: alleato-llc/rime
           path: rime
           token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+      - name: Checkout dorado (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/dorado
+          path: dorado
+      - name: Checkout prexp (sibling path dependency; dir must be `fdtop`)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/prexp
+          path: fdtop
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -155,7 +182,7 @@ jobs:
   #   APPLE_APP_SPECIFIC_PASSWORD   app-specific password for that Apple ID
   #   APPLE_TEAM_ID                 the 10-char Developer Team ID
   #   RIME_DEPLOY_TOKEN             (if rime is private) read token for the checkout
-  #   SALPA_INSTALL_TOKEN           (optional) token to `go install` salpa if private
+  # salpa comes from ghcr, pinned — no install token. dorado and prexp are public.
   build-macos:
     name: Build macOS (signed, notarized)
     needs: create-release
@@ -174,27 +201,35 @@ jobs:
           repository: alleato-llc/rime
           path: rime
           token: ${{ secrets.RIME_DEPLOY_TOKEN || github.token }}
+      - name: Checkout dorado (sibling path dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/dorado
+          path: dorado
+      - name: Checkout prexp (sibling path dependency; dir must be `fdtop`)
+        uses: actions/checkout@v4
+        with:
+          repository: alleato-llc/prexp
+          path: fdtop
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
+      - uses: oras-project/setup-oras@v1
 
-      - name: Install salpa
-        env:
-          SALPA_TOKEN: ${{ secrets.SALPA_INSTALL_TOKEN }}
+      # A PINNED prebuilt salpa from ghcr, not `go install ...@latest` — same
+      # arrangement as deploy-site.yml and dorado. macos-latest is Apple Silicon,
+      # so this is the darwin-arm64 artifact. Pulled into RUNNER_TEMP (overriding
+      # the job's `working-directory: tty`) and put on PATH, so the build step
+      # below still runs from the workspace root.
+      - name: Fetch salpa
+        working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          if [ -n "${SALPA_TOKEN:-}" ]; then
-            git config --global \
-              url."https://x-access-token:${SALPA_TOKEN}@github.com/".insteadOf \
-              "https://github.com/"
-            go env -w GOPRIVATE=github.com/alleato-llc/*
-          fi
-          go install github.com/alleato-llc/salpa@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          echo "${{ github.token }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          oras pull "ghcr.io/${{ github.repository_owner }}/salpa:${SALPA_VERSION}"
+          chmod +x salpa-darwin-arm64
+          mv salpa-darwin-arm64 salpa
+          echo "${{ runner.temp }}" >> "$GITHUB_PATH"
 
       # Build (sign + notarize + staple) then publish (gh release upload) the app.
       # salpa reads target/release and Cargo.toml from this working dir.
