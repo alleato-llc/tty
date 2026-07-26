@@ -22,6 +22,12 @@ name: Regenerate snapshot baselines
 # deliberate UI change makes the snapshot step fail in ci.yml.
 on:
   workflow_dispatch:
+  # TEMPORARY: workflow_dispatch only resolves once this file is on the default
+  # branch, so this trigger bootstraps the very first baseline generation from
+  # the branch that introduces it. Removed in the commit that lands the PNGs.
+  push:
+    branches: [fix/ci-sibling-checkouts]
+    paths: [".github/workflows/snapshot-baselines.yml"]
 
 permissions:
   contents: read
