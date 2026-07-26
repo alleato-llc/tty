@@ -1,11 +1,16 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import { resolveDownloads } from "../lib/releases";
 
 // Point of truth for downloads: prebuilt binaries are attached to GitHub
-// Releases by .github/workflows/release.yml. `/releases/latest` always resolves
-// to the newest release, so the buttons never need a hardcoded version.
+// Releases by .github/workflows/release.yml. The URLs are resolved at BUILD
+// time from the Releases API (src/lib/releases.ts) so the buttons link straight
+// at the file instead of dumping the visitor on the Releases list — the same
+// arrangement soroban and dorado use. Every URL degrades to the Releases page
+// if the lookup fails, so no version is ever hardcoded here.
 const REPO = "https://github.com/alleato-llc/tty";
-const LATEST = `${REPO}/releases/latest`;
+const dl = await resolveDownloads();
+const LATEST = dl.releasesPage;
 const COFFEE = "https://buymeacoffee.com/alleato";
 
 // A theme-swapping screenshot: dark (Dracula) + light (GitHub Light) variants, shown/hidden
@@ -31,7 +36,7 @@ const deck = `
       </p>
       ${shot("hero", "tty terminal showing colored ls output", "big")}
       <div class="cta">
-        <a class="btn primary" href="${LATEST}">Download tty <span class="sub">for macOS</span></a>
+        <a class="btn primary" href="${dl.macDmg}">Download tty <span class="sub">for macOS</span></a>
         <a class="btn ghost" href="${REPO}">View on GitHub</a>
       </div>
     </div>
@@ -176,13 +181,17 @@ const deck = `
       <div class="kicker">Native. Fast. Yours.</div>
       <h1 style="font-size:clamp(34px,6vw,64px)">Give tty a run.</h1>
       <p class="lede" style="margin:18px auto 0">
-        Grab the signed, notarized macOS app, or clone and run it yourself —
-        you'll be at a prompt in seconds. Built on Rust + iced, GPU-rendered with
-        wgpu. Linux and Windows are on the way.
+        Grab the signed, notarized macOS app, take the Linux build, or clone and
+        run it yourself — you'll be at a prompt in seconds. Built on Rust + iced,
+        GPU-rendered with wgpu. Windows is on the way.
       </p>
       <div class="downloads">
-        <a class="dl" href="${LATEST}"><span class="plat">Download for macOS</span><span class="arch">universal · Apple Silicon + Intel</span></a>
+        <a class="dl" href="${dl.macDmg}"><span class="plat">Download for macOS</span><span class="arch">universal · Apple Silicon + Intel</span></a>
+        <a class="dl" href="${dl.linuxX64}"><span class="plat">Download for Linux</span><span class="arch">x86-64 · tar.gz</span></a>
       </div>
+      <p class="fine" style="margin-top:10px">
+        <a href="${LATEST}">All downloads</a>
+      </p>
       <div class="install">
         <div class="run">cargo run -p tty</div>
       </div>
