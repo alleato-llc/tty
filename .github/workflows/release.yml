@@ -6,7 +6,8 @@ name: Release
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Two paths attach to one GitHub Release:
-#   • Linux + Windows — plain `cargo build` packaged as tar.gz / zip.
+#   • Linux — plain `cargo build` packaged as tar.gz. (Windows is not built; see
+#     the `build` job for why and how to restore it.)
 #   • macOS — a SIGNED, NOTARIZED, universal (Intel + Apple Silicon) .dmg, built by
 #     `salpa` (our house release tool) via the rust recipe. tty ships as Tty.app.
 #
@@ -91,7 +92,21 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
 
-  # Linux + Windows: unsigned binary, one archive per platform.
+  # Linux: unsigned binary, one archive per platform.
+  #
+  # Windows was dropped after v0.0.1-rc1 proved it cannot compile: the status-bar
+  # metrics use `prexp_core::backend::NativeSource`, which prexp-core only defines
+  # for macOS and Linux (`#[cfg(target_os = ...)]` in its backend/mod.rs — no
+  # Windows arm), so `tty` fails with E0432/E0433 before linking. It went
+  # unnoticed because ci.yml builds ubuntu-latest only; the Windows target existed
+  # here alone, and no release had ever run. To restore it, give prexp-core a
+  # Windows backend (or cfg-gate metrics.rs to a no-op sampler there), then re-add:
+  #
+  #   - os: windows-latest
+  #     target: x86_64-pc-windows-msvc
+  #     ext: zip
+  #
+  # The Package step below still handles `ext: zip`, so that entry is all it takes.
   build:
     name: Build ${{ matrix.target }}
     needs: create-release
@@ -103,9 +118,6 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             ext: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            ext: zip
     steps:
       - name: Checkout tty
         uses: actions/checkout@v4
