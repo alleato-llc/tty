@@ -208,7 +208,9 @@ const deck = `
   title="tty — the fast terminal in Rust"
   description="tty is a fast, focused, GPU-accelerated terminal written in Rust — tabs, split panes, shell-aware prompt jumping, scrollback, mouse select & copy, full ANSI color, themes, and output-driven repaint. Built on the cathode engine and phosphor widget. No Electron."
 >
-  <div class="hint">← → or space to explore</div>
+  <div class="hint">
+    <span class="hint-key">← → or space to explore</span><span class="hint-touch">swipe to explore</span>
+  </div>
   <div class="brand-foot">Rust · wgpu · zero Electron</div>
 
   <div class="deck" id="deck" set:html={deck}></div>
@@ -252,6 +254,37 @@ const deck = `
       if (e.key === "Home") go(0);
       if (e.key === "End") go(slides.length - 1);
     });
+    // Touch: swipe left/right to move between slides. The deck previously had
+    // no touch handling at all — on a phone the only affordances were the small
+    // arrows and dots, and the keyboard hint doesn't apply.
+    //
+    // Only a predominantly HORIZONTAL gesture navigates. Slides scroll
+    // vertically now (see `.slide { overflow-y: auto }`), so a mostly-vertical
+    // drag must be left alone for the browser to scroll with — hence the
+    // |dx| > |dy| test and the passive listeners (never preventDefault, so
+    // scrolling is never blocked).
+    const SWIPE_MIN = 50; // px of horizontal travel before it counts
+    let sx = 0,
+      sy = 0;
+    addEventListener(
+      "touchstart",
+      (e) => {
+        sx = e.changedTouches[0].clientX;
+        sy = e.changedTouches[0].clientY;
+      },
+      { passive: true },
+    );
+    addEventListener(
+      "touchend",
+      (e) => {
+        const dx = e.changedTouches[0].clientX - sx;
+        const dy = e.changedTouches[0].clientY - sy;
+        if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) <= Math.abs(dy)) return;
+        go(dx < 0 ? i + 1 : i - 1);
+      },
+      { passive: true },
+    );
+
     const start = parseInt(location.hash.slice(1), 10);
     go(Number.isInteger(start) ? start : 0);
   </script>
