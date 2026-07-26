@@ -89,8 +89,8 @@ jobs:
         working-directory: tty
         run: |
           set -euo pipefail
-          echo "removing $(ls snapshots/*-tiny-skia.png 2>/dev/null | wc -l) existing baselines"
-          rm -f snapshots/*-tiny-skia.png
+          echo "removing $(ls tty/snapshots/*-tiny-skia.png 2>/dev/null | wc -l) existing baselines"
+          rm -f tty/snapshots/*-tiny-skia.png
 
       # --no-fail-fast so a surprise failure still records every other baseline;
       # without it nextest cancels the run on the first one and the artifact
@@ -105,12 +105,12 @@ jobs:
         working-directory: tty
         run: |
           set -euo pipefail
-          count=$(ls snapshots/*-tiny-skia.png | wc -l)
+          count=$(ls tty/snapshots/*-tiny-skia.png | wc -l)
           echo "generated $count tiny-skia baselines" >> "$GITHUB_STEP_SUMMARY"
-          ls -la snapshots/*-tiny-skia.png
+          ls -la tty/snapshots/*-tiny-skia.png
 
       - uses: actions/upload-artifact@v4
         with:
           name: tiny-skia-baselines
-          path: tty/snapshots/*-tiny-skia.png
+          path: tty/tty/snapshots/*-tiny-skia.png
           if-no-files-found: error
