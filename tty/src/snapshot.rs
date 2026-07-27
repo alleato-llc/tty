@@ -2583,8 +2583,7 @@ fn generate_landing_shots() {
     {
         let arrangement = |i: usize| -> Vec<crate::state::MetricPopover> {
             let cores_at = |x: f32, y: f32| {
-                let mut p =
-                    crate::state::MetricPopover::new(crate::settings::MetricKind::CpuCores);
+                let mut p = crate::state::MetricPopover::new(crate::settings::MetricKind::CpuCores);
                 p.move_offset = (x, y);
                 p
             };
@@ -2594,10 +2593,10 @@ fn generate_landing_shots() {
                 p
             };
             match i {
-                0 => vec![],                                          // status bar only
-                1 => vec![cores_at(0.0, 0.0)],                        // drill in
-                2 => vec![cores_at(125.0, -75.0)],                    // …dragged
-                3 => vec![cores_at(250.0, -150.0)],                   // …parked
+                0 => vec![],                                            // status bar only
+                1 => vec![cores_at(0.0, 0.0)],                          // drill in
+                2 => vec![cores_at(125.0, -75.0)],                      // …dragged
+                3 => vec![cores_at(250.0, -150.0)],                     // …parked
                 4 => vec![cores_at(250.0, -150.0), procs_at(0.0, 0.0)], // second drill-in
                 5 => vec![cores_at(250.0, -150.0), procs_at(-145.0, 20.0)],
                 _ => vec![cores_at(250.0, -150.0), procs_at(-290.0, 40.0)], // == the still
