@@ -2385,7 +2385,16 @@ fn generate_landing_shots() {
         );
         let snap = sim.snapshot(&crate::state::theme(tty)).expect("render");
         let tmp = format!("snapshots/_shot-{name}.png");
-        let _ = snap.matches_image(&tmp); // writes _shot-<name>-wgpu.png
+        // `matches_image` only WRITES the file when it is absent; with one already
+        // there it COMPARES and returns false, which this discards. Leaving the
+        // previous run's file in place therefore made the generator silently
+        // re-copy the OLD render — edit a shot, re-run, get the same picture and
+        // no error. Clear it first so every run genuinely re-renders. Both
+        // backend suffixes, since ICED_TEST_BACKEND can select tiny-skia.
+        for backend in ["wgpu", "tiny-skia"] {
+            let _ = std::fs::remove_file(format!("snapshots/_shot-{name}-{backend}.png"));
+        }
+        let _ = snap.matches_image(&tmp); // now always writes _shot-<name>-<backend>.png
         std::fs::copy(
             format!("snapshots/_shot-{name}-wgpu.png"),
             format!("../web/public/shots/{name}.png"),
@@ -2569,11 +2578,15 @@ fn generate_landing_shots() {
     }
 
     // widgets, animated — "click to drill in, then arrange", the one thing on that
-    // slide a still cannot show. Frames: the bare status bar, the CPU-cores chart
-    // opening centred (`move_offset` starts at 0,0 — where a real drill-in lands),
-    // sliding to the upper right, then the Processes table doing the same to the
-    // lower left. The LAST frame is deliberately identical to the static
-    // `widgets` shot above, so the still fallback is the animation's end state.
+    // slide a still cannot show. The CPU-cores chart opens centred (`move_offset`
+    // starts at 0,0 — where a real drill-in lands), slides to the top right, then
+    // the Processes table does the same and parks directly beneath it.
+    //
+    // The machine also stays ALIVE across the frames: every sparkline, the CPU
+    // number, the per-core grid and the process table advance one sample per
+    // frame, so the animation reads as a running system rather than a static
+    // mock that happens to slide around. `tick` below is a fixed walk, not a
+    // random one — the frames have to be reproducible.
     //
     // These are frames, not a deliverable: they land in web/public/shots as
     // `_anim-widgets-f<n>[-theme].png` (gitignored) and
@@ -2581,27 +2594,91 @@ fn generate_landing_shots() {
     // and deletes them. Animated WebP rather than GIF — GIF's 256 colours band
     // badly on the dark terminal gradients and the file is several times larger.
     {
+        // Card geometry. `place_metric_popover` does NOT take a screen position:
+        // `left = (window_w - card_w)/2 + dx` and `bottom = 44 - dy`, i.e. dx is
+        // from centre and dy is measured UP FROM THE BOTTOM — so a positive dy
+        // pushes a card down, not up. It also cascades every popover past the
+        // first by `28 * index` (right and up), so the second card needs its
+        // offsets pre-compensated or it lands 28px off the column.
+        //
+        // Solving for a shared right-hand column at left=740 in the 1120x640
+        // window, cores on top and procs directly beneath:
+        //   cores (index 0): dx = 740 - 400 = 340,  dy = 44 - 320 = -276
+        //   procs (index 1): dx = 740 - 428 = 312,  dy = 72 -  78 =  -6
+        const CORES_DX: f32 = 340.0;
+        const CORES_DY: f32 = -276.0;
+        const PROCS_DX: f32 = 312.0;
+        const PROCS_DY: f32 = -6.0;
+
         let arrangement = |i: usize| -> Vec<crate::state::MetricPopover> {
-            let cores_at = |x: f32, y: f32| {
-                let mut p = crate::state::MetricPopover::new(crate::settings::MetricKind::CpuCores);
+            let at = |kind, x: f32, y: f32| {
+                let mut p = crate::state::MetricPopover::new(kind);
                 p.move_offset = (x, y);
                 p
             };
-            let procs_at = |x: f32, y: f32| {
-                let mut p = crate::state::MetricPopover::new(crate::settings::MetricKind::Procs);
-                p.move_offset = (x, y);
-                p
-            };
+            let cores = |x, y| at(crate::settings::MetricKind::CpuCores, x, y);
+            let procs = |x, y| at(crate::settings::MetricKind::Procs, x, y);
             match i {
-                0 => vec![],                                            // status bar only
-                1 => vec![cores_at(0.0, 0.0)],                          // drill in
-                2 => vec![cores_at(125.0, -75.0)],                      // …dragged
-                3 => vec![cores_at(250.0, -150.0)],                     // …parked
-                4 => vec![cores_at(250.0, -150.0), procs_at(0.0, 0.0)], // second drill-in
-                5 => vec![cores_at(250.0, -150.0), procs_at(-145.0, 20.0)],
-                _ => vec![cores_at(250.0, -150.0), procs_at(-290.0, 40.0)], // == the still
+                0 => vec![],                                           // status bar only
+                1 => vec![cores(0.0, 0.0)],                            // drill in, centred
+                2 => vec![cores(170.0, -140.0)],                       // …dragged up and right
+                3 => vec![cores(CORES_DX, CORES_DY)],                  // …parked top right
+                4 => vec![cores(CORES_DX, CORES_DY), procs(0.0, 0.0)], // second drill-in
+                5 => vec![cores(CORES_DX, CORES_DY), procs(160.0, -3.0)],
+                // Both parked in the right-hand column, procs beneath cores.
+                _ => vec![cores(CORES_DX, CORES_DY), procs(PROCS_DX, PROCS_DY)],
             }
         };
+
+        // Advance every metric one sample, deterministically. A fixed per-frame
+        // delta table rather than an RNG: the renders must be reproducible, and
+        // `Math::random`-style drift would make every regeneration a diff.
+        let tick = |tty: &mut Tty, i: usize| {
+            const CPU: [f32; 7] = [72.0, 79.0, 86.0, 74.0, 63.0, 68.0, 81.0];
+            const WOBBLE: [f32; 7] = [0.0, 6.0, -4.0, 9.0, -7.0, 3.0, -2.0];
+            let cpu = CPU[i];
+
+            // The headline CPU number and its sparkline: drop the oldest sample,
+            // push this frame's, so the chart visibly scrolls.
+            if let Some(latest) = tty.metrics.latest.as_mut() {
+                latest.cpu_percent = cpu;
+            }
+            tty.metrics.cpu_history.pop_front();
+            tty.metrics.cpu_history.push_back(cpu);
+
+            // Load average drifts with it.
+            let load = 1.32 + WOBBLE[i] / 40.0;
+            tty.metrics.load_avg = Some([load, 1.10, 0.95]);
+            tty.metrics.load1_history.pop_front();
+            tty.metrics.load1_history.push_back(load);
+
+            // Per-core grid: nudge each core by a rotating offset so the 4x4 of
+            // sparklines all move, without any of them flatlining or pegging.
+            for (c, hist) in tty.metrics.core_history.iter_mut().enumerate() {
+                if let Some(&last) = hist.back() {
+                    let next = (last + WOBBLE[(i + c) % 7] * 1.5).clamp(3.0, 99.0);
+                    hist.pop_front();
+                    hist.push_back(next);
+                }
+            }
+
+            // Processes: shuffle the CPU column and re-sort, so the table
+            // reorders the way a real `top` does — the busiest row changing is
+            // what sells it as live.
+            //
+            // PROPORTIONAL, not additive: a flat +-16 point swing dominated the
+            // small rows and produced nonsense like zsh at 17% (and three
+            // processes tied on the same value). Scaling by each process's own
+            // load keeps Chrome swinging by points and zsh by fractions.
+            for (j, p) in tty.metrics.processes.iter_mut().enumerate() {
+                let factor = 1.0 + WOBBLE[(i + j) % 7] / 45.0;
+                p.cpu_percent = (p.cpu_percent * factor).clamp(0.4, 99.0);
+            }
+            tty.metrics
+                .processes
+                .sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
+        };
+
         for i in 0..7 {
             let mut tty = populated();
             tty.settings.status_bar_metrics = vec![
@@ -2621,6 +2698,7 @@ fn generate_landing_shots() {
             tty.metrics.load_avg = Some([1.32, 1.10, 0.95]);
             tty.metrics.load1_history = [0.8, 1.0, 1.2, 1.1, 1.3, 1.32].into_iter().collect();
             tty.metrics.system_uptime_secs = Some(2 * 60);
+            tick(&mut tty, i);
             tty.metric_details = arrangement(i);
             save(tty, &format!("_anim-widgets-f{i}"), 1120.0, 640.0);
         }
