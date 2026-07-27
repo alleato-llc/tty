@@ -24,6 +24,20 @@ const COFFEE = "https://buymeacoffee.com/alleato";
 const shot = (name: string, alt: string, extra = "") =>
   `<img class="shot ${extra}" data-shot="${name}" src="/shots/${name}.png" alt="${alt}" />`;
 
+// An ANIMATED shot: the same capture set plus a `<name>[-theme].webp` built by
+// web/scripts/build-shot-anims.sh from frames the generator renders.
+//
+// <picture> rather than swapping the extension in JS, for two reasons: the
+// browser picks exactly one file (no double fetch), and `prefers-reduced-motion`
+// is honoured declaratively — an animated image cannot be paused, so anyone who
+// asks for reduced motion gets the still PNG instead. The <source> is retargeted
+// alongside the <img> when the theme changes; see syncShots().
+const anim = (name: string, alt: string, extra = "") =>
+  `<picture>` +
+  `<source srcset="/shots/${name}.webp" type="image/webp" media="(prefers-reduced-motion: no-preference)" />` +
+  `<img class="shot ${extra}" data-shot="${name}" data-anim="1" src="/shots/${name}.png" alt="${alt}" />` +
+  `</picture>`;
+
 // The whole slide deck is one raw-HTML string injected with `set:html`. Every
 // terminal shown is a real screenshot of the app (web/public/shots/*, rendered by
 // the actual wgpu path — see snapshot.rs `generate_landing_shots`), never a mockup.
@@ -159,7 +173,7 @@ const deck = `
           <li><b>Click to drill in</b> — any cell opens a full chart, and a chart can <b>graduate into its own pane</b> beside the terminal.</li>
         </ul>
       </div>
-      ${shot("widgets", "tty's configurable status-bar metrics with a CPU chart drilled in")}
+      ${anim("widgets", "A status-bar cell is clicked open into a CPU chart, then dragged into place beside the terminal; a Processes table follows")}
     </div>
   </section>
 
@@ -310,10 +324,21 @@ const deck = `
     const syncShots = () => {
       const suffix = SHOT_SUFFIX[document.documentElement.dataset.theme] ?? "";
       shots.forEach((img) => {
-        const next = `/shots/${img.dataset.shot}${suffix}.png`;
+        const base = `/shots/${img.dataset.shot}${suffix}`;
+        // An animated shot sits inside a <picture>; its <source> carries the
+        // .webp and has to move with the theme too, or the animation would stay
+        // on Dracula while everything around it re-skinned.
+        const source =
+          img.parentElement?.tagName === "PICTURE"
+            ? img.parentElement.querySelector("source")
+            : null;
+        if (source && !source.srcset.endsWith(`${base}.webp`)) {
+          source.srcset = `${base}.webp`;
+        }
         // Guard the assignment: setting src to its current value still counts as
         // a change in some browsers and would re-request the image on every
         // theme flip.
+        const next = `${base}.png`;
         if (!img.src.endsWith(next)) img.src = next;
       });
     };

@@ -2568,6 +2568,64 @@ fn generate_landing_shots() {
         save(tty, "widgets", 1120.0, 640.0);
     }
 
+    // widgets, animated — "click to drill in, then arrange", the one thing on that
+    // slide a still cannot show. Frames: the bare status bar, the CPU-cores chart
+    // opening centred (`move_offset` starts at 0,0 — where a real drill-in lands),
+    // sliding to the upper right, then the Processes table doing the same to the
+    // lower left. The LAST frame is deliberately identical to the static
+    // `widgets` shot above, so the still fallback is the animation's end state.
+    //
+    // These are frames, not a deliverable: they land in web/public/shots as
+    // `_anim-widgets-f<n>[-theme].png` (gitignored) and
+    // `web/scripts/build-shot-anims.sh` muxes them into `widgets[-theme].webp`
+    // and deletes them. Animated WebP rather than GIF — GIF's 256 colours band
+    // badly on the dark terminal gradients and the file is several times larger.
+    {
+        let arrangement = |i: usize| -> Vec<crate::state::MetricPopover> {
+            let cores_at = |x: f32, y: f32| {
+                let mut p = crate::state::MetricPopover::new(crate::settings::MetricKind::CpuCores);
+                p.move_offset = (x, y);
+                p
+            };
+            let procs_at = |x: f32, y: f32| {
+                let mut p = crate::state::MetricPopover::new(crate::settings::MetricKind::Procs);
+                p.move_offset = (x, y);
+                p
+            };
+            match i {
+                0 => vec![],                                            // status bar only
+                1 => vec![cores_at(0.0, 0.0)],                          // drill in
+                2 => vec![cores_at(125.0, -75.0)],                      // …dragged
+                3 => vec![cores_at(250.0, -150.0)],                     // …parked
+                4 => vec![cores_at(250.0, -150.0), procs_at(0.0, 0.0)], // second drill-in
+                5 => vec![cores_at(250.0, -150.0), procs_at(-145.0, 20.0)],
+                _ => vec![cores_at(250.0, -150.0), procs_at(-290.0, 40.0)], // == the still
+            }
+        };
+        for i in 0..7 {
+            let mut tty = populated();
+            tty.settings.status_bar_metrics = vec![
+                metric("disk_io", "sparkline"),
+                metric("clock", "sparkline"),
+                metric("load", "sparkline"),
+                metric("cpu", "sparkline"),
+                metric("procs", "sparkline"),
+                metric("uptime", "sparkline"),
+            ];
+            tty.settings.status_bar_metrics_pinned = Some(true);
+            tty.window_width = 1120.0;
+            tty.window_height = 640.0;
+            seed_metric_sample(&mut tty);
+            seed_cpu_cores(&mut tty);
+            seed_processes(&mut tty);
+            tty.metrics.load_avg = Some([1.32, 1.10, 0.95]);
+            tty.metrics.load1_history = [0.8, 1.0, 1.2, 1.1, 1.3, 1.32].into_iter().collect();
+            tty.metrics.system_uptime_secs = Some(2 * 60);
+            tty.metric_details = arrangement(i);
+            save(tty, &format!("_anim-widgets-f{i}"), 1120.0, 640.0);
+        }
+    }
+
     // themes — the whole app re-skinned; same content, different palettes
     for (name, theme) in [
         ("theme-phosphor", "Phosphor"),
