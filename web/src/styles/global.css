@@ -106,8 +106,24 @@ header.chrome {
   align-items: center;
   justify-content: space-between;
   /* The extra top inset keeps the wordmark and toggle clear of a notch /
-     Dynamic Island; it resolves to 0 everywhere else. */
+     Dynamic Island; it resolves to 0 everywhere else. Needs
+     `viewport-fit=cover` on the viewport meta to be non-zero at all. */
   padding: calc(14px + env(safe-area-inset-top, 0px)) 22px 14px;
+
+  /* Slides scroll UNDER this bar (`.slide { overflow-y: auto }`), so it has to
+     occlude what passes beneath it. Without a background the wordmark and
+     toggle render directly on top of scrolled text — the slide's top padding
+     only guarantees the at-rest position, not the scrolled one. A fade rather
+     than a hard bar keeps the page's radial gradient from showing a seam. */
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 62%, transparent 100%);
+
+  /* Let touches fall through to the slide so the top strip still scrolls;
+     the wordmark and toggle re-enable it for themselves. */
+  pointer-events: none;
+}
+
+header.chrome > * {
+  pointer-events: auto;
 }
 
 .wordmark {
@@ -379,7 +395,7 @@ kbd {
     display: inline;
   }
   .hint {
-    bottom: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
     right: 14px;
     font-size: 12px;
   }
