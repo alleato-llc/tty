@@ -1,6 +1,8 @@
 # 0005 — Headless CI: tiny-skia snapshot backend + coverage gate
 
-Status: accepted
+Status: accepted — **amended 2026-07-26** (see the amendment at the end: the
+baselines' portability claim in the Decision was wrong; they are now generated on
+the runner itself, not in a container)
 
 ## Context
 
@@ -38,6 +40,10 @@ not a workaround, a genuinely different (and better-suited-to-CI) rendering path
   were generated inside the same kind of container CI uses, not exported from
   macOS — sidesteps any residual font-shaping/rasterization variance between
   platforms rather than assuming it doesn't exist.
+  > **Superseded.** "The same kind of container" was `rust:bookworm` against an
+  > `ubuntu-latest` runner — Debian 12 vs Ubuntu 24.04, different font stacks. The
+  > baselines never matched the runner. They are now rendered *on* the runner by
+  > `.github/workflows/snapshot-baselines.yml`; see the amendment.
 - **A separate CI step, not folded into the existing `xvfb`-wrapped one.** The
   unit/behavior step still runs unforced (tries `wgpu` first, gets a display from
   `xvfb`) — nothing about its passing/failing depends on pixels, so there was no
@@ -64,11 +70,55 @@ not a workaround, a genuinely different (and better-suited-to-CI) rendering path
   what a developer actually looks at when iterating) and `tiny-skia` (CI, headless,
   portable). Both are legitimate, permanent — not "`tiny-skia` until CI gets a
   GPU." A future contributor should not try to unify them onto one backend.
-- Any snapshot-affecting UI change now needs **both** baselines refreshed (delete
-  the stale PNG, rerun once locally for `-wgpu`, once in a matching container for
-  `-tiny-skia`) — a small ongoing cost for CI actually catching visual
-  regressions, which it could not do before this ADR.
+- Any snapshot-affecting UI change now needs **both** baselines refreshed: rerun
+  locally for `-wgpu`, and dispatch the `snapshot-baselines` workflow for
+  `-tiny-skia` (see the amendment below — do *not* generate the latter in a
+  container).
 - The coverage gate can go up over time as genuinely-testable gaps close (e.g.
   `phosphor::input`'s ~30%, a pure key→bytes function that's more testable than
   its number suggests) — it should track "what's realistic," not sit fixed at 60%
   forever.
+
+## Amendment (2026-07-26) — the portability claim was wrong
+
+The Decision above says the `tiny-skia` baselines were "verified byte-identical
+across two independent fresh containers matching the `ubuntu-latest` CI runner",
+and concludes the pixels are "portable and deterministic". **That did not hold,
+and the verification was weaker than it sounds.**
+
+Two containers agreeing with *each other* is not the same as either agreeing with
+the runner. The baselines were generated in `rust:bookworm` — Debian 12 — while
+CI runs on `ubuntu-latest`, which is Ubuntu 24.04. Different freetype/fontconfig
+versions rasterize text differently, so the committed pixels never matched what
+the runner produced.
+
+This went unnoticed for two and a half weeks because **the snapshot step never
+actually ran**. The same commit that introduced these baselines also left CI
+failing earlier, on missing sibling checkouts (`dorado-engine`, `prexp-core`), and
+every run after it failed the same way. The first time the step executed was
+2026-07-26, at which point:
+
+- **4 of the 5** committed `-tiny-skia` baselines did not match, and
+- the other **61 snapshots had no `-tiny-skia` baseline at all**, so they were
+  taking `matches_image`'s write-if-absent path and passing unconditionally. The
+  step reported green while verifying essentially nothing.
+
+### What replaces it
+
+Stop trying to find an environment that matches the runner, and generate on the
+runner. `.github/workflows/snapshot-baselines.yml` is dispatch-only: it clears the
+`-tiny-skia` baselines, renders all of them on `ubuntu-latest`, and uploads them
+as an artifact to commit. All 66 image-comparing snapshots now have a real
+baseline, matching the `-wgpu` set name-for-name.
+
+The original decision — force `tiny-skia` for CI, keep `wgpu` for local dev —
+stands. Only the claim about where its baselines can be produced was wrong.
+
+### The transferable lesson
+
+The failure was not the wrong container; it was **a verification that could not
+fail**. "Two containers agree" and "a missing baseline is written and passes" both
+produce green without evidence. When a check's passing state is also its
+no-op state, it is not a check. Prefer a signal that is loud when absent — which
+is why the workflow now *clears* the baselines before rendering rather than
+topping up whatever happens to be missing.

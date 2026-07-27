@@ -484,16 +484,25 @@ GPU/driver-specific, so a baseline recorded on one machine won't byte-match anot
 which is why `snapshots/*-wgpu.png` (recorded on macOS/Metal, for local dev iteration)
 were historically excluded from CI. `iced_test` also compiles in a `tiny-skia` software
 rasterizer (an iced default feature, no extra Cargo work needed) with zero GPU/display
-dependency, selectable via `ICED_TEST_BACKEND=tiny-skia` — forcing it makes CI's
-`snapshots/*-tiny-skia.png` baselines fully portable: verified byte-for-byte identical
-across independent fresh Linux containers (matching the `ubuntu-latest` CI runner), no
-`xvfb` needed for that step. `.github/workflows/ci.yml`'s `rust` job runs it as a
-separate step from the `xvfb`-wrapped unit/behavior run.
+dependency, selectable via `ICED_TEST_BACKEND=tiny-skia` — so CI compares against
+`snapshots/*-tiny-skia.png` with no `xvfb` needed for that step.
+`.github/workflows/ci.yml`'s `rust` job runs it separately from the `xvfb`-wrapped
+unit/behavior run.
+
+Those baselines are **not portable across distros**, despite what ADR 0005 originally
+claimed. They were first generated in a `rust:bookworm` container (Debian 12) while CI
+runs `ubuntu-latest` (Ubuntu 24.04), whose different freetype/fontconfig rasterizes
+text differently — so they never matched, and the mismatch stayed invisible for weeks
+because CI was failing earlier and the snapshot step never executed. They are now
+rendered **on the runner** by the dispatch-only
+`.github/workflows/snapshot-baselines.yml`, which clears the set and re-renders all of
+them for committing. See ADR 0005's amendment.
 
 **Coverage** (`cargo-llvm-cov`, workspace-scoped: `cathode`/`phosphor`/`tty`, not rime
 or upstream deps) runs in CI as its own `coverage` job — same `tiny-skia` forcing, so
-the instrumented run also exercises the snapshot tier — gated at 60% lines (`--fail-
-under-lines`) with an HTML report uploaded as a build artifact for drilling into misses.
+the instrumented run also exercises the snapshot tier — gated at **70%** lines
+(`--fail-under-lines`, raised from the 60% ADR 0005 originally set) with an HTML report
+uploaded as a build artifact for drilling into misses.
 Known low-coverage areas, inherent to what they are rather than undertested:
 `cathode::pty`/`wake` (real PTY/OS signal plumbing), `tty::main`/`subscription`/
 `app_icon` (entry point, iced subscriptions, platform Dock-icon AppKit calls) — all

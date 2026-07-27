@@ -192,6 +192,10 @@ touching it:
 - **`keyring` needs its platform features** (`apple-native`, `windows-native`,
   `sync-secret-service` — set in the workspace `Cargo.toml`). Without them it
   silently compiles a non-persisting mock backend and every run mints a new key.
+  On **Linux** that feature pulls `libdbus-sys`, whose build script needs
+  `dbus-1.pc` — so every Linux CI job installs `libdbus-1-dev` alongside the
+  iced/wgpu libraries, or the build dies at `libdbus-sys` before compiling tty.
+  macOS uses `apple-native` and needs nothing extra.
 - **Tests never touch the OS keychain or LocalAuthentication** — both side-effect
   the machine running them (a real keychain entry / a real auth dialog). The
   crypto/segment/manifest/writer/passphrase layers are tested against temp dirs
@@ -205,8 +209,9 @@ touching it:
   ACL, so reading a key stored by an older build can hit an allow/deny dialog (or
   block). `security delete-generic-password -s tty -a encrypted-history-key`
   resets the dev state; the signed `.app` has a stable identity.
-- The second sibling path dependency: `../dorado/rust/crates/dorado-engine`
-  (alongside `../rime/rime`) supplies the opt-in Threefish-256 cipher AND all
+- One of tty's three sibling path deps: `../dorado/rust/crates/dorado-engine`
+  (alongside `../rime/rime` and `../fdtop/rust/crates/prexp-core` — see the
+  README's table) supplies the opt-in Threefish-256 cipher AND all
   key derivation (`dorado_engine::kdf`): `derive_from_password` + `validate`
   stretch the passphrase, and `derive_from_key_with` fans the master (keychain
   or passphrase) into the `HistoryKeys` hierarchy under a family-matched PRF
@@ -238,14 +243,35 @@ cargo build --bins
 cargo nextest run                          # unit + behavior (the everyday command)
 cargo nextest run --ignore-default-filter  # whole suite, incl. the snapshot
 cargo clippy --all-targets -- -D warnings
+cargo fmt -p cathode -p phosphor -p tty --check   # what CI checks — NOT `--all`
 ```
+
+The fmt command is **scoped to tty's own crates on purpose**. `cargo fmt --all` means
+"all packages *and their local path-based dependencies*", so it walks into the
+`rime` / `dorado` / `prexp` checkouts and fails on formatting in code this repo
+neither owns nor can fix — which it did, on a file in `prexp`. Clippy needs no
+equivalent scoping: it lints workspace members only, never dependencies.
 
 `behavior::*` tests drive `tty::state`/`update` with pty-less tabs (no shell);
 `snapshot::*` renders the chrome to a PNG (backend-specific baseline, excluded from
-the default run). Re-baseline a snapshot by deleting its backend-suffixed PNG
-(`snapshots/<name>-wgpu.png`, **not** the bare name in `matches_image`) and re-running —
-a missing baseline is written and passes. Full story in `docs/ARCHITECTURE.md`; the
-`snapshot-testing` skill has the authoring + re-baseline procedure.
+the default run). **Every snapshot has two baselines** — `-wgpu` (local dev, real
+GPU) and `-tiny-skia` (CI) — and they are refreshed in different places:
+
+- **`-wgpu`**: delete its backend-suffixed PNG (`snapshots/<name>-wgpu.png`, **not**
+  the bare name in `matches_image`) and re-run — a missing baseline is written and
+  passes.
+- **`-tiny-skia`**: dispatch `.github/workflows/snapshot-baselines.yml`, download the
+  `tiny-skia-baselines` artifact, commit it. Do **not** generate these locally or in
+  a container: they must come from the `ubuntu-latest` runner that compares against
+  them. ADR 0005's amendment explains why the container approach failed.
+
+That write-if-absent behaviour is a double edge: it makes re-baselining easy, and it
+makes a *missing* baseline pass silently. 61 of 66 snapshots were doing exactly that
+until 2026-07-26. If a snapshot step goes green suspiciously fast, check the baseline
+exists rather than assuming it matched.
+
+Full story in `docs/ARCHITECTURE.md`; the `snapshot-testing` skill has the authoring
++ re-baseline procedure.
 
 ## App icon
 

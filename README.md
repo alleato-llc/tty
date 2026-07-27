@@ -25,18 +25,24 @@ panel (by path dependency, the way `fed` consumes `rime`), so refinements to the
 terminal land in both the standalone app and the IDE at once. See
 `docs/ARCHITECTURE.md` and `docs/adr/0001-crate-split.md`.
 
-## rime (and dorado)
+## Sibling path dependencies
 
-The chrome (tab strip, status bar) comes from **rime**, our shared `iced`
-component kit — a sibling path dependency at `../rime/rime`
-([`alleato-llc/rime`](https://github.com/alleato-llc/rime)). Lay it down next to
-this repo so the path dependency resolves. **Extend rime; never fork a UI
-component.**
+tty's workspace has **three** sibling path dependencies. All three must sit next
+to this repo or `cargo metadata` fails before anything compiles — clone them as
+siblings, not into `tty/`:
 
-A second sibling path dependency, `../dorado/rust/crates/dorado-engine`
-([`alleato-llc/dorado`](https://github.com/alleato-llc/dorado)), provides the
-optional Threefish-256 cipher for encrypted history (see below) — lay `dorado`
-down next to this repo too.
+| Directory | Repo | Supplies |
+|---|---|---|
+| `../rime/rime` | [`alleato-llc/rime`](https://github.com/alleato-llc/rime) | The chrome (tab strip, status bar) — our shared `iced` component kit |
+| `../dorado/rust/crates/dorado-engine` | [`alleato-llc/dorado`](https://github.com/alleato-llc/dorado) | The opt-in Threefish-256 cipher **and** all key derivation for encrypted history |
+| `../fdtop/rust/crates/prexp-core` | [`alleato-llc/prexp`](https://github.com/alleato-llc/prexp) | The system-metrics sampling behind the status bar |
+
+Note the last row: the repo is named **`prexp`** but the path dependency expects
+the directory **`fdtop`**, so clone it as `fdtop`. CI has to do the same (see
+`.github/workflows/ci.yml`) — a missing checkout there is what kept every Rust job
+red until 2026-07-26.
+
+**Extend rime; never fork a UI component.**
 
 ## Build & run
 
@@ -55,6 +61,11 @@ cargo llvm-cov nextest --workspace --ignore-default-filter  # coverage (cathode/
 CI runs all three test tiers headlessly, including snapshots (forcing `iced_test`'s
 `tiny-skia` software backend — no GPU/display needed, unlike the `wgpu` backend used
 for local dev) — see `docs/adr/0005-headless-ci-snapshots-and-coverage.md`.
+
+The `-tiny-skia` baselines are generated **on the CI runner itself**, by dispatching
+`.github/workflows/snapshot-baselines.yml` and committing the artifact — not locally
+and not in a container, whose font stack rasterizes text differently. Releasing is in
+`docs/RELEASING.md`.
 
 ## Keys
 

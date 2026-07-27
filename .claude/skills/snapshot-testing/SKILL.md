@@ -1,6 +1,6 @@
 ---
 name: snapshot-testing
-description: Use when writing, updating, or fixing a snapshot or behavior test in tty — rendering chrome to a PNG and pixel-comparing, re-baselining a changed image, or diagnosing a flaky one. Covers the iced_test Simulator, the nextest serial-ui / default-filter setup, the -wgpu backend suffix, the re-baseline flow, and the fixed-clock gotcha. Apply whenever a `snapshot::*` or `behavior::*` test is involved.
+description: Use when writing, updating, or fixing a snapshot or behavior test in tty — rendering chrome to a PNG and pixel-comparing, re-baselining a changed image, or diagnosing a flaky one. Covers the iced_test Simulator, the nextest serial-ui / default-filter setup, the two backend baselines (-wgpu locally, -tiny-skia generated on the CI runner), the re-baseline flow, and the fixed-clock gotcha. Apply whenever a `snapshot::*` or `behavior::*` test is involved.
 ---
 
 # Snapshot + behavior tests (tty)
@@ -49,12 +49,41 @@ fn my_surface_view() {
 
 ## Re-baselining (after an intentional visual change)
 
+**Every snapshot has TWO committed baselines** and they are refreshed in different
+places — refreshing only the local one turns CI red:
+
+| Baseline | Used by | How to refresh |
+|---|---|---|
+| `<name>-wgpu.png` | local dev (real GPU) | delete + re-run locally |
+| `<name>-tiny-skia.png` | **CI** | dispatch `.github/workflows/snapshot-baselines.yml` |
+
+**`-wgpu`:**
+
 - The committed file has a **backend suffix**: `snapshots/tty-my-surface-**wgpu**.png` — *not* the
   bare name passed to `matches_image`. Find it: `ls tty/snapshots/ | grep <name>`.
 - **Delete that PNG and re-run.** A missing baseline is **written and passes**. Re-run once more
   to confirm it now compares clean (not just first-write).
 - Only delete the snapshots you meant to change; a diff in an unrelated one is a real regression
   (or the clock gotcha below).
+
+**`-tiny-skia`:** do **not** generate these locally, or in a container. They must come
+from the same `ubuntu-latest` runner that compares against them — freetype/fontconfig
+differences between distros change text rasterization, which is exactly how the
+original container-generated set ended up wrong (see ADR 0005's amendment). Instead:
+
+```sh
+gh workflow run snapshot-baselines.yml
+gh run download <run-id> -n tiny-skia-baselines -D tty/snapshots/
+```
+
+The workflow clears the existing `-tiny-skia` baselines and renders all of them, so
+the artifact is a complete replacement set, not a top-up.
+
+⚠️ **Write-if-absent cuts both ways.** It makes re-baselining a one-line delete — and it
+makes a *missing* baseline pass **silently**. 61 of 66 snapshots had no `-tiny-skia`
+baseline at all and the CI step reported green while verifying nothing, for two and a
+half weeks. If a snapshot run passes suspiciously fast, confirm the baseline exists
+rather than assuming it matched.
 
 ## Gotchas
 
