@@ -7,4 +7,10 @@ web/node_modules
 web/dist
 web/.astro
 
+# Intermediates from snapshot.rs `generate_landing_shots`: it renders through
+# `matches_image`, which writes `_shot-<name>-<backend>.png` here, then copies the
+# result into web/public/shots. The copies are the deliverable; these are scratch
+# (40 of them after a run) and were showing up as untracked noise.
+tty/snapshots/_shot-*
+
 .DS_Store

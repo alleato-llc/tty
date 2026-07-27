@@ -643,29 +643,14 @@ kbd {
   margin: 30px auto 8px;
 }
 
-/* Theme-swap: dark capture by default, light capture under the LIGHT themes.
-   Only two captures exist per shot, so the four selectable themes map onto them
-   by lightness — Solarized Light and GitHub Light take the light capture,
-   Dracula and Phosphor the dark one. */
-.shot-light {
-  display: none;
-}
+/* Theme-swap is no longer CSS: there is one <img> per shot and the deck script
+   rewrites its `src` (see the SHOT_SUFFIX map in index.astro). The old
+   .shot-dark/.shot-light pair kept every variant in the DOM, and browsers fetch
+   display:none images — so the page downloaded each capture in every theme just
+   to show one. */
 
-:root[data-theme="light"] .shot-dark,
-:root[data-theme="github"] .shot-dark {
-  display: none;
-}
-
-:root[data-theme="light"] .shot-light,
-:root[data-theme="github"] .shot-light {
-  display: block;
-}
-
-/* keep the .big centering when it's the light variant */
-:root[data-theme="light"] .shot-light.big,
-:root[data-theme="github"] .shot-light.big {
-  margin: 30px auto 8px;
-}
+/* (The old per-variant `.big` centering rule is gone with the duplicate <img>s —
+   `.shot.big` above now applies to the single image in every theme.) */
 
 /* the make-it-yours theme grid */
 .shots-grid {
