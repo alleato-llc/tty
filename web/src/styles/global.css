@@ -210,7 +210,16 @@ header.chrome > * {
 }
 
 .inner {
-  width: min(1200px, 94vw);
+  /* `100%` of the slide's PADDED content box — not a viewport percentage. The
+     old `min(1200px, 94vw)` double-counted the viewport: the slide already
+     spends 5vw–6vw per side on padding, so 94vw + 10vw = 104vw and the content
+     was always ~17px wider than the space it had at phone widths. That used to
+     be hidden — `body` is overflow:hidden and the item was centred, so it
+     clipped evenly on both sides — but slides scroll now, which promotes
+     overflow-x to auto and turns the same overflow into a visible rightward
+     shift. Capping with max-width keeps the desktop measure identical. */
+  width: 100%;
+  max-width: 1200px;
   /* Centers vertically when the slide has room; collapses to 0 when it doesn't,
      so tall content scrolls instead of being clipped. See `.slide`. */
   margin: auto;
