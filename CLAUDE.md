@@ -84,7 +84,9 @@ re-baselining, verify); it and the focused workflow skills — `ui-popover`, `ui
 
 Subsystems beyond this file: the status-bar metrics / drill-in popovers are surveyed in
 `docs/ideas/status-bar-metrics.md`; the Env view + shell integration and the overall
-render/state architecture are in `docs/ARCHITECTURE.md`.
+render/state architecture are in `docs/ARCHITECTURE.md`; cutting a release — the tag-driven
+pipeline, the five macOS signing secrets, and how to verify a notarized dmg — is in
+`docs/RELEASING.md`.
 
 Several workflows have on-demand **skills** — invoke the matching one when you start that
 kind of work: `ui` (+ the focused `ui-popover` / `ui-settings` / `ui-status-cell` /

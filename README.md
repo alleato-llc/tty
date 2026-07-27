@@ -249,8 +249,18 @@ if you flip history on mid-session. Design details in
 `docs/adr/0006-encrypted-history.md`, `0007` (key sources, async startup),
 and `0008` (untracked sessions).
 
+## Releases
+
+Prebuilt binaries are attached to the [GitHub
+Releases](https://github.com/alleato-llc/tty/releases): a signed, notarized
+universal macOS `.dmg` and a Linux `x86_64` tarball. Cutting one is a tag push
+(`git tag v0.2.0 && git push origin v0.2.0`) — the process, the macOS signing
+secrets, and how to verify a downloaded dmg are in `docs/RELEASING.md`.
+
 ## Landing page
 
 `web/` is a static [Astro](https://astro.build/) site deployed to
 `tty.alleato.dev` via `salpa` (see `salpa.yaml` and
-`.github/workflows/deploy-site.yml`).
+`.github/workflows/deploy-site.yml`). Its download buttons resolve real asset
+URLs from the Releases API at build time (`web/src/lib/releases.ts`), and a
+`release: published` trigger redeploys the site whenever a release is cut.
