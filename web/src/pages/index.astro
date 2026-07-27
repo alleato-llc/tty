@@ -13,12 +13,16 @@ const dl = await resolveDownloads();
 const LATEST = dl.releasesPage;
 const COFFEE = "https://buymeacoffee.com/alleato";
 
-// A theme-swapping screenshot: dark (Dracula) + light (GitHub Light) variants, shown/hidden
-// by the page's theme via CSS (.shot-dark / .shot-light), so the captures re-skin with the
-// ◐ toggle the same way the app does.
+// A theme-swapping screenshot. ONE <img> whose `src` is rewritten when the theme
+// changes (see the deck script), not one hidden copy per theme: browsers fetch
+// display:none images, so the four-variants-in-the-DOM approach would download
+// every capture — 2.08 MB — to show one. Swapping src fetches only what is on
+// screen: 0.52 MB, half of what the previous two-variant markup cost.
+//
+// Captures come from snapshot.rs `generate_landing_shots`, which renders each
+// shot in all four themes the page can wear.
 const shot = (name: string, alt: string, extra = "") =>
-  `<img class="shot shot-dark ${extra}" src="/shots/${name}.png" alt="${alt}" />` +
-  `<img class="shot shot-light ${extra}" src="/shots/${name}-light.png" alt="${alt}" />`;
+  `<img class="shot ${extra}" data-shot="${name}" src="/shots/${name}.png" alt="${alt}" />`;
 
 // The whole slide deck is one raw-HTML string injected with `set:html`. Every
 // terminal shown is a real screenshot of the app (web/public/shots/*, rendered by
@@ -286,20 +290,41 @@ const deck = `
     );
 
     // Easter egg (slide 7): clicking a theme card dresses the whole page in that
-    // theme, screenshots included — the light/dark captures swap by lightness,
-    // see the .shot-light rules in global.css.
+    // theme, screenshots included — every shot has a real capture in each theme,
+    // swapped in by syncShots() below.
     //
     // Deliberately EPHEMERAL: it never writes localStorage, so a reload returns
     // to the visitor's real preference and the egg can't strand someone in a
     // theme they didn't choose on purpose. `data-easter` marks that a picked
     // theme is active; ThemeToggle reads it and reverts on its next click
     // instead of flipping, which is the "standard buttons undo it" behaviour.
+    // Which capture each theme uses. Keep in step with snapshot.rs's `save`
+    // closure in generate_landing_shots, which writes exactly these suffixes.
+    const SHOT_SUFFIX = {
+      dark: "",
+      light: "-light",
+      phosphor: "-phosphor",
+      github: "-github",
+    };
+    const shots = [...document.querySelectorAll("[data-shot]")];
+    const syncShots = () => {
+      const suffix = SHOT_SUFFIX[document.documentElement.dataset.theme] ?? "";
+      shots.forEach((img) => {
+        const next = `/shots/${img.dataset.shot}${suffix}.png`;
+        // Guard the assignment: setting src to its current value still counts as
+        // a change in some browsers and would re-request the image on every
+        // theme flip.
+        if (!img.src.endsWith(next)) img.src = next;
+      });
+    };
+
     const picks = [...document.querySelectorAll("[data-pick-theme]")];
     const syncPicks = () => {
       const cur = document.documentElement.dataset.theme;
       picks.forEach((p) =>
         p.setAttribute("aria-pressed", String(p.dataset.pickTheme === cur)),
       );
+      syncShots();
     };
     picks.forEach((p) =>
       p.addEventListener("click", () => {

@@ -2392,15 +2392,24 @@ fn generate_landing_shots() {
         )
         .expect("copy shot to web");
     };
-    // A feature shot, rendered in both the page's dark (Dracula) and light (Solarized Light)
-    // themes as `<name>.png` / `<name>-light.png`, so the captures match the page chrome as
-    // its ◐ toggle flips. (The theme-showcase grid below stays single-theme via `save1`.)
-    // Keep these two in step with web/src/styles/global.css `:root[data-theme=…]`.
+    // A feature shot, rendered in every theme the landing page can wear, so the
+    // captures always match the chrome: `<name>.png` (Dracula, the default),
+    // `<name>-light.png` (Solarized Light), `<name>-phosphor.png`, `<name>-github.png`.
+    // The last two exist for the theme-grid easter egg on slide 7 — clicking a
+    // theme card re-skins the page, and the screenshots follow.
+    // (The theme-showcase grid itself stays single-theme via `save1`.)
+    // Keep this list in step with web/src/styles/global.css `:root[data-theme=…]`
+    // and the `SHOT_SUFFIX` map in web/src/pages/index.astro.
     let save = |mut tty: Tty, name: &str, w: f32, h: f32| {
-        tty.theme = Theme::named("Dracula");
-        save1(&tty, name, w, h);
-        tty.theme = Theme::named("Solarized Light");
-        save1(&tty, &format!("{name}-light"), w, h);
+        for (theme, suffix) in [
+            ("Dracula", ""),
+            ("Solarized Light", "-light"),
+            ("Phosphor", "-phosphor"),
+            ("GitHub Light", "-github"),
+        ] {
+            tty.theme = Theme::named(theme);
+            save1(&tty, &format!("{name}{suffix}"), w, h);
+        }
     };
     const TW: f32 = 820.0; // a compact terminal window
     const TH: f32 = 340.0;
