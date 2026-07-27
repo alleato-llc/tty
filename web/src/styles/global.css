@@ -58,6 +58,65 @@
   --glow: #f7f0dc;
 }
 
+/* The two extra palettes exist only for the theme-grid easter egg on slide 7:
+   clicking a theme card re-skins the page in it. `dark` and `light` above
+   already cover Dracula and Solarized Light, the other two cards.
+
+   Values are rime's actual palettes (`../rime/rime/src/theme/palettes.rs` —
+   PHOSPHOR and GITHUB), not eyeballed approximations, so the page really does
+   wear the same colours the app ships. Keep them in step if rime's change. */
+:root[data-theme="phosphor"] {
+  /* Phosphor — green CRT on near-black */
+  --bg: #040805;
+  --surface: #0a140b;
+  --text: #3df06a;
+  --muted: #2fb350;
+  --faint: #1f8a3a;
+  --hairline: #123a1e;
+  --accent: #5dff8a;
+  --success: #5dff8a;
+  --warn: #d6c34a;
+  --danger: #ff5c5c;
+
+  --kw: #5dff8a;
+  --fn: #3df06a;
+  --ty: #d6c34a;
+  --str: #2fb350;
+  --num: #5dff8a;
+  --com: #1f8a3a;
+
+  --win-bg: #040805;
+  --cur-line: rgba(61, 240, 106, 0.1);
+  --win-shadow: rgba(0, 0, 0, 0.7);
+  --glow: #0b1c0f;
+}
+
+:root[data-theme="github"] {
+  /* GitHub Light */
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --text: #1f2328;
+  --muted: #656d76;
+  --faint: #8c959f;
+  --hairline: #d0d7de;
+  --accent: #0969da;
+  --success: #1a7f37;
+  --warn: #9a6700;
+  --danger: #cf222e;
+
+  --kw: #cf222e;
+  --fn: #8250df;
+  --ty: #0969da;
+  --str: #0a3069;
+  --num: #0550ae;
+  --com: #6e7781;
+
+  --win-bg: #ffffff;
+  --cur-line: rgba(31, 35, 40, 0.06);
+  --win-shadow: rgba(31, 35, 40, 0.16);
+  --glow: #eaeef2;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -584,21 +643,27 @@ kbd {
   margin: 30px auto 8px;
 }
 
-/* Theme-swap: show the dark capture by default, the light one under data-theme=light. */
+/* Theme-swap: dark capture by default, light capture under the LIGHT themes.
+   Only two captures exist per shot, so the four selectable themes map onto them
+   by lightness — Solarized Light and GitHub Light take the light capture,
+   Dracula and Phosphor the dark one. */
 .shot-light {
   display: none;
 }
 
-:root[data-theme="light"] .shot-dark {
+:root[data-theme="light"] .shot-dark,
+:root[data-theme="github"] .shot-dark {
   display: none;
 }
 
-:root[data-theme="light"] .shot-light {
+:root[data-theme="light"] .shot-light,
+:root[data-theme="github"] .shot-light {
   display: block;
 }
 
 /* keep the .big centering when it's the light variant */
-:root[data-theme="light"] .shot-light.big {
+:root[data-theme="light"] .shot-light.big,
+:root[data-theme="github"] .shot-light.big {
   margin: 30px auto 8px;
 }
 
@@ -611,15 +676,49 @@ kbd {
   margin: 0 auto;
 }
 
-.shots-grid figure {
+/* Each theme card is a real <button>: clicking one re-skins the page in that
+   theme (the easter egg wired up in index.astro's deck script). Buttons rather
+   than figures so it is keyboard-reachable and announced as actionable. */
+.theme-pick {
   margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: transform 0.15s ease;
 }
 
-.shots-grid figcaption {
+.theme-pick:hover,
+.theme-pick:focus-visible {
+  transform: translateY(-2px);
+}
+
+.theme-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* The card whose theme is currently worn. */
+.theme-pick[aria-pressed="true"] .shot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 18px 50px -14px rgba(0, 0, 0, 0.5);
+}
+
+.theme-pick .cap {
+  display: block;
   margin-top: 8px;
   text-align: center;
   font-size: 14px;
   color: var(--muted);
+}
+
+.theme-pick[aria-pressed="true"] .cap {
+  color: var(--accent);
 }
 
 @media (max-width: 640px) {

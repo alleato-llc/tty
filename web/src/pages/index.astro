@@ -135,10 +135,10 @@ const deck = `
         <b>Try the ◐ toggle up top.</b>
       </p>
       <div class="shots-grid">
-        <figure><img class="shot" src="/shots/theme-phosphor.png" alt="Phosphor theme" /><figcaption>Phosphor</figcaption></figure>
-        <figure><img class="shot" src="/shots/theme-dracula.png" alt="Dracula theme" /><figcaption>Dracula</figcaption></figure>
-        <figure><img class="shot" src="/shots/theme-solarized.png" alt="Solarized Light theme" /><figcaption>Solarized</figcaption></figure>
-        <figure><img class="shot" src="/shots/theme-light.png" alt="GitHub Light theme" /><figcaption>GitHub Light</figcaption></figure>
+        <button class="theme-pick" data-pick-theme="phosphor" title="Wear the Phosphor theme"><img class="shot" src="/shots/theme-phosphor.png" alt="Phosphor theme" /><span class="cap">Phosphor</span></button>
+        <button class="theme-pick" data-pick-theme="dark" title="Wear the Dracula theme"><img class="shot" src="/shots/theme-dracula.png" alt="Dracula theme" /><span class="cap">Dracula</span></button>
+        <button class="theme-pick" data-pick-theme="light" title="Wear the Solarized Light theme"><img class="shot" src="/shots/theme-solarized.png" alt="Solarized Light theme" /><span class="cap">Solarized</span></button>
+        <button class="theme-pick" data-pick-theme="github" title="Wear the GitHub Light theme"><img class="shot" src="/shots/theme-light.png" alt="GitHub Light theme" /><span class="cap">GitHub Light</span></button>
       </div>
     </div>
   </section>
@@ -284,6 +284,36 @@ const deck = `
       },
       { passive: true },
     );
+
+    // Easter egg (slide 7): clicking a theme card dresses the whole page in that
+    // theme, screenshots included — the light/dark captures swap by lightness,
+    // see the .shot-light rules in global.css.
+    //
+    // Deliberately EPHEMERAL: it never writes localStorage, so a reload returns
+    // to the visitor's real preference and the egg can't strand someone in a
+    // theme they didn't choose on purpose. `data-easter` marks that a picked
+    // theme is active; ThemeToggle reads it and reverts on its next click
+    // instead of flipping, which is the "standard buttons undo it" behaviour.
+    const picks = [...document.querySelectorAll("[data-pick-theme]")];
+    const syncPicks = () => {
+      const cur = document.documentElement.dataset.theme;
+      picks.forEach((p) =>
+        p.setAttribute("aria-pressed", String(p.dataset.pickTheme === cur)),
+      );
+    };
+    picks.forEach((p) =>
+      p.addEventListener("click", () => {
+        document.documentElement.dataset.theme = p.dataset.pickTheme;
+        document.documentElement.dataset.easter = "1";
+        syncPicks();
+      }),
+    );
+    // Keep the pressed state honest when the theme changes from anywhere else
+    // (the ◐ toggle, or the system-preference listener in Layout.astro).
+    new MutationObserver(syncPicks).observe(document.documentElement, {
+      attributeFilter: ["data-theme"],
+    });
+    syncPicks();
 
     const start = parseInt(location.hash.slice(1), 10);
     go(Number.isInteger(start) ? start : 0);
