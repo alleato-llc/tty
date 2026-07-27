@@ -50,6 +50,34 @@ each shot straight into `web/public/shots/`. To restyle content or add a shot, e
 that function, rerun, and (optionally) `sips -Z 1400 web/public/shots/*.png` to keep
 the web assets light.
 
+Every shot is rendered in **all four themes the page can wear** —
+`<name>.png` (Dracula), `-light` (Solarized Light), `-phosphor`, `-github` — because
+the theme-grid easter egg on slide 7 re-skins the page and the screenshots follow.
+Only one is ever downloaded: the page keeps a single `<img>` per shot and rewrites
+its `src` (`SHOT_SUFFIX` in `index.astro`), rather than hiding copies in the DOM,
+which browsers fetch anyway.
+
+### Animated shots
+
+The status-bar shot is animated — a cell drills in and is dragged into place. The
+generator renders the frames; a second step muxes them:
+
+```
+cd ../tty && cargo nextest run -p tty --ignore-default-filter --run-ignored all \
+  -E 'test(generate_landing_shots)'
+cd .. && web/scripts/build-shot-anims.sh      # needs `brew install webp`
+```
+
+The frames land as `public/shots/_anim-<name>-f<n>[-theme].png` (gitignored) and the
+script turns them into `<name>[-theme].webp`, then deletes them. **Both steps are
+needed** — running only the generator leaves the old `.webp` in place next to fresh
+frames.
+
+Animated WebP rather than GIF: GIF caps at 256 colours and bands visibly on the dark
+terminal gradients, at several times the size. The still `.png` is kept and served to
+anyone who asks for reduced motion, via a `<picture>` media query — an animated image
+cannot be paused.
+
 ## Downloads
 
 The Download buttons link to `…/releases/latest` on GitHub, where

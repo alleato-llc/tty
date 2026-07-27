@@ -13,4 +13,10 @@ web/.astro
 # (40 of them after a run) and were showing up as untracked noise.
 tty/snapshots/_shot-*
 
+# Animation frames, likewise scratch: the generator renders them into the shots
+# directory and web/scripts/build-shot-anims.sh muxes them into the committed
+# <name>[-theme].webp, then deletes them. Ignored so an interrupted run cannot
+# leave 28 stray PNGs staged.
+web/public/shots/_anim-*
+
 .DS_Store
