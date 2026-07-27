@@ -94,6 +94,10 @@ kbd {
    header. Keep in sync if `header.chrome`'s padding or the toggle size change. */
 :root {
   --chrome-h: 60px;
+  /* Height of the fixed bottom stepper strip: 16px above a 44px control row
+     plus 22px below. Slides derive their bottom padding from this, the mirror
+     of --chrome-h at the top. Keep in sync with `.nav`. */
+  --nav-h: 82px;
 }
 
 header.chrome {
@@ -174,7 +178,8 @@ header.chrome > * {
   /* `max()` so the top padding always clears the fixed header, however short
      the viewport is. 7vh alone is only ~38px on a phone — less than the 60px
      header — which put the heading behind the wordmark and toggle. */
-  padding: max(7vh, calc(var(--chrome-h) + env(safe-area-inset-top, 0px) + 14px)) 6vw 11vh;
+  padding: max(7vh, calc(var(--chrome-h) + env(safe-area-inset-top, 0px) + 14px)) 6vw
+    max(11vh, calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px));
   animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
   /* A slide taller than the viewport must stay reachable. `body` is
      overflow:hidden and every slide is pinned to the viewport, so without this
@@ -312,8 +317,10 @@ kbd {
 
 .nav {
   position: fixed;
-  /* Lift clear of the home indicator on gesture-nav phones; 0 elsewhere. */
-  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  /* Anchored to the very bottom (not offset by 22px) so its backdrop reaches
+     the screen edge; the visual gap is padding instead. The inset lifts the
+     controls clear of the home indicator; it is 0 elsewhere. */
+  bottom: 0;
   left: 0;
   right: 0;
   display: flex;
@@ -321,6 +328,17 @@ kbd {
   justify-content: center;
   gap: 18px;
   z-index: 15;
+  padding: 16px 0 calc(22px + env(safe-area-inset-bottom, 0px));
+
+  /* Same reason the header has one: slides scroll UNDER this strip, so without
+     a backdrop the arrows, dots and counter render on top of whatever passes
+     beneath — the terminal screenshots on the taller slides, most visibly. */
+  background: linear-gradient(to top, var(--bg) 0%, var(--bg) 60%, transparent 100%);
+  pointer-events: none;
+}
+
+.nav > * {
+  pointer-events: auto;
 }
 
 .dots {
@@ -394,8 +412,10 @@ kbd {
   .hint-touch {
     display: inline;
   }
+  /* Sits ABOVE the stepper strip, not inside it — at the desktop offset it
+     landed on top of the "8 / 10" counter. */
   .hint {
-    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 6px);
     right: 14px;
     font-size: 12px;
   }
@@ -417,7 +437,7 @@ kbd {
      so headings rendered underneath the wordmark and theme toggle. */
   .slide {
     padding: calc(var(--chrome-h) + env(safe-area-inset-top, 0px) + 10px) 5vw
-      calc(9vh + env(safe-area-inset-bottom, 0px));
+      calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px);
   }
   ul.feat li {
     font-size: clamp(16px, 4.2vw, 20px);
